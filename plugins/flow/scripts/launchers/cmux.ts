@@ -555,6 +555,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     messageFile: string,
     opts: SendOptions = {}
   ): Promise<SendResult> {
+    requireSupported('cmux', given.runtime);
     validateMessageFile(messageFile);
     refuseBackslash('The message file', messageFile);
     if (opts.model !== undefined && !/^[A-Za-z0-9._:/@\[\]-]+$/.test(opts.model)) {

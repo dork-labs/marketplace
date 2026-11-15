@@ -63,6 +63,7 @@ interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
   urlAs?: string;
   /** Report this runtime on every session instead of the one requested. */
   reportRuntime?: string;
+  reportPermissionMode?: string;
   mcp?: McpMode;
   mint?: MintMode;
   /** Whether the token file exists under `<dorkHome>`. Default true. */
@@ -95,6 +96,7 @@ interface FakeSession {
   id: string;
   account: string | undefined;
   runtime: string;
+  permissionMode: string;
   cwd: string | null;
   lifecycle: string;
   limit: { window: string; resetsAt: string | null } | null;
@@ -107,6 +109,7 @@ interface DorkosHarness extends LauncherHarness {
   requests(): readonly SeenRequest[];
   /** Put a started session in a DorkOS lifecycle, and stamp when it last wrote. */
   setLifecycle(handle: SessionHandle, lifecycle: string, updatedAt?: string): void;
+  setPermissionMode(handle: SessionHandle, mode: string): void;
   toolCalls(): readonly { name: string; args: Record<string, unknown> }[];
   baseUrl: string;
   stdout: string[];
@@ -146,13 +149,15 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   const dorkHome = path.join(root, 'dork home');
   const runtime = options.runtime ?? 'claude-code';
   const account: LaunchAccount =
-    runtime === 'opencode'
-      ? { runtime, id: 'openrouter', path: null, provider: 'openrouter' }
-      : {
-          runtime,
-          id: runtime === 'codex' ? 'codex2' : 'claude3',
-          path: path.join(root, 'accounts', runtime === 'codex' ? 'codex2' : 'claude3'),
-        };
+    runtime === 'doe'
+      ? { runtime, id: 'default', path: null }
+      : runtime === 'opencode'
+        ? { runtime, id: 'openrouter', path: null, provider: 'openrouter' }
+        : {
+            runtime,
+            id: runtime === 'codex' ? 'codex2' : 'claude3',
+            path: path.join(root, 'accounts', runtime === 'codex' ? 'codex2' : 'claude3'),
+          };
   const otherDir = path.join(root, 'accounts', 'someone-else');
   const ambientConfigDir = path.join(osHome, '.claude');
   for (const dir of [cwd, osHome, dorkHome, otherDir, ambientConfigDir]) {
@@ -189,6 +194,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
       account: accountFor(body.account),
       runtime:
         options.reportRuntime ?? (typeof body.runtime === 'string' ? body.runtime : 'claude-code'),
+      permissionMode: options.reportPermissionMode ?? String(body.permissionMode ?? 'default'),
       cwd: typeof body.cwd === 'string' ? body.cwd : null,
       lifecycle: 'streaming',
       limit: null,
@@ -337,6 +343,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         createdAt: '2026-09-26T18:00:00.000Z',
         updatedAt: session.updatedAt ?? '2026-09-26T18:00:00.000Z',
         runtime: session.runtime,
+        permissionMode: session.permissionMode,
         ...(session.account === undefined ? {} : { account: session.account }),
         ...(reportsStatus
           ? {
@@ -393,7 +400,8 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
     launcher,
     runtime,
     mintsSessionId: false,
-    accountBinding: 'account-id',
+    accountBinding: runtime === 'doe' ? 'host-default' : 'account-id',
+    defaultPermissionMode: runtime === 'doe' ? 'bypassPermissions' : 'acceptEdits',
     states: ['busy', 'idle', 'limited'],
     stopBehavior: 'left-idle',
     scrubsCredentials: false,
@@ -419,6 +427,9 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         session.limit = { window: signal.window, resetsAt: signal.resetsAt };
       }
     },
+    setPermissionMode(handle, mode) {
+      byHandle(handle).permissionMode = mode;
+    },
     setLifecycle(handle: SessionHandle, lifecycle: string, updatedAt?: string) {
       const session = byHandle(handle);
       session.lifecycle = lifecycle;
@@ -442,10 +453,14 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   };
 }
 
-const DORKOS_RUNTIMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode'];
+const DORKOS_RUNTIMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode', 'doe'];
 launcherContract(
-  'dorkos (messages route)',
-  (options) => makeDorkosHarness(options),
+  'dorkos (vendor messages route; Dork requires MCP)',
+  (options) =>
+    makeDorkosHarness({
+      ...options,
+      ...(options.runtime === 'doe' ? { mcp: 'with-tool' as const } : {}),
+    }),
   DORKOS_RUNTIMES
 );
 launcherContract(
@@ -913,5 +928,127 @@ describe('dorkos launcher: errors and the token', () => {
       process.stderr.write = writeErr;
     }
     expect(out.join('')).not.toContain(TOKEN);
+  });
+});
+
+describe('Dork launcher permission and account contract', () => {
+  const runtime = 'doe';
+  for (const permissionMode of ['default', 'acceptEdits'] as const) {
+    it(`refuses ${permissionMode} before any HTTP request, without raising autonomy`, async () => {
+      const h = await makeDorkosHarness({ runtime, mcp: 'with-tool' });
+      try {
+        const error = await launchFailure(h.launcher.start(requestFor(h, { permissionMode })));
+        expect(error.code).toBe('unsupported');
+        expect(error.message).toMatch(/shell.*bypassPermissions/);
+        expect(h.requests()).toEqual([]);
+      } finally {
+        await h.cleanup();
+      }
+    });
+  }
+
+  it('carries an explicitly requested bypass mode and model through MCP for a reviewer', async () => {
+    const h = await makeDorkosHarness({ runtime, mcp: 'with-tool' });
+    try {
+      const handle = await h.launcher.start(
+        requestFor(h, { role: 'reviewer', model: 'example-model' })
+      );
+      expect(handle).toMatchObject({
+        runtime,
+        permissionMode: 'bypassPermissions',
+        launchPath: 'mcp',
+        model: 'example-model',
+      });
+      expect(h.toolCalls()[0].args).toMatchObject({
+        runtime,
+        permissionMode: 'bypassPermissions',
+        model: 'example-model',
+      });
+      expect(h.toolCalls()[0].args).not.toHaveProperty('account');
+      expect(h.requests().some((r) => r.url.endsWith('/messages'))).toBe(false);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  for (const mcp of ['absent', 'without-tool', 'refuse'] as const) {
+    it(`never falls back to a mode-less route when MCP is ${mcp}`, async () => {
+      const h = await makeDorkosHarness({ runtime, mcp });
+      try {
+        const error = await launchFailure(h.launcher.start(requestFor(h)));
+        expect(['unsupported', 'refused']).toContain(error.code);
+        expect(h.sessions()).toEqual([]);
+        expect(h.requests().some((r) => r.url.endsWith('/messages'))).toBe(false);
+      } finally {
+        await h.cleanup();
+      }
+    });
+  }
+
+  it('refuses without a token instead of using the route', async () => {
+    const h = await makeDorkosHarness({ runtime, tokenFile: false, mcp: 'with-tool' });
+    try {
+      expect((await launchFailure(h.launcher.start(requestFor(h)))).code).toBe('unsupported');
+      expect(h.sessions()).toEqual([]);
+      expect(h.requests().some((r) => r.url.endsWith('/messages'))).toBe(false);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  const invalidAccounts: LaunchAccount[] = [
+    { runtime, id: 'another-profile', path: null },
+    { runtime, id: 'default', path: '/tmp/example-profile' },
+    { runtime, id: 'default', path: null, provider: 'example-provider' },
+  ];
+  for (const account of invalidAccounts) {
+    it(`refuses an unsupported Dork account selector ${JSON.stringify(account)}`, async () => {
+      const h = await makeDorkosHarness({ runtime, mcp: 'with-tool' });
+      try {
+        expect((await launchFailure(h.launcher.start(requestFor(h, { account })))).code).toBe(
+          'bad-request'
+        );
+        expect(h.requests()).toEqual([]);
+      } finally {
+        await h.cleanup();
+      }
+    });
+  }
+
+  for (const reported of ['default', 'acceptEdits', 'unknown']) {
+    it(`does not adopt or escalate a session reporting mode ${reported}`, async () => {
+      const h = await makeDorkosHarness({
+        runtime,
+        mcp: 'with-tool',
+        reportPermissionMode: reported,
+      });
+      try {
+        expect((await launchFailure(h.launcher.start(requestFor(h)))).code).toBe('refused');
+        expect(h.requests().filter((r) => r.method === 'PATCH')).toEqual([]);
+      } finally {
+        await h.cleanup();
+      }
+    });
+  }
+
+  it('refuses a follow-up after the host lowers the mode, before changing model or sending', async () => {
+    const h = await makeDorkosHarness({ runtime, mcp: 'with-tool' });
+    try {
+      const handle = await h.launcher.start(requestFor(h));
+      h.setPermissionMode(handle, 'acceptEdits');
+      const before = h.requests().length;
+      const error = await launchFailure(
+        h.launcher.send(handle, h.messageFile, { model: 'example-model' })
+      );
+      expect(error.code).toBe('refused');
+      expect(
+        h
+          .requests()
+          .slice(before)
+          .filter((r) => r.method !== 'GET')
+      ).toEqual([]);
+    } finally {
+      await h.cleanup();
+    }
   });
 });

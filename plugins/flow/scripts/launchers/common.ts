@@ -17,7 +17,7 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
-import { ambientAccountPath, type RuntimeAccount } from '../fleet/accounts.ts';
+import { ambientAccountPath } from '../fleet/accounts.ts';
 import { childRuntimeEnv } from '../runtime-detect.ts';
 import {
   DEFAULT_ACCOUNT_ID,
@@ -59,13 +59,15 @@ export const RUNTIME_CREDENTIAL_ENV_VARS: Readonly<Record<RuntimeName, readonly 
   'claude-code': CREDENTIAL_ENV_VARS,
   codex: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL'],
   opencode: [],
+  doe: [],
 };
 
-/** Per runtime, the variable naming the account's home; opencode has none. */
+/** Per runtime, the variable naming the account's home; opencode and doe have none. */
 export const RUNTIME_HOME_ENV_VAR: Readonly<Record<RuntimeName, string | null>> = {
   'claude-code': 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
   opencode: null,
+  doe: null,
 };
 
 /** How long `start` waits for a session to confirm, unless a launcher is told otherwise. */
@@ -126,6 +128,7 @@ function isDir(dir: string): boolean {
  *
  * - `claude-code`, `codex`: `path` absolute, or `null` only for the implicit
  *   {@link DEFAULT_ACCOUNT_ID} account.
+ * - `doe`: only null or a path-less, provider-less default; billing belongs to the host.
  * - `opencode`: `path` `null` (an OpenCode account is a provider, not a folder),
  *   and a model of the form `provider/model` naming the account's provider.
  *
@@ -168,6 +171,18 @@ export function validateLaunchRequest(req: LaunchRequest): void {
       `The account ${account.id} is a ${account.runtime} account, not a ${req.runtime} one.`
     );
   }
+  if (req.runtime === 'doe') {
+    if (
+      account.id !== DEFAULT_ACCOUNT_ID ||
+      account.path !== null ||
+      account.provider !== undefined
+    ) {
+      badRequest(
+        'Dork (doe) uses host-managed billing; only null or a path-less default account is supported.'
+      );
+    }
+    return;
+  }
   if (req.runtime === 'opencode') {
     if (account.path !== null) {
       badRequest(
@@ -209,7 +224,7 @@ export function validateLaunchRequest(req: LaunchRequest): void {
  * @returns The launch account.
  */
 export function launchAccountFor(
-  account: Pick<RuntimeAccount, 'runtime' | 'id' | 'path'>
+  account: Pick<LaunchAccount, 'runtime' | 'id' | 'path'>
 ): LaunchAccount {
   return { runtime: account.runtime, id: account.id, path: account.path };
 }

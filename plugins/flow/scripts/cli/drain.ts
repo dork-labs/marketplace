@@ -68,6 +68,7 @@ import {
   resolveAccountRef,
   resolveDorkHome,
 } from '../fleet/accounts.ts';
+import { isRuntimeSlug } from '../fleet/usage-ledger.ts';
 import { openFlowStateFile, resolveMainCheckout } from '../flow-state-file.ts';
 import { forgeTargetFor } from '../forge/types.ts';
 import { dorkosBaseUrl } from '../launchers/dorkos.ts';
@@ -224,6 +225,7 @@ export function parker(
 export function sessionFinder(ctx: VerbContext, dorkHome: string): PassDeps['findSession'] {
   /** The launch account a session probe names (`null`: `default`), from the shared resolver. */
   const probeLaunchAccount = (runtime: RuntimeName, id: string | null): LaunchAccount | null => {
+    if (runtime === 'doe') return null;
     const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
     const found = resolveAccountRef(accounts, runtime, id ?? 'default');
     return found === null || found.path === null ? null : launchAccountFor(found);
@@ -391,7 +393,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     return found === undefined
       ? null
       : {
-          runtime: found.runtime as RuntimeName,
+          runtime: found.runtime,
           id: found.id,
           path: found.path,
           implicit: found.implicit,
@@ -696,6 +698,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       };
     },
     async reviewerAccount(runtime, exclude = []) {
+      if (runtime === 'doe') return null; // Dork billing is not part of the vendor fleet.
       const input = await gatherAssignmentInput(ctx, config, refresh);
       // An aliased `default` is its registered row, for the count and the exclusion alike.
       const { canonical, live } = liveCounts(input);
@@ -758,9 +761,9 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       journalUsage(
         ctx,
         dorkHome,
-        keys.map((key) => {
+        keys.flatMap((key) => {
           const [runtime, ...rest] = key.split(':');
-          return { runtime: runtime as RuntimeName, id: rest.join(':') };
+          return isRuntimeSlug(runtime) ? [{ runtime, id: rest.join(':') }] : [];
         })
       );
     },

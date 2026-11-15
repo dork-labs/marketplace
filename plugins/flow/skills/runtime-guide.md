@@ -11,8 +11,7 @@ referenced stage skill and supporting files when requested.
 Resolve the loaded skill file's real path first, including symlinks: its parent
 `skills/` folder belongs to the package root. Substitute that root for
 `${CLAUDE_PLUGIN_ROOT}` and `<flow-root>` in file paths and script invocations.
-A root the host already rewrote stays as given. Resolve Markdown links relative
-to their source file, never the project cwd. Keep scripts' cwd at the project or
+Resolve Markdown links relative to their source file, never the project cwd. Keep scripts' cwd at the project or
 selected worktree; the plugin folder is not the project.
 
 When instructions name `/flow:<name>`, read `flow-command-<name>/SKILL.md` instead
@@ -24,11 +23,11 @@ only. Prefer these skill entry points across runtimes. The existing scheduled
 ## Tools and authority
 
 Command frontmatter describes Claude Code's tool restrictions, not a grant on
-another runtime. Use only tools actually available and authorized in this session;
+another runtime. Use only tools available and authorized in this session;
 keep the command's read-only boundaries, isolated tracker writes and confirmation
 gates. Missing authority: report the blocked step and stop dependent work.
 Never enable a schedule or raise a permission mode to make a command succeed.
-Dork (`doe`) currently supplies builder shell only in `bypassPermissions`;
+Dork (`doe`) supplies builder shell only in `bypassPermissions`;
 `default` and `acceptEdits` cannot run Flow's shell steps. Report that limitation
 and leave mode changes to the operator.
 
@@ -57,4 +56,5 @@ Skill delivery does not add hooks. OpenCode and Dork have no Flow Stop/PostToolU
 hook execution; Codex's hook payload and session-identity parity remain unproved.
 Use explicit `continue` ticks, stopping after each, instead of creating the `auto`
 sentinel on these runtimes. This does not enable or change any host schedule.
-OpenCode skill discovery through namespaced symlinks still needs a live host probe.
+OpenCode skill discovery still needs a live probe. Dork's launcher supports
+manual runs and their reviewer; vendor fleet rotation does not select Dork.

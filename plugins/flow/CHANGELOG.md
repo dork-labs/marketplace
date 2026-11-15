@@ -6,6 +6,11 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.97.0
 
+- Add the Dork (`doe`) launcher through DorkOS only. Its workers/reviewers require
+  an explicitly requested `bypassPermissions` mode and the `session_start` MCP
+  path. Lower modes refuse before launch; Flow never increases autonomy. Dork
+  uses host-managed billing, with no named account or usage scanner in Flow.
+
 - Add skill entry points for all 15 Flow commands, retaining Claude Code commands.
   Codex, OpenCode and Dork can follow the same command bodies with explicit
   task-file, question and worktree fallbacks. Hook delivery and OpenCode skill

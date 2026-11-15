@@ -18,10 +18,10 @@ export type HostName = 'cli' | 'cmux' | 'dorkos';
 export const HOST_NAMES: readonly HostName[] = ['cmux', 'dorkos', 'cli'];
 
 /** An agent runtime flow can run a session on (the DorkOS runtime slugs). */
-export type RuntimeName = 'claude-code' | 'codex' | 'opencode';
+export type RuntimeName = 'claude-code' | 'codex' | 'opencode' | 'doe';
 
 /** Every {@link RuntimeName}. */
-export const RUNTIME_NAMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode'];
+export const RUNTIME_NAMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode', 'doe'];
 
 /**
  * The runtime of a stored handle: its own, or `claude-code` for a handle
@@ -52,6 +52,7 @@ export type LaunchPermissionMode = 'default' | 'acceptEdits' | 'bypassPermission
  *
  * - `claude-code`: the account's absolute `CLAUDE_CONFIG_DIR`.
  * - `codex`: the account's absolute `CODEX_HOME`.
+ * - `doe`: host-managed billing only; use null or the path-less default, never a provider.
  * - `opencode`: always `null` today. An OpenCode account is a provider
  *   credential, named by {@link LaunchAccount.provider}, not a folder.
  *
@@ -64,8 +65,7 @@ export type LaunchPermissionMode = 'default' | 'acceptEdits' | 'bypassPermission
  *
  * A `path` of `null` means the ambient environment: the runtime's own home as
  * the supervisor resolves it. Only `{ runtime, id: 'default', path: null }` may
- * say so, and flow's own callers use it only for OpenCode, whose default has no
- * folder.
+ * say so. OpenCode's ambient default and Dork's host-managed default have no folder.
  */
 export interface LaunchAccount {
   /** The runtime this account belongs to; must match the request's runtime. */

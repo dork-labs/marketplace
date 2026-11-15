@@ -265,8 +265,14 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new UsageError(`--host must be one of ${LAUNCHERS.join(', ')}, not "${launcher}"`);
   }
   const runtimeFlag = ctx.args.flags.runtime;
-  if (typeof runtimeFlag === 'string' && !(RUNTIMES as readonly string[]).includes(runtimeFlag)) {
-    throw new UsageError(`--runtime must be one of ${RUNTIMES.join(', ')}, not "${runtimeFlag}"`);
+  if (
+    typeof runtimeFlag === 'string' &&
+    runtimeFlag !== 'doe' &&
+    !(RUNTIMES as readonly string[]).includes(runtimeFlag)
+  ) {
+    throw new UsageError(
+      `--runtime must be one of ${RUNTIMES.join(', ')}, doe, not "${runtimeFlag}"`
+    );
   }
   const runtime = typeof runtimeFlag === 'string' ? runtimeFlag : runtimeSession(ctx.env).runtime;
   const sessionId = ctx.sessionId;

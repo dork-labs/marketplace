@@ -13,6 +13,9 @@
  * | `codex`       | `CODEX_THREAD_ID`, `CODEX_SANDBOX` or `CODEX_SANDBOX_NETWORK_DISABLED` |
  * | `opencode`    | `OPENCODE=1` (with `OPENCODE_PID`)                              |
  *
+ * Dork (`doe`) has no vendor shell marker here; identify it explicitly with
+ * `FLOW_RUNTIME=doe` or the manual claim runtime flag.
+ *
  * `FLOW_RUNTIME` and `FLOW_HARNESS` let a launcher that knows what it started
  * (DorkOS, a scheduler, flow's own launchers) say so, and they win over every
  * marker. Both are inherited, and so are the markers, so a launcher builds each
@@ -40,7 +43,7 @@
  */
 
 /** The agent runtimes flow knows. */
-export const RUNTIMES = ['claude-code', 'codex', 'opencode'] as const;
+export const RUNTIMES = ['claude-code', 'codex', 'opencode', 'doe'] as const;
 
 /** An agent runtime, or `unknown` when nothing identifies one. */
 export type Runtime = (typeof RUNTIMES)[number] | 'unknown';

@@ -50,6 +50,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
+import type { RuntimeSlug } from '../fleet/usage-ledger.ts';
 import { FlowError } from '../errors.ts';
 import { armRefusalFor, withArmRefusal, type FlowRun, type RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
@@ -162,8 +163,8 @@ export interface HandoffIo {
 
 /** An account a session may bill, as the runner launches on it. */
 export interface PlannedAccount {
-  /** The runtime. */
-  runtime: RuntimeName;
+  /** A vendor-fleet runtime; Dork has host-managed billing, not fleet accounts. */
+  runtime: RuntimeSlug;
   /** The registry id (`default` for the runtime's standalone default account). */
   id: string;
   /**

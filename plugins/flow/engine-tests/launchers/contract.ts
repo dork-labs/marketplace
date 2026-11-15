@@ -32,6 +32,7 @@ import {
   type LaunchAccount,
   type LaunchErrorCode,
   type LaunchRequest,
+  type LaunchPermissionMode,
   type Launcher,
   type RuntimeName,
   type SessionHandle,
@@ -55,6 +56,7 @@ export const CREDENTIAL_VARS: Readonly<Record<RuntimeName, readonly string[]>> =
   ],
   codex: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL'],
   opencode: [],
+  doe: [],
 };
 
 /** Per runtime, the variable a `config-dir` host names the account's home in. */
@@ -62,6 +64,7 @@ const HOME_VAR: Readonly<Record<RuntimeName, string | null>> = {
   'claude-code': 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
   opencode: null,
+  doe: null,
 };
 
 /** How a harness is built for one case. */
@@ -149,7 +152,9 @@ export interface LauncherHarness {
    * How the host names the account: a runtime home in the child env, an
    * account id in a request, or (opencode) the provider the session bills.
    */
-  accountBinding: 'config-dir' | 'account-id' | 'provider';
+  accountBinding: 'config-dir' | 'account-id' | 'provider' | 'host-default';
+  /** The mode this fake host can execute Flow shell steps under. */
+  defaultPermissionMode?: LaunchPermissionMode;
   /** Whether the runtime mints its own session id, replacing the request's (codex, opencode). */
   mintsSessionId: boolean;
   /** The states the host can report, so case 8 checks exactly those. */
@@ -219,7 +224,7 @@ export function requestFor(
     cwd: h.cwd,
     promptFile: h.promptFile,
     sessionId: freshSessionId(),
-    permissionMode: 'acceptEdits',
+    permissionMode: h.defaultPermissionMode ?? 'acceptEdits',
     title: 'ACME-12 worker',
     ...overrides,
   };
@@ -310,6 +315,12 @@ export function launcherContract(
           expect(err.message).toContain(reason);
           expect(h.sessions()).toEqual([]);
           expect(h.calls()).toEqual([]);
+          // Recovery must not resume an unsupported runtime through a vendor host.
+          const own = await h.launcher.start(requestFor(h));
+          const before = h.sessions().length;
+          const sent = await failure(h.launcher.send({ ...own, runtime }, h.messageFile));
+          expect(sent.code).toBe('unsupported');
+          expect(h.sessions()).toHaveLength(before);
         });
       });
     }
@@ -337,6 +348,7 @@ function runtimeContract(
         expect(record.cwd).toBe(h.cwd);
         if (h.accountBinding === 'config-dir') expect(record.configDir).toBe(h.account.path);
         else if (h.accountBinding === 'provider') expect(record.provider).toBe(h.account.provider);
+        else if (h.accountBinding === 'host-default') expect(record.accountId).toBeUndefined();
         else expect(record.accountId).toBe(h.account.id);
       });
     });
@@ -375,6 +387,14 @@ function runtimeContract(
     // Case 4: a session billing another account is refused, not adopted.
     it('4. a session on another account throws wrong-account', async () => {
       await withHarness(make, {}, async (h) => {
+        if (h.accountBinding === 'host-default') {
+          const err = await failure(
+            h.launcher.start(requestFor(h, { account: { ...h.account, id: 'another-profile' } }))
+          );
+          expect(err.code).toBe('bad-request');
+          expect(h.sessions()).toEqual([]);
+          return;
+        }
         h.script({ confirm: 'other-account' });
         const req = requestFor(h);
         const err = await failure(h.launcher.start(req));
