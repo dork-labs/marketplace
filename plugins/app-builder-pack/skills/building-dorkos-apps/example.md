@@ -1,16 +1,24 @@
 # Worked example: a hello card
 
-Request: "Put a small card on my dashboard that says hello."
+Request: "Put a small card in Activity that says hello."
 
-Nothing here needs a network, a key, server code or agent tools, so the smallest
-template does: `dashboard-card`.
+## 0. Interview
+
+The request already answers where it shows, so one short round covers the rest:
+
+> Before I build: (1) a small section at the top of Activity, nothing else. (2) You'll
+> glance at it, so it stays one line. (3) It reads nothing and sends nothing. (4) Just
+> for you. Change any of these, or say go.
+
+The person says go. Nothing needs a network, a key, server code or agent tools, so the
+smallest template does: `dashboard-card`.
 
 ## 1. Scaffold
 
 ```
 create_extension(
   name: "hello-card",
-  description: "A dashboard card that says hello. Reads nothing, sends nothing.",
+  description: "An Activity section that says hello. Reads nothing, sends nothing.",
   template: "dashboard-card"
 )
 ```
@@ -36,16 +44,18 @@ approve.
 
 ## 2. The files
 
-`extension.json`, unchanged from the starter: only one contribution, no
-`serverCapabilities`, no `tools`, no `capabilities.events`.
+`extension.json`: one contribution, no `serverCapabilities`, no `tools`, no
+`capabilities`. The one change from the starter: `minHostVersion` goes from the
+placeholder `0.1.0` to the first release with API v2 (shown here as `<v2 release>`).
 
 ```json
 {
   "id": "hello-card",
   "name": "Hello Card",
   "version": "0.1.0",
-  "description": "A dashboard card that says hello. Reads nothing, sends nothing.",
-  "minHostVersion": "0.1.0",
+  "description": "An Activity section that says hello. Reads nothing, sends nothing.",
+  "minHostVersion": "<v2 release>",
+  "clientApiVersion": 2,
   "contributions": { "dashboard.sections": true }
 }
 ```
@@ -82,7 +92,7 @@ test_extension(id: "hello-card")
 }
 ```
 
-One dashboard section, as meant.
+One Activity section (slot id `dashboard.sections`), as meant.
 
 ## 4. Check it started
 
@@ -97,9 +107,14 @@ One dashboard section, as meant.
 `server.ts`, anything but `active` means it didn't start; read `get_extension_errors`
 and the server log.
 
-## 5. Tell the person
+## 5. Prove it
 
-> Built by {your name} from your request. **Hello Card** is a card on your dashboard
-> that says hello. It reaches nothing outside your screen: no files, no network, no
-> keys, no agent tools. It never posts or sends. You can turn it off in
-> Settings → Extensions.
+Four screenshots of the Activity section: 390 px and desktop, light and dark. It has no
+data, so the empty state is the only state. Post them with the review.
+
+## 6. Tell the person
+
+> Built by {your name} from your request. **Hello Card** is one section at the top of
+> Activity that says hello. It takes no other surface. It reaches nothing outside your
+> screen: no files, no network, no keys, no agent tools. It never posts or sends. You
+> can turn it off in Settings → Extensions.
