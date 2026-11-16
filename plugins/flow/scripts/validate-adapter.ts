@@ -56,6 +56,7 @@ const OPTIONAL_FIELDS: string[] = [
   'assignee',
   'agentDisposition',
   'createdAt',
+  'updatedAt',
 ];
 
 /** A single breached invariant in the verdict. */
@@ -275,6 +276,8 @@ function checkInv2(items: readonly unknown[]): string[] {
         details.push(`${label} optional "assignee" must be a non-empty string`);
       if (field === 'createdAt' && typeof value !== 'string')
         details.push(`${label} optional "createdAt" must be a string`);
+      if (field === 'updatedAt' && typeof value !== 'string')
+        details.push(`${label} optional "updatedAt" must be a string`);
       if (
         field === 'agentDisposition' &&
         !(typeof value === 'string' && AGENT_DISPOSITIONS.includes(value))

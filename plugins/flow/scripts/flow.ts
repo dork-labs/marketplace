@@ -465,7 +465,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'create',
     summary: 'File a new item in the tracker.',
     description:
-      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label (except agent/from-outside, for an item captured from outside the team), two labels in one group, a priority outside 0-4, and a title ending in a capture tag ([owner/name#N]) without --label agent/from-outside. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
+      'File one new, already-triaged item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call (exit 2), naming every missing field at once, an item without a title, a description, a type/* label, a priority 1-4 (MoSCoW: 1 or 2 Must, 3 Should, 4 Could; 0 is refused), a --size, a --for-project, or a "## Proof" and a "## Done when" section in the description. Also refuses an agent/* label (except agent/from-outside, for an item captured from outside the team), two labels in one group, and a title ending in a capture tag ([owner/name#N]) without --label agent/from-outside. Then checks the open items: a near-duplicate title refuses (exit 5) naming the match, unless --not-duplicate-of names every near match. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem and getBacklogSnapshot capabilities (exit 3).',
     common: ['project', 'dry-run', 'session'],
     flags: [
       { name: 'title', kind: 'string', value: 'text', description: 'The title.' },
@@ -487,10 +487,28 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'for-project',
         kind: 'string',
         value: 'name|id',
-        description: 'File it in this tracker project (its id or exact name).',
+        description: 'File it in this tracker project (its id or exact name). Required.',
       },
       { name: 'parent', kind: 'string', value: 'id', description: 'The parent item, e.g. DOR-12.' },
-      { name: 'priority', kind: 'string', value: '0-4', description: '0 none, 1 urgent … 4 low.' },
+      {
+        name: 'priority',
+        kind: 'string',
+        value: '1-4',
+        description: 'MoSCoW on the tracker priority: 1 or 2 Must, 3 Should, 4 Could.',
+      },
+      {
+        name: 'size',
+        kind: 'string',
+        value: 'points|xs-xxl',
+        description: "The estimate, in the tracker's shape: points (1, 2, 3, 5, 8) or a t-shirt size.",
+      },
+      {
+        name: 'not-duplicate-of',
+        kind: 'string',
+        value: 'ids',
+        repeatable: true,
+        description: 'Near matches you checked and that are different work, e.g. DOR-12,DOR-40.',
+      },
       {
         name: 'key',
         kind: 'string',

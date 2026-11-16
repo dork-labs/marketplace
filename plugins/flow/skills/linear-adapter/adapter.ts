@@ -67,7 +67,7 @@ import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '3.0.0';
+export const CONTRACT_VERSION = '3.1.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -104,7 +104,7 @@ const DISPOSITIONS = ['ready', 'claimed', 'completed', 'needs-input'] as const;
 const LABEL_PAGE = 100;
 
 /** The fields every normalized issue needs, except its project and relations. */
-const ISSUE_FIELDS = `id identifier title description priority estimate createdAt
+const ISSUE_FIELDS = `id identifier title description priority estimate createdAt updatedAt
   state { name type } assignee { id } parent { identifier }
   labels(first: ${LABEL_PAGE}) { nodes { id name parent { name } } }`;
 
@@ -344,6 +344,7 @@ interface RawIssue {
   priority?: number | null;
   estimate?: number | null;
   createdAt?: string | null;
+  updatedAt?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null } | null;
   parent?: { identifier?: string | null } | null;
@@ -619,6 +620,7 @@ export function normalizeIssue(
   if (node.assignee?.id) item.assignee = node.assignee.id;
   if (disposition !== undefined) item.agentDisposition = disposition;
   if (typeof node.createdAt === 'string') item.createdAt = node.createdAt;
+  if (typeof node.updatedAt === 'string') item.updatedAt = node.updatedAt;
   return item;
 }
 
@@ -1494,6 +1496,16 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     },
 
     async createItem(spec: NewItem): Promise<CreatedItem> {
+      // Linear's estimate is a number of points on every scale it offers, so a
+      // t-shirt size has nowhere to go: refuse it before any call.
+      if (
+        spec.size !== undefined &&
+        !(typeof spec.size === 'number' && Number.isInteger(spec.size) && spec.size >= 0)
+      ) {
+        throw new PreconditionError(
+          `Linear estimates are whole points; pass the size as a number (for example 1, 2, 3, 5 or 8), not "${spec.size}"`
+        );
+      }
       const { id: teamId, key } = await team();
       // agent/from-outside is the one exception: it marks an item captured from
       // outside the team, which keeps it from being readied unattended.
@@ -1566,6 +1578,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         input.parentId = (await readIssue(spec.parent)).id;
       }
       if (spec.priority !== undefined) input.priority = spec.priority;
+      if (spec.size !== undefined) input.estimate = spec.size;
 
       // A key names one OPEN item. When the item a key made is closed or
       // archived, the create moves on to the key chained with its identifier,

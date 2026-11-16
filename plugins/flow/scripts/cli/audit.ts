@@ -4,7 +4,7 @@
  *
  * - The pull is the tracker's (closed titles included) or the `--snapshot` file.
  * - GRM-8's agent identity is `identity.agent`, or the tracker's current user
- *   when that is `auto`.
+ *   when that is `auto`. GRM-16 (an expired Could) measures against the run's clock.
  * - Human output: one block per failing invariant, titled from the oracle's
  *   own invariant list, one line per offending item.
  * - `--json`: the oracle's `{ ok, failures }`.
@@ -59,6 +59,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const results = runInvariants([...snapshot.items, ...snapshot.closed], {
     agentIdentity,
     unnamespacedLabels: project.loaded.config.groom.unnamespacedLabels,
+    now: ctx.now().toISOString(),
   });
   const verdict = verdictOf(results);
   return {

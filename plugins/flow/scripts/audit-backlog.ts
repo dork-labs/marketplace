@@ -1,7 +1,7 @@
 /*
  * audit-backlog.ts - the /flow backlog-groom invariant oracle.
  *
- * Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
+ * Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
  * NORMALIZED WorkItems - the whole live backlog as the adapter's
  * `getBacklogSnapshot()` verb emits it. Where validate-adapter.ts asks "did the
  * adapter normalize each item correctly?", this oracle asks "is the backlog
@@ -53,7 +53,7 @@ const AGENT_READY_LABEL = 'agent/ready';
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`GRM-1` .. `GRM-15`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`GRM-1` .. `GRM-16`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -73,6 +73,8 @@ interface AuditOpts {
   agentIdentity?: string;
   /** Bare labels the team keeps on purpose (config `groom.unnamespacedLabels`); GRM-12 skips them. */
   unnamespacedLabels?: readonly string[];
+  /** The time GRM-16 measures an item's age against, ISO-8601. Default: the wall clock. */
+  now?: string;
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -85,7 +87,7 @@ interface HarnessArgs {
 
 const HELP = `audit-backlog - the /flow backlog-groom invariant oracle.
 
-Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
+Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
 NORMALIZED WorkItems - the whole live backlog, as the adapter's
 getBacklogSnapshot() verb emits it. Run by the grooming-backlog skill before
 and after a groom; runnable standalone for a read-only health check.
@@ -96,7 +98,7 @@ Usage:
   node --experimental-strip-types scripts/audit-backlog.ts --help
 
 Fixture: a JSON array of WorkItems, or
-  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."] } }.
+  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."], "now": "<ISO>" } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -125,6 +127,9 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-15  state coherence: state, agent/* and stage/* agree (STATE-1 .. STATE-5):
           at most one stage/* label, none on a started item, agent/claimed only
           when started, no agent/ready when started, no agent/completed when open
+  GRM-16  no open Could (priority 4) untouched for 30 or more days (updatedAt,
+          else createdAt, against opts.now): close it as canceled with the comment
+          "Closed after 30 days as a Could. Reopen it if it matters."
 `;
 
 /** True for a non-array, non-null object. */
@@ -368,6 +373,66 @@ function checkGrm14(items: readonly unknown[]): string[] {
   return details;
 }
 
+/** How many days a Could (priority 4) item may sit untouched before the groom closes it. */
+const COULD_EXPIRY_DAYS = 30;
+
+/** The comment the groom closes an expired Could with. */
+const COULD_EXPIRY_COMMENT = 'Closed after 30 days as a Could. Reopen it if it matters.';
+
+/** One day, in milliseconds. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** An open Could item past its expiry, as {@link expiredCoulds} reports it. */
+interface ExpiredCould {
+  /** The item's human key. */
+  identifier: string;
+  /** Its title. */
+  title: string;
+  /** Whole days since it was last touched. */
+  days: number;
+}
+
+/**
+ * The open Could (priority 4) items untouched for {@link COULD_EXPIRY_DAYS} or
+ * more days: the ones the groom proposes to close as canceled with
+ * {@link COULD_EXPIRY_COMMENT}. "Touched" is the tracker's `updatedAt`, else
+ * `createdAt`; an item with neither, or an unreadable date, never expires
+ * (missing is neutral). Every other priority is left alone.
+ *
+ * @param items - The snapshot's normalized WorkItems.
+ * @param now - The time to measure against, ISO-8601. Default: the wall clock.
+ * @returns The expired items, in snapshot order.
+ */
+function expiredCoulds(items: readonly unknown[], now?: string): ExpiredCould[] {
+  const at = now === undefined ? Date.now() : Date.parse(now);
+  const expired: ExpiredCould[] = [];
+  items.forEach((item, index) => {
+    if (!isPlainObject(item) || !isOpen(item) || item.priority !== 4) return;
+    let touched: string | undefined;
+    if (isNonEmptyString(item.updatedAt)) touched = item.updatedAt;
+    else if (isNonEmptyString(item.createdAt)) touched = item.createdAt;
+    if (touched === undefined) return;
+    const since = Date.parse(touched);
+    if (!Number.isFinite(since) || !Number.isFinite(at)) return;
+    const days = Math.floor((at - since) / DAY_MS);
+    if (days < COULD_EXPIRY_DAYS) return;
+    expired.push({
+      identifier: itemLabel(item, index),
+      title: typeof item.title === 'string' ? item.title : '',
+      days,
+    });
+  });
+  return expired;
+}
+
+/** GRM-16 - no open Could untouched for 30 or more days. */
+function checkGrm16(items: readonly unknown[], opts: AuditOpts): string[] {
+  return expiredCoulds(items, opts.now).map(
+    (could) =>
+      `${could.identifier} is a Could untouched for ${could.days} days; close it as canceled with the comment "${COULD_EXPIRY_COMMENT}"`
+  );
+}
+
 /** One groom invariant: its id, a one-line summary, and the check that asserts it. */
 interface Invariant {
   /** The invariant identifier, e.g. `GRM-4`. */
@@ -403,6 +468,7 @@ const INVARIANTS: readonly Invariant[] = [
     summary: 'state, the agent/* label and the stage/* label agree',
     check: checkGrm15,
   },
+  { id: 'GRM-16', summary: 'no Could item untouched for 30 days', check: checkGrm16 },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -518,6 +584,9 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
           isNonEmptyString(label) && !label.includes('/') && label.trim() === label
       );
     }
+    if (isPlainObject(parsed.opts) && isNonEmptyString(parsed.opts.now)) {
+      opts.now = parsed.opts.now;
+    }
     return { items: parsed.items, opts };
   }
   throw new Error(
@@ -594,5 +663,14 @@ if (invokedDirectly(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }
 
-export { main, audit, runInvariants, verdictOf, INVARIANTS };
-export type { AuditOpts, Failure, Invariant, InvariantResult, Verdict };
+export {
+  main,
+  audit,
+  runInvariants,
+  verdictOf,
+  expiredCoulds,
+  INVARIANTS,
+  COULD_EXPIRY_DAYS,
+  COULD_EXPIRY_COMMENT,
+};
+export type { AuditOpts, ExpiredCould, Failure, Invariant, InvariantResult, Verdict };

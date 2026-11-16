@@ -7,7 +7,8 @@
  * fake adapter's skill routes every tracker read and write through it. So:
  *
  * - `capture` checks the spec's outcome: exactly one new item (`flow create`),
- *   with an `origin/*` label and no `agent/ready`.
+ *   with an `origin/*` label, no `agent/ready`, and the fields a triaged item
+ *   is filed with (a priority 1-4, a size and the project, DOR-4546).
  * - `triage` checks the one write `flow triage` makes: the item ends ready
  *   (with a `stage/*` label) or parked on exactly one question, never both, and
  *   nothing else in the backlog changes. flow has no command that sets an
@@ -16,9 +17,7 @@
  * - `done/follow-up` checks what closing-work promises: the item closes, one
  *   follow-up is filed (`flow create`) with a type, a priority, the project and
  *   `origin/from-agent`, and triage then readies it only when it passes the
- *   groom readiness invariants, or else parks it on one question. `flow create`
- *   cannot size an item, so on the fake a ready follow-up fails GRM-4: the
- *   honest outcome there is a parked one.
+ *   groom readiness invariants, or else parks it on one question.
  * - `decompose` and `done` run as the spec describes them.
  *
  * @module @dorkos/flow/selftest/live/cases
@@ -230,6 +229,13 @@ export const LIVE_CASES: readonly LiveCase[] = [
       }
       if (captured.labels.includes('agent/ready')) {
         return `${captured.identifier} carries agent/ready: readiness is triage's decision`;
+      }
+      if (typeof captured.priority !== 'number' || captured.priority < 1) {
+        return `${captured.identifier} has no priority`;
+      }
+      if (captured.size === undefined) return `${captured.identifier} has no size`;
+      if (captured.project?.id !== PROJECT.id) {
+        return `${captured.identifier} is not in ${PROJECT.name}`;
       }
       return undefined;
     },
