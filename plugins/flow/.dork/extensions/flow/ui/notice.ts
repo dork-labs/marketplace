@@ -102,7 +102,8 @@ export function FleetNotice(props: { kind: NoticeKind }): Node {
           href: GUIDE_URL,
           target: '_blank',
           rel: 'noopener noreferrer',
-          onClick: (event: { preventDefault(): void }) => openWebPage(event, GUIDE_URL, GUIDE_LINK_TEXT),
+          onClick: (event: { preventDefault(): void }) =>
+            openWebPage(event, GUIDE_URL, GUIDE_LINK_TEXT),
           style: { color: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' },
         },
         GUIDE_LINK_TEXT

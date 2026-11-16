@@ -21,12 +21,12 @@ flow accounts                # each account's role and room left
 
 ## Which projects an account may work in
 
-DorkOS decides which accounts each project may use, and DorkOS holds every chat, schedule and handoff there to it. Each project's Flow settings show **Accounts this project may use**: each account, and whether it may work there. Only you change that. In Settings → Runtimes you can limit an account to certain projects, or remove a project's own list; the button under the list takes you there. `flow next` and `flow drain` in the terminal follow the same rule.
+DorkOS decides which accounts each project may use, and holds every chat, schedule and handoff there to it. Each project's Flow settings show **Accounts this project may use**. You change it in Settings → Runtimes, where you can limit an account to projects. `flow next` and `flow drain` follow the same rule.
 
 This replaces flow's older **Only for these repos** list on a kept-out account. In Settings → Flow, that account's row says what to do, and nothing moves until you press a button:
 
-1. Press **Limit this account in Settings → Runtimes**, and there limit it to exactly the projects the row names. Flow never sets DorkOS's limits itself. It never suggests a limit wider than your repo list, and it leaves alone an account DorkOS already limits.
-2. Back in Settings → Flow, **Switch to DorkOS's rule** lets flow use the account in rotation within those limits, and drops flow's own list. If some project still runs a flow older than 0.52, the row says **Note it** instead: flow keeps its own list too, both rules apply, and the switch appears once every project is updated.
+1. **Limit this account in Settings → Runtimes**: there, limit it to the projects the row names. Flow never suggests a wider limit, and leaves alone an account DorkOS already limits.
+2. **Switch to DorkOS's rule** then lets flow use the account in rotation within those limits, and drops flow's own list. While a project runs flow older than 0.52, the row says **Note it** instead, both rules apply, and the switch appears once every project is updated.
 
 To undo it, clear the account's project limits in Settings → Runtimes, and put flow's list back with `flow accounts set <id> --role kept-out --repos owner/name,...`.
 

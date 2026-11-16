@@ -154,7 +154,9 @@ const CREDITS_ACCOUNT_ID = 'dorkos-credits';
 function routable(account: AccountSummary): boolean {
   if (account.implicit) return account.id === MAIN_ACCOUNT_ID;
   return (
-    account.id !== MAIN_ACCOUNT_ID && account.id !== CREDITS_ACCOUNT_ID && isValidAccountId(account.id)
+    account.id !== MAIN_ACCOUNT_ID &&
+    account.id !== CREDITS_ACCOUNT_ID &&
+    isValidAccountId(account.id)
   );
 }
 
