@@ -49,9 +49,52 @@ that fails at start still says `compiled`. Read `serverStatus`, each tool's stat
 Text that sends the person somewhere ("approve it under Needs you", "open Settings →
 Keys", "click Sync") must match the real state the app is in. An empty state that
 points at a card or button that isn't there is a bug. Check each such line against the
-app in that exact state (empty, loading, error, full) before you hand it over.
+app in that exact state (empty, loading, error, full) before you hand it over. If the
+thing it points at can't be reached from the app, say what's missing and show no button.
 
-## 5. Small things
+## 5. The sandboxed frame (extension API v2)
+
+On DorkOS with API v2, app screens run in an isolated frame. The manifest sets
+`"clientApiVersion": 2`; without it no screen code runs.
+
+- **No `fetch`.** Call your own server with `api.request(path, { method, body })`, which
+  needs `capabilities.http`. Pictures and video come through `api.media(path)`.
+- **Other apps only through declared exports.** To call another app, list it in
+  `capabilities.http.apps`; that app must list the route and method in its
+  `exports.http`. Export the fewest routes, name their callers, and keep person-only
+  routes in `personOnly`.
+- **`minHostVersion` is enforced.** Set it to the first release with every API the app
+  uses, so an older DorkOS refuses it instead of breaking.
+
+## 6. The fill view scrolls at `#root`
+
+In a page or panel the frame's `#root` is the scroller; `html` and `body` don't
+scroll. An inner `h-full` box that's meant to scroll grows instead, and content below the
+fold is cut off. Test with content taller than the view, using a real mouse wheel and
+the End key, not only a screenshot of the top.
+
+## 7. Layout follows the app's width, not the window's
+
+The same app runs in a narrow panel and a full window. Size with container queries on
+the app's own root, not viewport media queries. Touch targets at least 44 px on coarse
+pointers; nothing that only shows on hover. If your team has a shared UI kit (lists,
+tabs, alerts, loading and error states, time formats), use it so apps look and behave
+alike, and get your designer's OK on anything people see.
+
+## 8. Data agents can't overwrite
+
+Decisions, approvals, limits and anything else the person controls must not live in a
+file an agent can edit (a plain JSON file in a folder the agent writes to). Keep them in
+the app's own storage behind a person-only route or setting, and give agent tools only
+the reads and writes the job needs. Never edit a data migration that already ran; add a
+new one.
+
+"Person-only" means checked on the server. Writes to those fields go through a route
+behind `requirePerson`, and no agent tool may set them, including a generic "update
+record" tool. Text that came from outside (web pages, messages, other agents) and is
+stored in the app is shown as plain text, never as HTML or a clickable action.
+
+## 9. Small things
 
 - Client code can't import npm packages like `lucide-react`. Inline small SVGs.
 - `registerComponent` options: `label` names a right-panel tab; the host draws the tab
