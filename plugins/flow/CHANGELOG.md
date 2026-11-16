@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.98.0
+
+**Every item flow files is now triaged as it is filed, and flow checks for a duplicate first (DOR-4546). Reinstall to get it: until you do, `flow create` still files items with no priority, size or project.**
+
+- `flow create` refuses an item without a `type/*` label, a priority 1-4, a `--size`, a `--for-project`, and a `## Proof` and a `## Done when` section in the description. It names every missing one in a single message and files nothing. Priority 0 ("none") is refused.
+- Priority follows MoSCoW on the tracker's own priority: 1 or 2 is Must (1 only for something broken now), 3 Should, 4 Could. A Won't is not filed. The capture, triage, groom and closing skills use the same buckets: a Must is readied, a Should or Could waits in the backlog, a Won't is canceled with a reason.
+- Before it files, `flow create` reads the open items. A title that nearly matches one is refused with that item's identifier and title, so you can comment there instead. If it is different work, pass `--not-duplicate-of` with every match it named; the new item says which ones you checked.
+- The groom closes a Could nobody has touched for 30 days, as canceled, with the comment "Closed after 30 days as a Could. Reopen it if it matters." `flow audit` reports these as GRM-16.
+- The adapter contract is now 3.1.0: a new item can carry a size, and an item can say when it last changed. The shipped Linear and fake adapters do both. A custom adapter still at 3.0 keeps working, but its new items arrive without a size.
+
 ## 0.97.1
 
 **Reinstall Flow to receive this fix.**
