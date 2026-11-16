@@ -51,8 +51,8 @@ function unrecordedText(label: string, names: string): string {
   return `DorkOS now keeps ${label} to ${names}, but flow couldn't note the move. Try again so flow can finish it later.`;
 }
 
-/** The button that opens Settings → Runtimes. */
-export const OPEN_RUNTIMES_ACTION = 'Open Settings → Runtimes';
+/** The button that opens Settings → Runtimes, where the person limits the account. */
+export const OPEN_RUNTIMES_ACTION = 'Limit this account in Settings → Runtimes';
 
 /** What the move needs, so tests can stand in for flow and DorkOS. */
 export interface MigrationDeps {

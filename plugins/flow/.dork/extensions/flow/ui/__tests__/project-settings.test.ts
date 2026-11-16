@@ -296,7 +296,7 @@ describe('Settings → Flow and "Only for these repos"', () => {
         { exact: false }
       )
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' }));
     await act(async () => {});
     expect(api.navigate).toHaveBeenCalledWith('?settings=runtimes');
     expect(put).not.toHaveBeenCalled();
@@ -326,7 +326,7 @@ describe('Settings → Flow and "Only for these repos"', () => {
     await act(async () => {});
     await act(async () => {});
     await act(async () => {});
-    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' }));
     await act(async () => {});
     expect(screen.getByText('DorkOS has no page at that address.')).toBeTruthy();
   });

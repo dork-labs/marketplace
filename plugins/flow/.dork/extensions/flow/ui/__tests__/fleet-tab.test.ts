@@ -685,7 +685,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
                 key: 'claude-code:Work',
                 kind: 'ready' as const,
                 text,
-                action: 'Open Settings → Runtimes',
+                action: 'Limit this account in Settings → Runtimes',
                 opens: '?settings=runtimes',
               },
               result: null,
@@ -699,7 +699,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
     await act(async () => {});
     expect(screen.getByText(text)).toBeTruthy();
     expect(onMove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' }));
     expect(onMove).toHaveBeenCalledTimes(1);
   });
 

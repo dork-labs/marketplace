@@ -30,15 +30,20 @@ import { ALERT } from './styles.ts';
 /** Main's id in DorkOS: this computer's own Claude sign-in. */
 const MAIN_ID = 'default';
 
-/** Where DorkOS shows each account's own rule, and each project's list. */
+/**
+ * Where DorkOS shows each account's own limits, and each project's list. It
+ * can limit an account to projects, or remove a project's list, but not yet
+ * choose a project's accounts: say only what it can do.
+ * TODO(DOR-4549): point at the screen that sets a project's account list once it ships.
+ */
 export const RUNTIMES_SETTINGS_LINK = '?settings=runtimes';
 
-/** The button that opens it. */
-export const OPEN_RUNTIMES_LABEL = 'Change in Settings → Runtimes';
+/** The button that opens it, saying what the person can do there today. */
+export const OPEN_RUNTIMES_LABEL = 'Limit an account to projects in Settings → Runtimes';
 
-/** Said under the list: why the list can't be changed here. */
+/** Said under the list: what changes the list, and where. */
 export const CHANGE_IN_RUNTIMES_TEXT =
-  'Only you can change which accounts work where, in Settings → Runtimes.';
+  'Only you can change where an account may work. In Settings → Runtimes you can limit an account to certain projects.';
 
 /** Said when the project keeps its own account list. */
 export const PROJECT_LIST_TEXT =
