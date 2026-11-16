@@ -35,7 +35,9 @@
  * only for a loopback base URL) rides only on `/mcp` requests to the configured
  * base URL. It is never printed, logged,
  * stored on the handle, or left in an error message, even one quoting the
- * server's own words.
+ * server's own words. An existing `DORKOS_AGENT_TOKEN` rides as
+ * `X-DorkOS-Agent` on MCP and API requests, preserving caller attribution on
+ * lookups and follow-ups. Neither credential follows redirects.
  *
  * Every outside effect comes in through {@link DorkosLauncherDeps}, so the
  * contract suite runs it against an in-process fake server.
@@ -75,7 +77,7 @@ import {
 
 /** What a 401 or 403 on the HTTP API means, and what to do about it. */
 export const DORKOS_AUTH_MESSAGE =
-  'DorkOS refused the request because sign-in is on. Set DORKOS_MCP_TOKEN to an API key.';
+  'DorkOS refused API access. This launcher cannot supply a person’s sign-in; an MCP token does not authorize the HTTP API.';
 
 /** The file DorkOS writes its per-instance MCP token to, under `<dorkHome>`. */
 export const MCP_TOKEN_FILE = 'mcp-local-token';
@@ -99,7 +101,7 @@ const BUSY_LIFECYCLES = new Set(['streaming', 'blocked', 'running']);
 export interface DorkosLauncherDeps {
   /** The HTTP client (the global `fetch`). */
   fetch: typeof fetch;
-  /** The supervisor's environment (`DORKOS_URL`, `DORKOS_PORT`, `DORKOS_MCP_TOKEN`, `DORK_HOME`). */
+  /** The supervisor's environment (`DORKOS_URL`, `DORKOS_PORT`, `DORKOS_MCP_TOKEN`, `DORKOS_AGENT_TOKEN`, `DORK_HOME`). */
   env: Readonly<Record<string, string | undefined>>;
   /** The OS home folder, for the default `<dorkHome>`. */
   osHome: string;
@@ -311,9 +313,16 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     }
   }
 
-  /** Remove every occurrence of the token from text bound for a person. */
-  function redact(text: string, token: string | null): string {
-    return token === null || token === '' ? text : text.split(token).join('[token]');
+  /** Remove both transport and identity credentials from text bound for a person. */
+  function redact(text: string, token: string | null = readToken()): string {
+    for (const secret of [
+      token,
+      deps.env.DORKOS_MCP_TOKEN?.trim(),
+      deps.env.DORKOS_AGENT_TOKEN?.trim(),
+    ]) {
+      if (secret) text = text.split(secret).join('[token]');
+    }
+    return text;
   }
 
   /** One HTTP request to DorkOS. Throws `unavailable` when DorkOS does not answer at all. */
@@ -326,7 +335,13 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     try {
       response = await deps.fetch(`${base}${route}`, {
         method,
+        // A custom identity header otherwise follows cross-origin redirects.
+        // Every credential stays at the configured server, including lookups.
+        redirect: 'manual',
         headers: {
+          ...(deps.env.DORKOS_AGENT_TOKEN?.trim()
+            ? { 'x-dorkos-agent': deps.env.DORKOS_AGENT_TOKEN.trim() }
+            : {}),
           ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
           ...init.headers,
         },
@@ -335,6 +350,13 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       });
     } catch {
       throw new LaunchError('unavailable', `DorkOS is not answering at ${base}.`);
+    }
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => {});
+      throw new LaunchError(
+        'unavailable',
+        'DorkOS redirected the request; credentials were not forwarded.'
+      );
     }
     const text = await response.text().catch(() => '');
     const contentType = response.headers.get('content-type') ?? '';
@@ -359,7 +381,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     if (reply.status === 403 && typeof code === 'string' && !/AUTH|LOGIN|TOKEN/i.test(code)) {
       throw new LaunchError(
         'refused',
-        `DorkOS refused ${what} (${code}): ${serverMessage(reply.body)}`
+        redact(`DorkOS refused ${what} (${code}): ${serverMessage(reply.body)}`)
       );
     }
     if (reply.status === 401 || reply.status === 403) {
@@ -367,7 +389,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     }
     throw new LaunchError(
       'unavailable',
-      `DorkOS answered ${reply.status} to ${what}: ${serverMessage(reply.body)}`
+      redact(`DorkOS answered ${reply.status} to ${what}: ${serverMessage(reply.body)}`)
     );
   }
 
@@ -395,13 +417,35 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
 
   /**
    * Start through `session_start` when DorkOS offers it. Anything short of the
-   * tool being listed and callable (no token, a 401, no `/mcp`, no such tool)
-   * means the route; a call the tool answers with an error is final.
+   * tool being available (no token, no `/mcp`, no such tool) means the route.
+   * Authentication and policy refusals, during discovery or call, are final.
    */
   async function startOverMcp(req: LaunchRequest, token: string | null): Promise<McpOutcome> {
     if (token === null) return { kind: 'use-route' };
     const listed = await rpc(token, 'tools/list', {});
-    if (!isObject(listed.message) || !isObject(listed.message.result)) return { kind: 'use-route' };
+    if (listed.status === 404 || listed.status === 405) return { kind: 'use-route' };
+    if (listed.status < 200 || listed.status >= 300) {
+      throw new LaunchError(
+        listed.status === 401 ? 'auth' : 'refused',
+        redact(
+          `DorkOS refused MCP discovery (${listed.status}): ${serverMessage(listed.body)}`,
+          token
+        )
+      );
+    }
+    if (isObject(listed.message) && isObject(listed.message.error)) {
+      throw new LaunchError(
+        'refused',
+        redact(`DorkOS refused MCP discovery: ${serverMessage(listed.message)}`, token)
+      );
+    }
+    if (
+      !isObject(listed.message) ||
+      !isObject(listed.message.result) ||
+      !Array.isArray(listed.message.result.tools)
+    ) {
+      throw new LaunchError('unavailable', 'DorkOS gave MCP discovery no readable tool list.');
+    }
     const tools = Array.isArray(listed.message.result.tools) ? listed.message.result.tools : [];
     if (!tools.some((tool) => isObject(tool) && tool.name === 'session_start')) {
       return { kind: 'use-route' };
@@ -417,12 +461,9 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       seedContext: seedContextLine(req),
     };
     const called = await rpc(token, 'tools/call', { name: 'session_start', arguments: args });
-    // A 401 here is a credential flow holds that DorkOS no longer takes, not a
-    // guard's no: nothing started, so the route may still try.
-    if (called.status === 401) return { kind: 'use-route' };
     if (called.status < 200 || called.status >= 300) {
       throw new LaunchError(
-        'unavailable',
+        called.status === 401 ? 'auth' : 'refused',
         redact(
           `DorkOS answered ${called.status} to session_start: ${serverMessage(called.body)}`,
           token
@@ -462,6 +503,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       {
         body: {
           content: pointerLine(req.promptFile),
+          create: true,
           cwd: req.cwd,
           runtime: req.runtime,
           ...(sentAccount(req) === undefined ? {} : { account: sentAccount(req) }),
@@ -628,7 +670,9 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       if (patched.status < 200 || patched.status >= 300) {
         throw new LaunchError(
           'unsupported',
-          `DorkOS would not switch this session to ${opts.model}: ${serverMessage(patched.body)}`
+          redact(
+            `DorkOS would not switch this session to ${opts.model}: ${serverMessage(patched.body)}`
+          )
         );
       }
     }

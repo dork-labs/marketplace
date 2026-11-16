@@ -41,6 +41,7 @@ import {
 
 /** The token the fake accepts. Distinctive, so a leak is easy to search for. */
 const TOKEN = 'dork_mcp_local_SECRET-7f3a9c';
+const AGENT_TOKEN = 'registered-agent-SECRET-58a2';
 
 /** How the fake's `/mcp` behaves. */
 type McpMode =
@@ -65,6 +66,10 @@ interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
   reportRuntime?: string;
   reportPermissionMode?: string;
   mcp?: McpMode;
+  /** Genuine HTTP admission refusal at discovery or call. */
+  mcpRefusal?: { method: 'tools/list' | 'tools/call'; status: 401 | 403 };
+  requireFreshCreate?: boolean;
+  redirectMcpTo?: string;
   mint?: MintMode;
   /** Whether the token file exists under `<dorkHome>`. Default true. */
   tokenFile?: boolean;
@@ -87,6 +92,7 @@ interface SeenRequest {
   method: string;
   url: string;
   authorization: string | undefined;
+  agentIdentity: string | undefined;
   accept: string | undefined;
   body: unknown;
 }
@@ -221,6 +227,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
       method: req.method ?? '',
       url,
       authorization: req.headers.authorization,
+      agentIdentity: req.headers['x-dorkos-agent'] as string | undefined,
       accept: req.headers.accept,
       body,
     });
@@ -232,12 +239,23 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
     if (url === '/api/health' && req.method === 'GET') return json(200, { status: 'ok' });
 
     if (url === '/mcp' && req.method === 'POST') {
+      if (options.redirectMcpTo) {
+        res.writeHead(307, { location: options.redirectMcpTo });
+        return res.end();
+      }
       if (mcp === 'absent') return json(404, { error: 'Not found' });
       const accept = req.headers.accept ?? '';
       if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
         return json(406, { jsonrpc: '2.0', error: { code: -32000, message: 'Not Acceptable' } });
       }
       const rpc = (body ?? {}) as { id?: unknown; method?: string; params?: unknown };
+      if (options.mcpRefusal && options.mcpRefusal.method === rpc.method) {
+        return json(options.mcpRefusal.status, {
+          jsonrpc: '2.0',
+          id: rpc.id,
+          error: { code: -32001, message: 'Caller admission refused' },
+        });
+      }
       const authed = req.headers.authorization === `Bearer ${TOKEN}`;
       // The login-off carve-out: discovery passes tokenless, a mutating call does not.
       if (rpc.method !== 'tools/list' && !authed) {
@@ -258,7 +276,9 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         const args = params.arguments ?? {};
         toolCalls.push({ name: params.name ?? '', args });
         if (mcp === 'refuse') {
-          const echo = options.echoAuth ? ` (you sent ${req.headers.authorization})` : '';
+          const echo = options.echoAuth
+            ? ` (you sent ${req.headers.authorization}; identity ${req.headers['x-dorkos-agent']})`
+            : '';
           return res.end(
             rpcReply(rpc.id, {
               result: {
@@ -305,6 +325,9 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
       const payload = (body ?? {}) as Record<string, unknown>;
       const canonical = aliases.get(id) ?? id;
       if (!sessions.has(canonical)) {
+        if (options.requireFreshCreate && payload.create !== true) {
+          return json(404, { code: 'SESSION_NOT_FOUND', error: 'Send create: true.' });
+        }
         const target = options.rebindTo ?? id;
         if (target !== id) aliases.set(id, target);
         openSession(target, payload, payload.content);
@@ -555,6 +578,7 @@ describe('dorkos launcher: which path it takes', () => {
           cwd: h.cwd,
           runtime: 'claude-code',
           account: 'claude3',
+          create: true,
           seedContext: `flow started this session as the worker for ACME-12 (flow id ${req.sessionId}).`,
         });
         expect(post?.authorization).toBeUndefined();
@@ -563,19 +587,117 @@ describe('dorkos launcher: which path it takes', () => {
     });
   }
 
-  // A stale token: the mutating call answers 401, which is not a guard's no,
-  // so the launch goes through the route instead.
-  it('a 401 on the tool call falls back to the route', async () => {
+  for (const method of ['tools/list', 'tools/call'] as const) {
+    for (const status of [401, 403] as const) {
+      it(`never falls back after ${method} admission answers ${status}`, async () => {
+        await withFake({ mcp: 'with-tool', mcpRefusal: { method, status } }, async (h) => {
+          await launchFailure(h.launcher.start(requestFor(h)));
+          expect(h.requests().filter((r) => r.url.includes('/api/sessions/'))).toEqual([]);
+          expect(h.sessions()).toEqual([]);
+        });
+      });
+    }
+  }
+
+  it('keeps a rejected MCP credential out of the route', async () => {
     await withFake(
       { mcp: 'with-tool', supervisorEnv: { DORKOS_MCP_TOKEN: 'stale-token' } },
       async (h) => {
-        const handle = await h.launcher.start(requestFor(h));
-        expect(handle.launchPath).toBe('route');
-        expect(h.requests().find((r) => r.url === '/mcp')?.authorization).toBe(
-          'Bearer stale-token'
-        );
+        await launchFailure(h.launcher.start(requestFor(h)));
+        expect(h.requests().filter((r) => r.url.includes('/api/sessions/'))).toEqual([]);
       }
     );
+  });
+
+  it('forwards registered caller identity throughout the chat without promoting MCP auth', async () => {
+    await withFake(
+      { mcp: 'with-tool', supervisorEnv: { DORKOS_AGENT_TOKEN: AGENT_TOKEN } },
+      async (h) => {
+        const handle = await h.launcher.start(requestFor(h));
+        await h.launcher.send(handle, h.messageFile, { model: 'fixture-model' });
+        await h.launcher.state(handle);
+        expect(await h.launcher.stop(handle)).toBe('left-idle');
+        for (const req of h.requests().filter((r) => r.url !== '/api/health')) {
+          expect(req.agentIdentity).toBe(AGENT_TOKEN);
+          if (req.url !== '/mcp') expect(req.authorization).toBeUndefined();
+        }
+        expect(JSON.stringify(handle)).not.toContain(AGENT_TOKEN);
+        expect(JSON.stringify(handle)).not.toContain(TOKEN);
+      }
+    );
+  });
+
+  it('redacts both credentials from MCP and API refusal messages', async () => {
+    await withFake(
+      {
+        mcp: 'refuse',
+        echoAuth: true,
+        supervisorEnv: { DORKOS_AGENT_TOKEN: AGENT_TOKEN },
+      },
+      async (h) => {
+        const error = await launchFailure(h.launcher.start(requestFor(h)));
+        expect(error.message).not.toContain(TOKEN);
+        expect(error.message).not.toContain(AGENT_TOKEN);
+        expect(error.stack).not.toContain(AGENT_TOKEN);
+      }
+    );
+    await withFake(
+      {
+        apiStatus: 403,
+        apiError: { code: 'OUTSIDE_BOUNDARY', error: `Denied ${AGENT_TOKEN} ${TOKEN}` },
+        supervisorEnv: { DORKOS_AGENT_TOKEN: AGENT_TOKEN },
+      },
+      async (h) => {
+        const error = await launchFailure(h.launcher.start(requestFor(h)));
+        expect(error.message).not.toContain(TOKEN);
+        expect(error.message).not.toContain(AGENT_TOKEN);
+        expect(error.stack).not.toContain(AGENT_TOKEN);
+      }
+    );
+  });
+
+  it('keeps both credentials at the configured origin when MCP redirects', async () => {
+    const foreignRequests: { authorization?: string; identity?: string }[] = [];
+    const foreign = createServer((req, res) => {
+      foreignRequests.push({
+        authorization: req.headers.authorization,
+        identity: req.headers['x-dorkos-agent'] as string | undefined,
+      });
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise<void>((resolve) => foreign.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = foreign.address() as AddressInfo;
+      await withFake(
+        {
+          mcp: 'with-tool',
+          redirectMcpTo: `http://127.0.0.1:${port}/mcp`,
+          supervisorEnv: { DORKOS_AGENT_TOKEN: AGENT_TOKEN },
+        },
+        async (h) => {
+          await launchFailure(h.launcher.start(requestFor(h)));
+          expect(foreignRequests).toEqual([]);
+          expect(h.requests().some((r) => r.url.includes('/api/sessions/'))).toBe(false);
+        }
+      );
+    } finally {
+      foreign.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        foreign.close((err) => (err ? reject(err) : resolve()))
+      );
+    }
+  });
+
+  it('explicitly creates only the fresh route chat, preserving resume messages', async () => {
+    await withFake({ mcp: 'without-tool', requireFreshCreate: true }, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      await h.launcher.send(handle, h.messageFile);
+      const posts = h.requests().filter((r) => r.url.endsWith('/messages'));
+      expect(posts).toHaveLength(2);
+      expect(posts[0]?.body).toHaveProperty('create', true);
+      expect(posts[1]?.body).not.toHaveProperty('create');
+    });
   });
 });
 

@@ -30,7 +30,7 @@ npm install --omit=dev
 ```
 
 Codex, OpenCode and Dork: invoke `flow-command-init`, then `flow-command-<stage>`.
-The [runtime guide](./skills/runtime-guide.md) covers tools, permissions and hook limits.
+See [runtime limits](./skills/runtime-guide.md) and [DorkOS starts](./docs/dorkos-starts.mdx).
 
 ## The flow CLI
 
