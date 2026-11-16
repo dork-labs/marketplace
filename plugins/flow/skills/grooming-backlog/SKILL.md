@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fifteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the sixteen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog
@@ -27,7 +27,7 @@ one team's identifiers: stop and fix the read first.
 go to the operator at the phase-5 gate. Labels, priorities, estimates, states,
 relations and description sections proceed under the operator's approval of the groom.
 
-**The fifteen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
+**The sixteen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
 invariant fails); `node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help`
 lists them.
 
@@ -64,6 +64,13 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
   Same-defect-class families are `related`, and stay open.
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
+- **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
+  untouched for `groom.couldExpiryDays` (default 60) or more days. Propose closing it as `canceled` with the comment the
+  failure quotes. A Could carrying a `groom.neverExpireLabels` label (security
+  work, by default) is never reported. Its evidence is its
+  last-touched date; it needs no ship proof.
+- **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
+  one (the current maintenance project when none fits); never leave one project-less.
 
 Every closure carries a `flow comment` with evidence. Ambiguity stays open and is flagged.
 
@@ -74,9 +81,11 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 
 1. One `type/*`: bug → `signal`; investigate/decide → `research`; wish → `idea`;
    scoped work → `task`; programme tracker → `meta` (never ready).
-2. A calibrated priority: most work is medium; urgent means broken mainline, open hole
-   or launch blocker.
-3. A size (required for ready).
+2. A MoSCoW bucket, by _The MoSCoW buckets_ in
+   `<flow-root>/skills/triaging-work/SKILL.md` (a Won't is proposed for closing with a
+   reason). Each of the team's cycles a Should is promoted, kept or dropped to Could. Only a Must is
+   proposed `agent/ready`.
+3. A size, on the tracker's own estimate scale.
 4. `stage/execute` (one component, no new pattern) or `stage/ideate` (multi-layer, new
    pattern, architectural decision). In doubt: complex.
 5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete
@@ -95,7 +104,7 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 
 Merge proposals into the ledger and check mechanically first: each item proposed once;
 each ready proposal complete and not droppable (open blocker, assignee, dead project);
-sane priority spread; boilerplate criteria flagged. Present the closure list with
+a sane bucket spread (mostly Should); boilerplate criteria flagged. Present the closure list with
 evidence, the project changes, the ready-set size with a sample, and every flag.
 **No write happens before this gate clears.**
 

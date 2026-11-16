@@ -6,7 +6,7 @@
  * verdict + exit code, exactly like `validate-adapter.test.ts`.
  *
  * The keystone property here is **every check can fail**: for each of the
- * fifteen GRM invariants there is a seeded mutation of the good fixture that
+ * sixteen GRM invariants there is a seeded mutation of the good fixture that
  * must turn the verdict red, naming exactly that invariant. This ports the
  * "prove the check can fail" self-test from the 2026-08-03 tracker
  * reorganization into committed tests - a groom verification that cannot go
@@ -26,6 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { audit, couldExpiryComment, expiredCoulds } from '../scripts/audit-backlog.ts';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 // engine-tests -> plugins/flow
 const PLUGIN_DIR = path.resolve(here, '..');
@@ -42,7 +44,12 @@ interface Verdict {
 
 interface Snapshot {
   items: Array<Record<string, unknown>>;
-  opts?: { agentIdentity?: string; unnamespacedLabels?: string[] };
+  opts?: {
+    agentIdentity?: string;
+    unnamespacedLabels?: string[];
+    now?: string;
+    couldExpiryDays?: number;
+  };
 }
 
 /** Spawn the oracle, returning its exit code + captured streams. */
@@ -196,6 +203,15 @@ describe('audit-backlog', () => {
         invariant: 'GRM-13',
         seed: (s) => {
           (s.items[0].labels as string[]).push('agent/needs-input');
+        },
+      },
+      {
+        // The parked idea becomes a Could last touched 92 days before opts.now.
+        invariant: 'GRM-16',
+        seed: (s) => {
+          s.items[1].priority = 4;
+          s.items[1].updatedAt = '2026-07-01T00:00:00.000Z';
+          s.opts = { ...s.opts, now: '2026-10-01T00:00:00.000Z' };
         },
       },
       {
@@ -390,6 +406,7 @@ describe('audit-backlog', () => {
       expect(status).toBe(0);
       expect(stdout).toContain('GRM-1');
       expect(stdout).toContain('GRM-15');
+      expect(stdout).toContain('GRM-16');
       expect(stdout).toContain('--fixture');
     });
   });
@@ -407,5 +424,169 @@ describe('audit-backlog', () => {
       expect(status).toBe(2);
       expect((JSON.parse(stdout) as Verdict).ok).toBe(false);
     });
+  });
+});
+
+describe('Could expiry (GRM-16, DOR-4546)', () => {
+  // Purpose: a waiting Could nobody has touched for groom.couldExpiryDays
+  // (default 60) is closed by the groom, and nothing else is.
+  const NOW = '2026-11-16T12:00:00.000Z';
+  const daysAgo = (days: number) => new Date(Date.parse(NOW) - days * 86_400_000).toISOString();
+  const item = (identifier: string, over: Record<string, unknown>) => ({
+    id: `id-${identifier}`,
+    identifier,
+    title: `Made-up item ${identifier}`,
+    description: '',
+    type: 'idea',
+    stateCategory: 'backlog',
+    stateName: 'Backlog',
+    parent: null,
+    relations: { blocks: [], blockedBy: [], children: [], relatedTo: [] },
+    labels: ['type/idea'],
+    project: { id: 'p1', name: 'Maintenance', stateCategory: 'started' },
+    ...over,
+  });
+
+  it('by default selects a Could untouched 61 days, and not one untouched 59', () => {
+    const items = [
+      item('ABC-1', { priority: 4, updatedAt: daysAgo(61) }),
+      item('ABC-2', { priority: 4, updatedAt: daysAgo(59) }),
+    ];
+    expect(expiredCoulds(items, NOW)).toEqual([
+      { identifier: 'ABC-1', title: 'Made-up item ABC-1', days: 61 },
+    ]);
+  });
+
+  it('uses a configured number of days: 29 vs 31 at 30', () => {
+    const items = [
+      item('ABC-3', { priority: 4, updatedAt: daysAgo(31) }),
+      item('ABC-4', { priority: 4, updatedAt: daysAgo(29) }),
+    ];
+    expect(expiredCoulds(items, NOW, 30).map((c) => c.identifier)).toEqual(['ABC-3']);
+    const verdict = audit(items, { now: NOW, couldExpiryDays: 30 });
+    expect(verdict.failures[0].detail).toContain(couldExpiryComment(30));
+  });
+
+  it('reads couldExpiryDays from a stdin snapshot, and ignores a value that is not a positive whole number', () => {
+    const items = [item('ABC-5', { priority: 4, updatedAt: daysAgo(40) })];
+    const run = (couldExpiryDays: unknown) =>
+      runOracle({ stdin: JSON.stringify({ items, opts: { now: NOW, couldExpiryDays } }) });
+    expect(run(30).status).toBe(1);
+    for (const bad of [0, -5, 1.5, '30']) expect(run(bad).status, String(bad)).toBe(0);
+  });
+
+  it('leaves every other priority alone, however old', () => {
+    const old = daysAgo(400);
+    const items = [1, 2, 3, 0].map((priority) =>
+      item(`ABC-${priority + 10}`, { priority, updatedAt: old })
+    );
+    items.push(item('ABC-20', { updatedAt: old }));
+    expect(expiredCoulds(items, NOW)).toEqual([]);
+  });
+
+  it('reads the last touch from updatedAt, else createdAt, and never expires an undated or closed item', () => {
+    const items = [
+      // Created long ago but touched yesterday: not expired.
+      item('ABC-30', { priority: 4, createdAt: daysAgo(90), updatedAt: daysAgo(1) }),
+      // Never updated since it was filed 75 days ago: expired.
+      item('ABC-31', { priority: 4, createdAt: daysAgo(75) }),
+      // No date at all: neutral.
+      item('ABC-32', { priority: 4 }),
+      // Already closed.
+      item('ABC-33', { priority: 4, updatedAt: daysAgo(90), stateCategory: 'canceled' }),
+    ];
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-31']);
+  });
+
+  it('leaves a started Could and a claimed Could alone: someone is working on them', () => {
+    const old = daysAgo(90);
+    const items = [
+      item('ABC-50', {
+        priority: 4,
+        updatedAt: old,
+        stateCategory: 'started',
+        stateName: 'In Progress',
+      }),
+      item('ABC-51', {
+        priority: 4,
+        updatedAt: old,
+        stateCategory: 'unstarted',
+        labels: ['type/idea', 'agent/claimed'],
+      }),
+      item('ABC-52', { priority: 4, updatedAt: old, stateCategory: 'unstarted' }),
+    ];
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-52']);
+  });
+
+  it('never expires a Could carrying a never-expire label: security unless set (Security, #183)', () => {
+    const old = daysAgo(400);
+    const items = [
+      item('ABC-60', { priority: 4, updatedAt: old, labels: ['type/signal', 'security'] }),
+      item('ABC-61', { priority: 4, updatedAt: old, labels: ['type/signal', 'area/security'] }),
+      item('ABC-62', { priority: 4, updatedAt: old, labels: ['type/idea', 'area/legal'] }),
+      item('ABC-63', { priority: 4, updatedAt: old }),
+    ];
+    // The default list: a security label, bare or as a family's leaf, keeps it open.
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-62', 'ABC-63']);
+    const grm16 = (opts: Parameters<typeof audit>[1]) =>
+      audit(items, opts).failures.find((f) => f.invariant === 'GRM-16')?.detail ?? '';
+    expect(grm16({ now: NOW })).toContain('ABC-62');
+    expect(grm16({ now: NOW })).not.toContain('ABC-60');
+    // A custom list replaces the default.
+    expect(expiredCoulds(items, NOW, 60, ['area/legal']).map((c) => c.identifier)).toEqual([
+      'ABC-60',
+      'ABC-61',
+      'ABC-63',
+    ]);
+    expect(grm16({ now: NOW, neverExpireLabels: ['legal'] })).toContain('ABC-60');
+    expect(grm16({ now: NOW, neverExpireLabels: ['legal'] })).not.toContain('ABC-62');
+    // Matched without case: Security, SECURITY and area/Security all count.
+    const cased = [
+      item('ABC-65', { priority: 4, updatedAt: old, labels: ['type/signal', 'Security'] }),
+      item('ABC-66', { priority: 4, updatedAt: old, labels: ['type/signal', 'Area/SECURITY'] }),
+      item('ABC-67', {
+        priority: 4,
+        updatedAt: old,
+        labels: ['type/task', 'needs-security-design'],
+      }),
+    ];
+    expect(expiredCoulds(cased, NOW)).toEqual([]);
+    expect(expiredCoulds(cased, NOW, 60, ['SECURITY']).map((c) => c.identifier)).toEqual([
+      'ABC-67',
+    ]);
+    // An empty list expires every old Could, as before the setting existed.
+    expect(expiredCoulds(items, NOW, 60, []).map((c) => c.identifier)).toEqual([
+      'ABC-60',
+      'ABC-61',
+      'ABC-62',
+      'ABC-63',
+    ]);
+  });
+
+  it('reads neverExpireLabels from a stdin snapshot', () => {
+    const items = [
+      item('ABC-64', { priority: 4, updatedAt: daysAgo(90), labels: ['type/idea', 'security'] }),
+    ];
+    const run = (neverExpireLabels: unknown) =>
+      runOracle({
+        stdin: JSON.stringify({
+          items,
+          opts: { now: NOW, neverExpireLabels, unnamespacedLabels: ['security'] },
+        }),
+      });
+    expect(run(undefined).status).toBe(0);
+    expect(run([]).status).toBe(1);
+    expect(run(['legal']).status).toBe(1);
+  });
+
+  it('fails GRM-16 naming the item and the closing comment with the configured days', () => {
+    const verdict = audit([item('ABC-40', { priority: 4, updatedAt: daysAgo(61) })], {
+      now: NOW,
+    });
+    expect(verdict.failures.map((f) => f.invariant)).toEqual(['GRM-16']);
+    expect(verdict.failures[0].detail).toContain('ABC-40');
+    expect(verdict.failures[0].detail).toContain(
+      'Closed after 60 days as a Could. Reopen it if it matters.'
+    );
   });
 });

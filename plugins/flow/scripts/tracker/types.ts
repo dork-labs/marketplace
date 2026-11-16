@@ -177,6 +177,12 @@ export interface NewItem {
   /** `0` none … `4` low, as {@link WorkItem.priority}. */
   priority?: 0 | 1 | 2 | 3 | 4;
   /**
+   * The estimate, in the tracker's own shape, as {@link WorkItem.size}: points
+   * (a number) or a t-shirt size (a string). Since contract 3.1.0. An adapter
+   * whose tracker cannot hold the shape given refuses, creating nothing.
+   */
+  size?: number | string;
+  /**
    * An idempotency key. While the item a key made is open, a second create with
    * the key returns it instead of making another; once that item is closed or
    * archived, the key makes a new item. Callers pass what makes the item unique (a self-test
@@ -249,6 +255,12 @@ export type ItemWithComments = WorkItem & {
 export interface CodeAdapter {
   /** The methods this adapter implements. */
   capabilities: readonly Capability[];
+  /**
+   * The contract version the adapter's code declares (`CONTRACT_VERSION`). Set
+   * by flow's loader, never by the adapter; absent for an adapter flow did not
+   * load (a test's), which is then taken to be current.
+   */
+  contractVersion?: string;
   /** The account the adapter acts as. */
   getCurrentUser(): Promise<TrackerAccount>;
   /** Optional bounded, shared display cache. Unsupported adapters refuse timer snapshots. */

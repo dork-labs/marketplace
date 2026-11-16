@@ -39,6 +39,8 @@ Each firing runs CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
 1. Pull once: `flow snapshot --include-closed --out .dork/flow/tmp/groom/backlog.json`.
    Run `flow audit --snapshot .dork/flow/tmp/groom/backlog.json --json`, `flow next --snapshot .dork/flow/tmp/groom/backlog.json --json` and `flow prs --json`.
 2. Report failing invariants with their items, the eligible-pool size, starvation
-   stats and stuck PRs' `prompt`s; anything red: recommend `/flow:groom`.
+   stats and stuck PRs' `prompt`s; anything red: recommend `/flow:groom`. List
+   GRM-16's expired Could items and GRM-2's project-less ones on their own: the full
+   groom closes the first and places the second.
 
 **This tick never writes.** Closing and restructuring need a person.

@@ -301,13 +301,15 @@ issue **or** project). `isPromotableToSubIssue` fires only at
 The whole-tracker health oracle behind `/flow:groom` (`grooming-backlog`).
 Where `validate-adapter.ts` asserts one adapter's normalization is well-formed
 (INV-1..5, per-item shape), `audit-backlog.ts` asserts the **backlog itself**
-is honestly dispatchable: fifteen invariants (GRM-1..15) over a full
+is honestly dispatchable: sixteen invariants (GRM-1..16) over a full
 `getBacklogSnapshot()` — exactly one `type/*` label, a project, and a real
 priority on every open item; size, both engine-read description sections, no
 open blocker, no foreign assignee, a live project, and a `stage/*` label on
 every READY item; no dead project holding open work; namespaced labels; a
 single-valued `agent/*` state machine; no live item with an unresolved
-`duplicateOf`; and state and labels agreeing.
+`duplicateOf`; state and labels agreeing; and no Could (priority 4) left
+untouched for `groom.couldExpiryDays`, 60 days unless set (GRM-16, closed by
+the groom as canceled).
 
 **GRM-15** reports each `STATE-n` breach from `work-state.ts`, the one rule for
 how state and labels fit together: at most one `stage/*` label; none while

@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.0.0. `adapter.ts` beside this file is the code `flow` runs.
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.1.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 
@@ -43,7 +43,7 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 | **`attachEvidence(item, evidence)`**                                      | Link the proof (recording, test summary, PR) per `evidence.attachTo`.                                                                                                                                                                                                                                 |
 | **`needsInput(item, question)`**                                          | Post the question (multiple choice when possible; marker and `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resume only on a member's reply.                                                   |
 | **`link(a, b, type)`**                                                    | A typed relation (`blocks`, `related`, `duplicate`). Never in description prose.                                                                                                                                                                                                                      |
-| **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. Record it in the task's `issue` field in `03-tasks.json`. Description ends with the `agent:provenance` line; a rewrite replaces it.                                           |
+| **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`, with the type, a priority 1-4, `--size`, the parent's project and `## Proof` / `## Done when` sections `flow create` requires. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. Record it in the task's `issue` field in `03-tasks.json`. Description ends with the `agent:provenance` line; a rewrite replaces it.                                           |
 | **`completeProject(project, outcome)`**                                   | `projectUpdate` to `completed` or `canceled`. List its issues live first; any open: **refuse**, naming it (dispatch drops a closed project's issues). Read its state from GraphQL `projects`; unreadable: refuse; already there: no-op. On `mcp`, `save_project` or `update_project`; neither: `cli`. |
 
 ## Calls by hand
@@ -75,6 +75,7 @@ WorkItem {
   stateCategory,   // backlog|unstarted|started|completed|canceled
   stateName,       // display only
   priority, size,  // native fields, never labels; size never t-shirt converted
+  createdAt, updatedAt, // ISO-8601; updatedAt feeds the Could expiry (GRM-16)
   project, parent,
   relations { blocks[], blockedBy[], children[], relatedTo[], duplicateOf? },
   labels[],        // re-namespaced group/leaf
@@ -88,6 +89,15 @@ WorkItem {
 - Labels arrive as bare leaves with a `parent` group; re-namespace to `parent/name` (`ready` → `agent/ready`), or dispatch silently misses them.
 - Compare `size` by ordinal only, never to the threshold word: `sizeOrdinal(8)` and `sizeOrdinal("xl")` are both `4`. Missing is neutral and never promotes.
 - Graceful degradation: a missing field is `undefined` (neutral), never `0`, `null` or `""`. Full rules: SPEC section 2.
+
+## Filing and priority
+
+- The buckets (`<flow-root>/skills/triaging-work/SKILL.md`) are Linear's own priority:
+  Must is High (Urgent only when broken now), Should Medium, Could Low.
+- `flow create` sends `--size` as `estimate`: a whole number of points; the tracker may
+  refuse a value off its scale. A t-shirt size is refused. It finds duplicates in its own backlog pull: no `searchIssues`.
+- A new item lands in Triage. A readied Must moves to Todo; moving a Should or Could to
+  Backlog is an `issueUpdate` of `stateId`, never a reason to triage it again.
 
 ## The state machine
 

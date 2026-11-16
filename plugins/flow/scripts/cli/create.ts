@@ -4,13 +4,26 @@
  * tracker write; the judgment (what to capture, how to title it, which labels)
  * stays in the skill.
  *
- * - Refuses (exit 2) before any tracker call: an empty title or description,
- *   an `agent/*` label other than `agent/from-outside` (a new item is never
- *   ready: readiness is triage's decision), two labels of one group (a tracker applies one per group), a
- *   priority outside 0-4, a malformed key, and a title ending in a capture
- *   tag (`[owner/name#N]`) without `agent/from-outside`.
- * - Needs the `createItem` capability (exit 3 naming it), and
- *   `getBacklogSnapshot` too when there is a `--key`.
+ * - Files only a triaged item (DOR-4546). Refuses (exit 2) before any tracker
+ *   call, naming every problem in one message: a missing title, description,
+ *   `type/*` label, MoSCoW priority 1-4 (0 "none" is refused), size or
+ *   project, a missing proof or done-when section in the description
+ *   (`create-fields.ts`), and every malformed value: an `agent/*` label other
+ *   than `agent/from-outside` (readiness is triage's decision), two labels of
+ *   one group, a bad priority, size, key or `--not-duplicate-of`, and a title
+ *   ending in a capture tag (`[owner/name#N]`) without `agent/from-outside`.
+ *   There is no way around it: an item that cannot say these is not ready to
+ *   file.
+ * - Needs the `createItem` and `getBacklogSnapshot` capabilities (exit 3
+ *   naming them), and an adapter at contract 3.1.0 or later, which can hold
+ *   the size (exit 3 naming the version).
+ * - Checks for a duplicate first: an open item, other than the `--parent`,
+ *   whose title nearly matches (`duplicate-title.ts`) stops the create. It
+ *   exits 5 with `nearMatches` in the JSON (identifier, title, score) and a
+ *   first text line starting `near duplicate:`; a caller keys on those, not
+ *   on the exit code. `--not-duplicate-of <ids>` files anyway once it names
+ *   every near match. Every description gains a line naming the words compared
+ *   and any items ruled out. One backlog pull per create.
  * - Signs the description with the project's identity marker and this
  *   session's provenance line, as `flow done` signs its summary.
  * - With `--key`, the description carries a `<!-- flow-create:key=<k> -->`
@@ -18,7 +31,8 @@
  *   created. Otherwise the key goes to `createItem`, so a retry after a
  *   timeout also gets the first item back. A key names one OPEN item: once its
  *   item is closed, the same key files a new one.
- * - `--dry-run` prints the planned item and writes nothing.
+ * - `--dry-run` runs every check, duplicates included, prints the planned item
+ *   and writes nothing.
  * - A `--description-file` under `.dork/flow/tmp/` is removed once the item
  *   is filed or found, by the scratch-file rule in `scratch-file.ts`.
  *
@@ -35,14 +49,19 @@
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
-import { UsageError } from '../errors.ts';
+import { nearMatches, titleWords, type NearMatch } from '../duplicate-title.ts';
+import { ConfigError, EXIT } from '../errors.ts';
 import { requireCapabilities } from '../tracker/load.ts';
-import type { Capability, NewItem } from '../tracker/types.ts';
+import type { Capability, CodeAdapter, NewItem } from '../tracker/types.ts';
 import { AGENT_FROM_OUTSIDE, labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { missingFields, notDuplicateOf, priorityOf, refusal, sizeOf } from './create-fields.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
 import { signBody } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
+
+/** The first contract version whose `createItem` takes a size. */
+const SIZE_CONTRACT = [3, 1] as const;
 
 /** What a key may hold: it goes into an HTML comment and a tracker id. */
 const KEY_PATTERN = /^[A-Za-z0-9._:/@]+(?:-[A-Za-z0-9._:/@]+)*$/;
@@ -68,61 +87,153 @@ export function keyMarker(key: string): string {
 const CAPTURE_TAG = /\[[^[\]]*\/[^[\]]*#\d+\]\s*$/;
 
 /**
- * The labels, each once, refused when one is `agent/*` (other than
- * `agent/from-outside`) or two share a group.
+ * The labels, each once, recording a problem when one is empty, `agent/*`
+ * (other than `agent/from-outside`), or shares a group with another.
  */
-function labelList(ctx: VerbContext): string[] {
+function labelList(ctx: VerbContext, problems: string[]): string[] {
   const labels = [...new Set(ctx.args.repeated?.label ?? [])];
   const groups = new Map<string, string>();
   for (const label of labels) {
-    if (label.trim() === '') throw new UsageError('a --label is empty');
+    if (label.trim() === '') {
+      problems.push('a --label is empty');
+      continue;
+    }
     const group = labelGroup(label);
     // The one exception: an item captured from outside the team carries
     // agent/from-outside, which keeps it from ever being readied unattended.
     if (group === 'agent' && label !== AGENT_FROM_OUTSIDE) {
-      throw new UsageError(
+      problems.push(
         `a new item never carries an agent/* label ("${label}"); readiness is triage's decision`
       );
     }
     if (group === null) continue;
     const other = groups.get(group);
     if (other !== undefined) {
-      throw new UsageError(
+      problems.push(
         `"${other}" and "${label}" are both in the ${group} group, and an item takes one label per group`
       );
     }
     groups.set(group, label);
   }
-  return labels;
+  return labels.filter((label) => label.trim() !== '');
 }
 
-/** `--priority` as 0-4, when given. */
-function priorityOf(ctx: VerbContext): NewItem['priority'] {
-  const raw = ctx.args.flags.priority;
-  if (typeof raw !== 'string') return undefined;
-  if (!/^[0-4]$/.test(raw)) {
-    throw new UsageError(`--priority must be 0 (none) to 4 (low), not "${raw}"`);
+/** A string flag's value, when given. */
+function stringFlag(ctx: VerbContext, name: string): string | undefined {
+  const raw = ctx.args.flags[name];
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+/**
+ * The line every filed description gains, saying what the duplicate check
+ * compared and which near matches the filer ruled out with
+ * `--not-duplicate-of`, so a reader can see the search was done.
+ *
+ * @param title - The new title.
+ * @param ids - The items `--not-duplicate-of` named.
+ * @returns The line.
+ */
+export function duplicateLine(title: string, ids: readonly string[]): string {
+  const words = [...titleWords(title)];
+  const compared =
+    words.length === 0
+      ? 'Duplicate check: the title has no words to compare with open items'
+      : `Duplicate check: open item titles compared on "${words.join(' ')}"`;
+  return ids.length === 0 ? `${compared}.` : `${compared}; not a duplicate of ${ids.join(', ')}.`;
+}
+
+/**
+ * The open near matches of a new title that `--not-duplicate-of` does not
+ * name, best first. The parent is left out: a sub-item shares its words.
+ *
+ * @param title - The new title.
+ * @param open - The open items.
+ * @param checked - The items `--not-duplicate-of` named.
+ * @param parent - The `--parent`, when given.
+ * @returns The unchecked near matches.
+ */
+function uncheckedMatches(
+  title: string,
+  open: readonly { identifier: string; title: string }[],
+  checked: readonly string[],
+  parent: string | undefined
+): NearMatch[] {
+  const skip = new Set([...checked, ...(parent === undefined ? [] : [parent.toUpperCase()])]);
+  return nearMatches(title, open).filter((match) => !skip.has(match.identifier.toUpperCase()));
+}
+
+/**
+ * The result a near duplicate stops the create with (exit 5): `nearMatches`
+ * in the JSON, and a first text line no caller can mistake for another
+ * precondition.
+ *
+ * @param matches - The unchecked near matches (not empty).
+ * @returns The verb result.
+ */
+function nearDuplicate(matches: readonly NearMatch[]): VerbResult {
+  const shown = matches.slice(0, 5);
+  const ids = matches.map((match) => match.identifier).join(',');
+  const message =
+    `near duplicate: ${shown.map((m) => `${m.identifier} - ${m.title}`).join('; ')}` +
+    `${matches.length > shown.length ? ` (and ${matches.length - shown.length} more)` : ''}. ` +
+    `The same work: comment on it with what is new, and file nothing. Different work: ` +
+    `file again with --not-duplicate-of ${ids}. Nothing was filed.`;
+  return {
+    exitCode: EXIT.precondition,
+    json: {
+      ok: false,
+      created: false,
+      identifier: null,
+      nearMatches: matches.map(({ identifier, title, score }) => ({
+        identifier,
+        title,
+        score: Math.round(score * 100) / 100,
+      })),
+      message,
+    },
+    text: message,
+  };
+}
+
+/**
+ * Refuse a size an adapter below contract 3.1.0 would drop.
+ *
+ * @param adapter - The loaded adapter.
+ * @throws {ConfigError} Naming the version, when it is older.
+ */
+function requireSizeContract(adapter: CodeAdapter): void {
+  const version = adapter.contractVersion;
+  if (version === undefined) return;
+  const [major, minor] = version.split('.').map(Number);
+  if (major > SIZE_CONTRACT[0] || (major === SIZE_CONTRACT[0] && minor >= SIZE_CONTRACT[1])) {
+    return;
   }
-  return Number(raw) as NewItem['priority'];
+  throw new ConfigError(
+    `the tracker adapter targets contract ${version}, which cannot file an item with a size (contract ${SIZE_CONTRACT.join('.')}.0); regenerate it with the building-adapters skill`
+  );
 }
 
-/** `--key`, checked, when given. */
-function keyOf(ctx: VerbContext): string | undefined {
+/** `--key`, when given and well formed. */
+function keyOf(ctx: VerbContext, problems: string[]): string | undefined {
   const raw = ctx.args.flags.key;
   if (typeof raw !== 'string') return undefined;
   if (raw.length > KEY_MAX || !KEY_PATTERN.test(raw)) {
-    throw new UsageError(
+    problems.push(
       `--key takes letters, digits and . _ : / @, joined by single hyphens, up to ${KEY_MAX} characters; "${raw}" is not one`
     );
+    return undefined;
   }
   return raw;
 }
 
-/** One optional string flag, refused when given empty. */
-function optional(ctx: VerbContext, name: string): string | undefined {
+/** One optional string flag, recording a problem when it is given empty. */
+function optional(ctx: VerbContext, name: string, problems: string[]): string | undefined {
   const raw = ctx.args.flags[name];
   if (typeof raw !== 'string') return undefined;
-  if (raw.trim() === '') throw new UsageError(`--${name} is empty`);
+  if (raw.trim() === '') {
+    problems.push(`--${name} is empty`);
+    return undefined;
+  }
   return raw.trim();
 }
 
@@ -133,54 +244,76 @@ function optional(ctx: VerbContext, name: string): string | undefined {
  * @returns Whether an item was created, and its identifier and url.
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
-  // Every refusal below comes before the config, the adapter or any tracker call.
+  // Every refusal below comes before the config, the adapter or any tracker
+  // call, and all of them come in one message.
+  const problems: string[] = [];
   const rawTitle = ctx.args.flags.title;
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-  if (title === '') throw new UsageError('pass a non-empty --title');
   const given = flagText(ctx, {
     inline: 'description',
     file: 'description-file',
     what: 'description',
   });
-  if (given === undefined) {
-    throw new UsageError('pass --description <text> or --description-file <path>');
-  }
-  const { text, scratch } = given;
-  const description = text.trimEnd();
-  if (description.trim() === '') throw new UsageError('the description is empty');
-  const labels = labelList(ctx);
+  const scratch = given?.scratch;
+  const text = given?.text.trimEnd();
+  const description = text === undefined || text.trim() === '' ? undefined : text;
+  const labels = labelList(ctx, problems);
   if (CAPTURE_TAG.test(title) && !labels.includes(AGENT_FROM_OUTSIDE)) {
-    throw new UsageError(
+    problems.push(
       `a title ending in a capture tag ("${title.match(CAPTURE_TAG)?.[0]}") is an item captured from outside the team: add --label ${AGENT_FROM_OUTSIDE}`
     );
   }
-  const priority = priorityOf(ctx);
-  const key = keyOf(ctx);
-  const project = optional(ctx, 'for-project');
-  const parent = optional(ctx, 'parent');
+  const rawPriority = stringFlag(ctx, 'priority');
+  const rawSize = stringFlag(ctx, 'size');
+  const priority = priorityOf(rawPriority, problems);
+  const size = sizeOf(rawSize, problems);
+  const key = keyOf(ctx, problems);
+  const project = optional(ctx, 'for-project', problems);
+  const parent = optional(ctx, 'parent', problems);
+  const checked = notDuplicateOf(ctx.args.repeated?.['not-duplicate-of'] ?? [], problems);
+  problems.push(
+    ...missingFields({
+      title,
+      description,
+      labels,
+      priority: rawPriority,
+      size: rawSize,
+      project: stringFlag(ctx, 'for-project'),
+    })
+  );
+  // An empty `problems` already means the description and project are set;
+  // naming them here narrows their types.
+  if (problems.length > 0 || description === undefined || project === undefined) {
+    throw refusal(problems);
+  }
 
   const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
   const adapter = await ctx.adapter();
-  const needed: Capability[] = ['createItem'];
-  if (key !== undefined) needed.push('getBacklogSnapshot');
+  const needed: Capability[] = ['createItem', 'getBacklogSnapshot'];
   requireCapabilities(adapter, needed);
+  requireSizeContract(adapter);
 
-  const body = key === undefined ? description : `${description}\n\n${keyMarker(key)}`;
+  const parts = [description];
+  parts.push(duplicateLine(title, checked));
+  if (key !== undefined) parts.push(keyMarker(key));
+  const body = parts.join('\n\n');
   const spec: NewItem = {
     title,
     description: signBody(body, config.identity.marker, sessionProvenance(ctx)),
     labels,
-    ...(project === undefined ? {} : { project }),
+    project,
+    priority,
+    size,
     ...(parent === undefined ? {} : { parent }),
-    ...(priority === undefined ? {} : { priority }),
     ...(key === undefined ? {} : { key }),
   };
 
-  // With a key: the open items, to return one already filed with it.
-  let open: readonly { identifier: string; title: string; description?: string }[] = [];
+  // The open items: to return one a key already filed, and to find duplicates.
+  const open: readonly { identifier: string; title: string; description?: string }[] = (
+    await adapter.getBacklogSnapshot()
+  ).items;
   if (key !== undefined) {
     const marker = keyMarker(key);
-    open = (await adapter.getBacklogSnapshot()).items;
     const match = open.find((item) =>
       (item.description ?? '').split('\n').some((line) => line.trim() === marker)
     );
@@ -200,6 +333,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       };
     }
   }
+  const matches = uncheckedMatches(title, open, checked, parent);
+  if (matches.length > 0) return nearDuplicate(matches);
 
   if (ctx.dryRun) {
     return {

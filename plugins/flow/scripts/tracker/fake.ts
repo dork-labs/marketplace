@@ -48,7 +48,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '3.0.0';
+export const FAKE_CONTRACT_VERSION = '3.1.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -442,8 +442,9 @@ export class FakeTracker {
 
   /**
    * Create an item as Linear does (recorded 2026-09-26): it lands in the team's
-   * `Triage` state (backlog category), with the labels, project, parent and
-   * priority asked for. A label the team does not have is refused and nothing is
+   * `Triage` state (backlog category), with the labels, project, parent,
+   * priority and size asked for (a number or a t-shirt string, both of which
+   * the fake holds), and `createdAt` and `updatedAt` set to now. A label the team does not have is refused and nothing is
    * created; a missing or foreign project or parent is a precondition failure.
    */
   private createItem(spec: NewItem): CreatedItem {
@@ -547,11 +548,13 @@ export class FakeTracker {
       stateCategory: triage.category,
       stateName: triage.name,
       ...(spec.priority !== undefined ? { priority: spec.priority } : {}),
+      ...(spec.size !== undefined ? { size: spec.size } : {}),
       ...(project !== undefined ? { project: structuredClone(project) } : {}),
       parent: parent?.identifier ?? null,
       relations: { blocks: [], blockedBy: [], children: [], relatedTo: [] },
       labels,
       createdAt: this.now().toISOString(),
+      updatedAt: this.now().toISOString(),
     };
     this.backlog.items.push(item);
     parent?.relations.children.push(identifier);

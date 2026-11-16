@@ -776,11 +776,29 @@ export const BareLabelSchema = z.string().regex(/^[^/\s](?:[^/]*[^/\s])?$/, {
  * Backlog-groom policy (`/flow:groom`, `audit-backlog.ts`). `unnamespacedLabels`
  * lists bare labels the team keeps on purpose (say, one mirrored from another
  * tool), so GRM-12 skips exactly those and still fails every other bare label.
+ * `couldExpiryDays` is how long a waiting Could may go untouched before GRM-16
+ * proposes closing it, and `neverExpireLabels` the labels that keep a Could
+ * open however old it is, so a security finding ranked Could is never closed
+ * for being old (DOR-4546).
  */
 export const GroomSchema = z
   .object({
     /** Bare labels GRM-12 accepts. Default: none. */
     unnamespacedLabels: z.array(BareLabelSchema).default([]),
+    /** Days a waiting Could (priority 4) may go untouched before the groom closes it. Default: 60. */
+    couldExpiryDays: z.number().int().positive().default(60),
+    /**
+     * Labels that keep a Could from ever expiring, matched without case, whole
+     * or as a family's leaf (`security` matches `Security` and `area/security`).
+     * Default: `["security", "needs-security-design"]`; `[]` lets every Could expire.
+     */
+    neverExpireLabels: z
+      .array(z.string().regex(/\S/, { message: 'must be a label name, not empty or blank' }))
+      // Zod's JSON Schema has no uniqueItems; the parse refuses a repeat, in any case.
+      .refine((names) => new Set(names.map((name) => name.toLowerCase())).size === names.length, {
+        message: 'must not list a label twice',
+      })
+      .default(['security', 'needs-security-design']),
   })
   .prefault({});
 

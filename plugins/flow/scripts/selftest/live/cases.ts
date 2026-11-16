@@ -7,18 +7,17 @@
  * fake adapter's skill routes every tracker read and write through it. So:
  *
  * - `capture` checks the spec's outcome: exactly one new item (`flow create`),
- *   with an `origin/*` label and no `agent/ready`.
- * - `triage` checks the one write `flow triage` makes: the item ends ready
- *   (with a `stage/*` label) or parked on exactly one question, never both, and
- *   nothing else in the backlog changes. flow has no command that sets an
- *   item's type or priority (no adapter capability writes them), so the oracle
- *   does not ask for them; the skill still does that through a real adapter.
+ *   with an `origin/*` label, no `agent/ready`, and the fields a triaged item
+ *   is filed with (a priority 1-4, a size and the project, DOR-4546).
+ * - `triage` gives a Should already in its project and checks it is left in
+ *   the backlog, with no `agent/*` label, and that nothing else changes. (flow
+ *   has no command that sets a priority, so a case cannot ask for one to be
+ *   set; the item arrives bucketed, as `flow create` now files every item.)
  * - `done/follow-up` checks what closing-work promises: the item closes, one
  *   follow-up is filed (`flow create`) with a type, a priority, the project and
- *   `origin/from-agent`, and triage then readies it only when it passes the
- *   groom readiness invariants, or else parks it on one question. `flow create`
- *   cannot size an item, so on the fake a ready follow-up fails GRM-4: the
- *   honest outcome there is a parked one.
+ *   `origin/from-agent`, and triage then routes it by bucket: a Must is readied
+ *   only when it passes the groom readiness invariants, else parked on one
+ *   question; a Should or Could stays in the backlog unreadied.
  * - `decompose` and `done` run as the spec describes them.
  *
  * @module @dorkos/flow/selftest/live/cases
@@ -142,16 +141,41 @@ function notDone(store: FakeBacklog, identifier: string): string | undefined {
 }
 
 /**
- * Why a triaged item is not in one honest outcome, or `undefined`: ready with
- * a `stage/*` label, or parked with exactly one new comment (the question).
+ * Why a triaged item is not in one honest outcome, or `undefined` (DOR-4546):
+ *
+ * - **ready**, with a `stage/*` label: a Must (priority 1 or 2) only;
+ * - **parked** with exactly one new comment (the question), any bucket;
+ * - **bucketed**: a Should or Could (priority 3 or 4) in a project, left in
+ *   the backlog with no `agent/*` label. A Must (priority 1 or 2) is never
+ *   left that way: it is readied, or parked when it is too thin.
  */
-function notTriaged(before: FakeBacklog, after: FakeBacklog, identifier: string) {
-  const labels = find(after, identifier)?.labels ?? [];
+export function notTriaged(
+  before: FakeBacklog,
+  after: FakeBacklog,
+  identifier: string
+): string | undefined {
+  const item = find(after, identifier);
+  const labels = item?.labels ?? [];
   const ready = labels.includes('agent/ready');
   const parked = labels.includes('agent/needs-input');
+  const priority = item?.priority;
+  const must = priority === 1 || priority === 2;
+  const later = priority === 3 || priority === 4;
   if (ready && parked) return `${identifier} carries both agent/ready and agent/needs-input`;
   if (!ready && !parked) {
-    return `${identifier} was neither readied nor parked (labels: ${labels.join(', ') || 'none'})`;
+    if (must) {
+      return `${identifier} is a Must (priority ${priority}) but was neither readied nor parked`;
+    }
+    const bucketed =
+      later &&
+      item?.project !== undefined &&
+      item.stateCategory === 'backlog' &&
+      !labels.some((label) => label.startsWith('agent/'));
+    if (bucketed) return undefined;
+    return `${identifier} was neither readied, parked, nor left in the backlog as a Should or Could in a project (labels: ${labels.join(', ') || 'none'})`;
+  }
+  if (ready && !must) {
+    return `${identifier} was readied, but only a Must is (priority ${priority ?? 'none'})`;
   }
   if (ready && !labels.some((label) => label.startsWith('stage/'))) {
     return `${identifier} is ready with no stage/* label to start at`;
@@ -231,6 +255,13 @@ export const LIVE_CASES: readonly LiveCase[] = [
       if (captured.labels.includes('agent/ready')) {
         return `${captured.identifier} carries agent/ready: readiness is triage's decision`;
       }
+      if (typeof captured.priority !== 'number' || captured.priority < 1) {
+        return `${captured.identifier} has no priority`;
+      }
+      if (captured.size === undefined) return `${captured.identifier} has no size`;
+      if (captured.project?.id !== PROJECT.id) {
+        return `${captured.identifier} is not in ${PROJECT.name}`;
+      }
       return undefined;
     },
   },
@@ -248,6 +279,9 @@ export const LIVE_CASES: readonly LiveCase[] = [
         type: 'idea',
         stateCategory: 'backlog',
         stateName: 'Triage',
+        // A Should already in its project: triaged as it was filed.
+        priority: 3,
+        project: PROJECT,
         labels: ['type/idea', 'origin/human'],
       }),
       item('FAKE-2', {
@@ -273,6 +307,12 @@ export const LIVE_CASES: readonly LiveCase[] = [
         if (!isDeepStrictEqual(now, was) || newComments(before, after, was.identifier) !== 0) {
           return `${was.identifier} changed, but the triage was of FAKE-1 only`;
         }
+      }
+      // FAKE-1 was filed as a Should in its project: the honest outcome is to
+      // leave it in the backlog, unreadied and unparked, for the groom.
+      const agent = (find(after, 'FAKE-1')?.labels ?? []).filter((l) => l.startsWith('agent/'));
+      if (agent.length > 0) {
+        return `FAKE-1 is a Should already in its project and stays in the backlog unreadied, but it carries ${agent.join(', ')}`;
       }
       return notTriaged(before, after, 'FAKE-1');
     },

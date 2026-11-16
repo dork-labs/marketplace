@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.0.0`) over **one transport - the in-session Linear MCP
+> (contract version `3.1.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -140,6 +140,8 @@ literal `agent/ready`): re-namespacing is mandatory, not cosmetic.
     `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)` - because
     the threshold is a t-shirt word and the estimate may be a number. Never write
     `size >= "xl"`.
+- **`updatedAt`** (contract 3.1.0) <- Linear's `updatedAt`, ISO-8601, as given.
+  Missing -> `undefined`. The groom's Could expiry (GRM-16) reads it.
 
 ---
 
@@ -340,8 +342,10 @@ The elicitation primitive - **four atomic effects, in order**:
 #### `createSubIssue(parent, spec): WorkItem`
 
 - **Call.** `mcp__plugin_linear_linear__save_issue` with `parentId = parent.id`,
-  `title`, `description`, the `type/*` label for `spec.type`, and `estimate` for
-  `spec.size`.
+  `title`, `description`, the `type/*` label for `spec.type`, `estimate` for
+  `spec.size`, the parent's project and a priority 1-4. `flow create`, which
+  normally files it, refuses an item without a type, priority, size, project,
+  `## Proof` and `## Done when` (contract 3.1.0).
 - **Normalize.** Return the created issue **normalized as a `WorkItem`** so the
   caller records its `identifier` as the task's canonical home (the per-task
   `issue` field in `03-tasks.json`). Sub-issue promotion fires only when `size`
@@ -448,7 +452,7 @@ provably closed), **INV-4** (labels re-namespaced into the generic families),
 these reads never trust anyone, the trusted example INV-6's fixture needs comes
 from a `cli` read), and **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `3.0.0`, and **declares
+pre-filtered). It targets contract version `3.1.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.

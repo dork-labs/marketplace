@@ -74,6 +74,12 @@ export const VERBS: readonly VerbDefinition[] = [
         description: 'Also pull closed items, as titles.',
       },
       {
+        name: 'untriaged',
+        kind: 'boolean',
+        description:
+          'Keep only the items the daily triage takes up: waiting (backlog or unstarted), no agent/* label, no assignee but the agent, and no priority 1-4, no project, or a Must that is not type/meta.',
+      },
+      {
         name: 'out',
         kind: 'string',
         value: 'file',
@@ -465,7 +471,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'create',
     summary: 'File a new item in the tracker.',
     description:
-      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label (except agent/from-outside, for an item captured from outside the team), two labels in one group, a priority outside 0-4, and a title ending in a capture tag ([owner/name#N]) without --label agent/from-outside. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
+      'File one new, already-triaged item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call (exit 2), naming every problem at once: no title, description, type/* label, priority 1-4 (MoSCoW: 1 or 2 Must, 3 Should, 4 Could; 0 is refused), --size, --for-project, or "## Proof" and "## Done when" sections in the description; an agent/* label (except agent/from-outside, for an item captured from outside the team); two labels in one group; a malformed value; a title ending in a capture tag ([owner/name#N]) without --label agent/from-outside. Then reads the open items: a near-duplicate title (the --parent aside) stops it with nearMatches in the JSON and a first line starting "near duplicate:" (exit 5), unless --not-duplicate-of names every near match. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem and getBacklogSnapshot capabilities and an adapter at contract 3.1.0 or later (exit 3).',
     common: ['project', 'dry-run', 'session'],
     flags: [
       { name: 'title', kind: 'string', value: 'text', description: 'The title.' },
@@ -487,10 +493,29 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'for-project',
         kind: 'string',
         value: 'name|id',
-        description: 'File it in this tracker project (its id or exact name).',
+        description: 'File it in this tracker project (its id or exact name). Required.',
       },
       { name: 'parent', kind: 'string', value: 'id', description: 'The parent item, e.g. DOR-12.' },
-      { name: 'priority', kind: 'string', value: '0-4', description: '0 none, 1 urgent … 4 low.' },
+      {
+        name: 'priority',
+        kind: 'string',
+        value: '1-4',
+        description: 'MoSCoW on the tracker priority: 1 or 2 Must, 3 Should, 4 Could.',
+      },
+      {
+        name: 'size',
+        kind: 'string',
+        value: 'points|xs-xxl',
+        description:
+          "The estimate on the tracker's own scale: whole points, or a t-shirt size where the tracker uses them.",
+      },
+      {
+        name: 'not-duplicate-of',
+        kind: 'string',
+        value: 'ids',
+        repeatable: true,
+        description: 'Near matches you checked and that are different work, e.g. DOR-12,DOR-40.',
+      },
       {
         name: 'key',
         kind: 'string',

@@ -1,6 +1,6 @@
 ---
 name: flow-command-capture
-description: "Capture a thought as a low-commitment work item (the /flow CAPTURE stage). Use for /flow:capture on skill-only runtimes, including Codex, OpenCode and Dork."
+description: "Capture a thought as a triaged work item (the /flow CAPTURE stage). Use for /flow:capture on skill-only runtimes, including Codex, OpenCode and Dork."
 ---
 
 # /flow:capture

@@ -196,6 +196,12 @@ export interface WorkItem {
    * neutral age tier.
    */
   createdAt?: string;
+  /**
+   * ISO-8601 timestamp of the item's last change, when the tracker says
+   * (contract 3.1.0). The groom's Could expiry (GRM-16) reads it; absent, it
+   * falls back to {@link createdAt}.
+   */
+  updatedAt?: string;
 }
 
 /**

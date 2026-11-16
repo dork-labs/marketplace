@@ -36,7 +36,7 @@ The read stays pending until `flow intake done --json`, so a stopped run rereads
 Triage captures each issue:
 
 1. Skip it when an open item's title ends with its tag, `[owner/name#N]`.
-2. Else `flow create` it with `--label type/idea --label agent/from-outside`: your own imperative title ending in the tag, the problem in brief, and the issue's link. Never paste the body.
+2. Else `flow create` it with `--label type/idea --label agent/from-outside`, as capturing-work steps 3 and 4 say (`nearMatches` included): your own imperative title ending in the tag, the problem in brief, the issue's link as `## Proof`, and `## Done when` in your own words. Never paste the body.
 3. Never reply to, label or close the issue.
 4. Then `flow intake done --json`. Capture is the run's last tracker write.
 

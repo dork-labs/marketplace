@@ -128,6 +128,8 @@ const READ_EXACT = [
   'selftest --json',
   'retro --json',
   'snapshot --json',
+  // DOR-4546: the daily triage's selection; it refuses --out, so it writes nothing.
+  'snapshot --json --untriaged',
   'snapshot --include-closed --out .dork/flow/tmp/groom/backlog.json',
   // DOR-3258: one fixed `gh issue list` per configured repo, and flow's own
   // mark file. The repos come from config, never from an argument.

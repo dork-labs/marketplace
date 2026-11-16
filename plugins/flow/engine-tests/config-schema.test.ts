@@ -824,13 +824,21 @@ describe('FlowConfigSchema — the groom block', () => {
   // Purpose: with no groom block, GRM-12 exempts nothing; a default that
   // quietly allowed some label would hide bare tracker labels from the audit.
   it('defaults unnamespacedLabels to an empty list', () => {
-    expect(FlowConfigSchema.parse({}).groom).toEqual({ unnamespacedLabels: [] });
+    expect(FlowConfigSchema.parse({}).groom).toEqual({
+      unnamespacedLabels: [],
+      couldExpiryDays: 60,
+      neverExpireLabels: ['security', 'needs-security-design'],
+    });
   });
 
   // Purpose: a valid bare label reads back through Zod and the JSON Schema.
   it('accepts bare labels', () => {
     const groom = { unnamespacedLabels: ['cloud-contract', 'Needs Design'] };
-    expect(FlowConfigSchema.parse({ groom }).groom).toEqual(groom);
+    expect(FlowConfigSchema.parse({ groom }).groom).toEqual({
+      ...groom,
+      couldExpiryDays: 60,
+      neverExpireLabels: ['security', 'needs-security-design'],
+    });
     expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(true);
   });
 
@@ -845,5 +853,52 @@ describe('FlowConfigSchema — the groom block', () => {
     const groom = { unnamespacedLabels: [entry] };
     expect(FlowConfigSchema.safeParse({ groom }).success).toBe(false);
     expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(false);
+  });
+});
+
+describe('groom.couldExpiryDays (DOR-4546)', () => {
+  // Purpose: how long a waiting Could may sit untouched is the team's call,
+  // 60 days unless set, and only a positive whole number of days is a setting.
+  it('defaults to 60', () => {
+    expect(FlowConfigSchema.parse({}).groom.couldExpiryDays).toBe(60);
+  });
+
+  it('takes a positive whole number', () => {
+    expect(FlowConfigSchema.parse({ groom: { couldExpiryDays: 30 } }).groom.couldExpiryDays).toBe(
+      30
+    );
+  });
+
+  it.each([0, -1, 1.5, '60', null])('refuses %j', (value) => {
+    expect(FlowConfigSchema.safeParse({ groom: { couldExpiryDays: value } }).success).toBe(false);
+  });
+});
+
+describe('groom.neverExpireLabels (DOR-4546)', () => {
+  // Purpose: a Could carrying one of these labels never expires, so a security
+  // finding ranked Could is never closed for being old. "security" unless set.
+  it('defaults to ["security", "needs-security-design"]', () => {
+    expect(FlowConfigSchema.parse({}).groom.neverExpireLabels).toEqual([
+      'security',
+      'needs-security-design',
+    ]);
+  });
+
+  it('takes a list of label names, and an empty list', () => {
+    const parse = (neverExpireLabels: unknown) =>
+      FlowConfigSchema.parse({ groom: { neverExpireLabels } }).groom.neverExpireLabels;
+    expect(parse(['security', 'area/legal'])).toEqual(['security', 'area/legal']);
+    expect(parse([])).toEqual([]);
+  });
+
+  it.each([
+    ['an empty name', ['']],
+    ['a blank name', ['  ']],
+    ['a duplicate', ['security', 'security']],
+    ['a duplicate in another case', ['security', 'Security']],
+    ['a non-string', [7]],
+    ['a string instead of a list', 'security'],
+  ])('refuses %s', (_what, value) => {
+    expect(FlowConfigSchema.safeParse({ groom: { neverExpireLabels: value } }).success).toBe(false);
   });
 });

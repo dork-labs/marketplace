@@ -1,7 +1,7 @@
 /*
  * audit-backlog.ts - the /flow backlog-groom invariant oracle.
  *
- * Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
+ * Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
  * NORMALIZED WorkItems - the whole live backlog as the adapter's
  * `getBacklogSnapshot()` verb emits it. Where validate-adapter.ts asks "did the
  * adapter normalize each item correctly?", this oracle asks "is the backlog
@@ -53,7 +53,7 @@ const AGENT_READY_LABEL = 'agent/ready';
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`GRM-1` .. `GRM-15`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`GRM-1` .. `GRM-16`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -73,6 +73,12 @@ interface AuditOpts {
   agentIdentity?: string;
   /** Bare labels the team keeps on purpose (config `groom.unnamespacedLabels`); GRM-12 skips them. */
   unnamespacedLabels?: readonly string[];
+  /** The time GRM-16 measures an item's age against, ISO-8601. Default: the wall clock. */
+  now?: string;
+  /** Days a waiting Could may go untouched (config `groom.couldExpiryDays`). Default: 60. */
+  couldExpiryDays?: number;
+  /** Labels that keep a Could from expiring (config `groom.neverExpireLabels`). Default: `["security", "needs-security-design"]`. */
+  neverExpireLabels?: readonly string[];
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -85,7 +91,7 @@ interface HarnessArgs {
 
 const HELP = `audit-backlog - the /flow backlog-groom invariant oracle.
 
-Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
+Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
 NORMALIZED WorkItems - the whole live backlog, as the adapter's
 getBacklogSnapshot() verb emits it. Run by the grooming-backlog skill before
 and after a groom; runnable standalone for a read-only health check.
@@ -96,7 +102,9 @@ Usage:
   node --experimental-strip-types scripts/audit-backlog.ts --help
 
 Fixture: a JSON array of WorkItems, or
-  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."] } }.
+  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."],
+    "now": "<ISO>", "couldExpiryDays": 60,
+    "neverExpireLabels": ["security", "needs-security-design"] } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -125,6 +133,13 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-15  state coherence: state, agent/* and stage/* agree (STATE-1 .. STATE-5):
           at most one stage/* label, none on a started item, agent/claimed only
           when started, no agent/ready when started, no agent/completed when open
+  GRM-16  no waiting Could (priority 4; backlog or unstarted, not agent/claimed)
+          untouched for opts.couldExpiryDays (default 60) or more days (updatedAt,
+          else createdAt, against opts.now): close it as canceled with the comment
+          "Closed after <N> days as a Could. Reopen it if it matters." A Could
+          carrying a label in opts.neverExpireLabels (default ["security",
+          "needs-security-design"], matched without case, whole or as a
+          family's leaf) never expires.
 `;
 
 /** True for a non-array, non-null object. */
@@ -368,6 +383,103 @@ function checkGrm14(items: readonly unknown[]): string[] {
   return details;
 }
 
+/** The days a Could (priority 4) may sit untouched before the groom closes it, unless configured. */
+const COULD_EXPIRY_DAYS = 60;
+
+/** The labels that keep a Could from expiring, unless configured: security work is never closed for being old. */
+const NEVER_EXPIRE_LABELS: readonly string[] = ['security', 'needs-security-design'];
+
+/**
+ * Whether an item carries one of the never-expire labels, matched without
+ * case, whole or as a family's leaf (`security` matches `Security` and
+ * `area/security`).
+ */
+function neverExpires(labels: readonly string[], names: readonly string[]): boolean {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  return labels.some((raw) => {
+    const label = raw.toLowerCase();
+    const leaf = label.includes('/') ? label.slice(label.indexOf('/') + 1) : label;
+    return wanted.has(label) || wanted.has(leaf);
+  });
+}
+
+/**
+ * The comment the groom closes an expired Could with.
+ *
+ * @param days - The configured expiry, in days.
+ * @returns The comment.
+ */
+function couldExpiryComment(days: number): string {
+  return `Closed after ${days} days as a Could. Reopen it if it matters.`;
+}
+
+/** One day, in milliseconds. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** An open Could item past its expiry, as {@link expiredCoulds} reports it. */
+interface ExpiredCould {
+  /** The item's human key. */
+  identifier: string;
+  /** Its title. */
+  title: string;
+  /** Whole days since it was last touched. */
+  days: number;
+}
+
+/**
+ * The waiting Could (priority 4) items, in a `backlog` or `unstarted` state and
+ * not `agent/claimed`, untouched for `days` or more days: the ones the groom
+ * proposes to close as canceled with {@link couldExpiryComment}. A Could
+ * carrying one of `keep` (by {@link neverExpires}) never expires. "Touched" is the tracker's `updatedAt`, else
+ * `createdAt`; an item with neither, or an unreadable date, never expires
+ * (missing is neutral). Every other priority is left alone.
+ *
+ * @param items - The snapshot's normalized WorkItems.
+ * @param now - The time to measure against, ISO-8601. Default: the wall clock.
+ * @param days - The expiry, in days. Default: {@link COULD_EXPIRY_DAYS}.
+ * @param keep - The never-expire labels. Default: {@link NEVER_EXPIRE_LABELS}.
+ * @returns The expired items, in snapshot order.
+ */
+function expiredCoulds(
+  items: readonly unknown[],
+  now?: string,
+  days: number = COULD_EXPIRY_DAYS,
+  keep: readonly string[] = NEVER_EXPIRE_LABELS
+): ExpiredCould[] {
+  const at = now === undefined ? Date.now() : Date.parse(now);
+  const expired: ExpiredCould[] = [];
+  items.forEach((item, index) => {
+    if (!isPlainObject(item) || item.priority !== 4) return;
+    // Waiting work only: a started or claimed Could is being worked on.
+    if (item.stateCategory !== 'backlog' && item.stateCategory !== 'unstarted') return;
+    if (labelsOf(item).includes('agent/claimed')) return;
+    if (neverExpires(labelsOf(item), keep)) return;
+    let touched: string | undefined;
+    if (isNonEmptyString(item.updatedAt)) touched = item.updatedAt;
+    else if (isNonEmptyString(item.createdAt)) touched = item.createdAt;
+    if (touched === undefined) return;
+    const since = Date.parse(touched);
+    if (!Number.isFinite(since) || !Number.isFinite(at)) return;
+    const untouched = Math.floor((at - since) / DAY_MS);
+    if (untouched < days) return;
+    expired.push({
+      identifier: itemLabel(item, index),
+      title: typeof item.title === 'string' ? item.title : '',
+      days: untouched,
+    });
+  });
+  return expired;
+}
+
+/** GRM-16 - no waiting Could untouched for the configured days or more. */
+function checkGrm16(items: readonly unknown[], opts: AuditOpts): string[] {
+  const days = opts.couldExpiryDays ?? COULD_EXPIRY_DAYS;
+  return expiredCoulds(items, opts.now, days, opts.neverExpireLabels ?? NEVER_EXPIRE_LABELS).map(
+    (could) =>
+      `${could.identifier} is a Could untouched for ${could.days} days; close it as canceled with the comment "${couldExpiryComment(days)}"`
+  );
+}
+
 /** One groom invariant: its id, a one-line summary, and the check that asserts it. */
 interface Invariant {
   /** The invariant identifier, e.g. `GRM-4`. */
@@ -403,6 +515,7 @@ const INVARIANTS: readonly Invariant[] = [
     summary: 'state, the agent/* label and the stage/* label agree',
     check: checkGrm15,
   },
+  { id: 'GRM-16', summary: 'no waiting Could untouched past its expiry', check: checkGrm16 },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -518,6 +631,19 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
           isNonEmptyString(label) && !label.includes('/') && label.trim() === label
       );
     }
+    if (isPlainObject(parsed.opts) && isNonEmptyString(parsed.opts.now)) {
+      opts.now = parsed.opts.now;
+    }
+    // The config's rule: a positive whole number of days; anything else keeps the default.
+    const days = isPlainObject(parsed.opts) ? parsed.opts.couldExpiryDays : undefined;
+    if (typeof days === 'number' && Number.isInteger(days) && days > 0) {
+      opts.couldExpiryDays = days;
+    }
+    // A list of non-empty names, as the config allows; anything else keeps the default.
+    const keep = isPlainObject(parsed.opts) ? parsed.opts.neverExpireLabels : undefined;
+    if (Array.isArray(keep) && keep.every((name) => isNonEmptyString(name) && name.trim() !== '')) {
+      opts.neverExpireLabels = keep;
+    }
     return { items: parsed.items, opts };
   }
   throw new Error(
@@ -594,5 +720,15 @@ if (invokedDirectly(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }
 
-export { main, audit, runInvariants, verdictOf, INVARIANTS };
-export type { AuditOpts, Failure, Invariant, InvariantResult, Verdict };
+export {
+  main,
+  audit,
+  runInvariants,
+  verdictOf,
+  expiredCoulds,
+  INVARIANTS,
+  COULD_EXPIRY_DAYS,
+  NEVER_EXPIRE_LABELS,
+  couldExpiryComment,
+};
+export type { AuditOpts, ExpiredCould, Failure, Invariant, InvariantResult, Verdict };

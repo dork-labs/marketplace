@@ -1,5 +1,5 @@
 /**
- * `flow snapshot [--include-closed] [--out <file>]` (spec `flow-cli-core` §6):
+ * `flow snapshot [--include-closed] [--out <file>] [--untriaged]` (spec `flow-cli-core` §6):
  * one pull of the configured team's backlog through the adapter's
  * `getBacklogSnapshot`.
  *
@@ -7,6 +7,8 @@
  * - `--json`: the `BacklogSnapshot` itself.
  * - `--out <file>`: also writes that JSON to a file, for `--snapshot` reuse by
  *   `next`, `audit` and `status`, so one pull serves a whole drain tick.
+ * - `--untriaged`: only the open items the daily triage takes up
+ *   (`triage-select.ts`); never saved, since it is not the whole backlog.
  *
  * @module @dorkos/flow/cli/snapshot
  */
@@ -19,7 +21,9 @@ import { ensureIgnored } from '../git-exclude.ts';
 import { sourceKey, updateIntakeMarks } from '../intake.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
 import { requireCapabilities } from '../tracker/load.ts';
+import { needsTriage } from '../triage-select.ts';
 import type { BacklogSnapshot } from '../tracker/types.ts';
+import { loadProjectConfig, resolveAgentId } from './backlog.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { formatColumns } from './output.ts';
 
@@ -182,7 +186,12 @@ async function markTeamRead(ctx: VerbContext, snapshot: BacklogSnapshot): Promis
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const includeClosed = ctx.args.flags['include-closed'] === true;
+  const untriaged = ctx.args.flags.untriaged === true;
   const out = ctx.args.flags.out;
+  if (untriaged && (typeof out === 'string' || typeof ctx.args.flags['panel-cache'] === 'string')) {
+    // A filtered pull is not a backlog: saved, audit and next would read it as one.
+    throw new UsageError('--untriaged cannot be saved with --out or read from --panel-cache');
+  }
   const target = typeof out === 'string' ? path.resolve(ctx.cwd, out) : undefined;
   if (target !== undefined) checkSnapshotTarget(target);
 
@@ -200,6 +209,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   // `v` first, the same order `--json` prints, so the file equals the output.
   if (!snapshot.panelOnly) await markTeamRead(ctx, snapshot);
+
+  if (untriaged) {
+    const project = loadProjectConfig(ctx);
+    const agent = await resolveAgentId(project);
+    project.flushWarnings();
+    snapshot.items = snapshot.items.filter((item) => needsTriage(item, agent));
+  }
 
   const { v, ...rest } = snapshot;
   const json = { v, ...rest };
