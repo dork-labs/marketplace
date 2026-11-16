@@ -75,6 +75,10 @@
     "baseline": 1288,
     "target": 1288
   },
+  "docs/dorkos-starts.mdx": {
+    "baseline": 130,
+    "target": 130
+  },
   "docs/driving-it-manually.mdx": {
     "baseline": 2252,
     "target": 2252

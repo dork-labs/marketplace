@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.97.1
+
+**Reinstall Flow to receive this fix.**
+
+- Fix new DorkOS chats being refused when Flow already holds a registered agent’s token.
+- Stop retrying through another route when DorkOS refuses access or a launch.
+- Fix new chats on the messages route while keeping follow-up messages in their existing chat.
+- Keep both credentials out of errors and prevent redirects from forwarding them elsewhere.
+
 ## 0.97.0
 
 - Add the Dork (`doe`) launcher through DorkOS only. Its workers/reviewers require

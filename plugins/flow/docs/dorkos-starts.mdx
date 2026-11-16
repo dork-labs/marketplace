@@ -1,0 +1,17 @@
+---
+title: Starting agents in DorkOS
+description: Caller identity, access refusals, and new chats when Flow uses the DorkOS host.
+---
+
+# Starting agents in DorkOS
+
+Flow starts new chats as the registered agent calling it.
+It uses that caller’s existing `DORKOS_AGENT_TOKEN` to identify the agent.
+Flow does not create an identity or change what the agent may do.
+
+`DORKOS_MCP_TOKEN` authorizes tool calls; it does not sign a person into the HTTP API.
+If the start tool is unavailable, Flow may use the messages route under its existing access rules.
+A refused sign-in, permission check, or launch stops the attempt without trying another route.
+
+Credentials stay at the configured server, even when it redirects a request.
+Follow-up messages stay in the existing chat. Stopping Flow leaves that chat in DorkOS.
