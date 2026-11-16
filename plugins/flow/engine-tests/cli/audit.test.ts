@@ -146,6 +146,35 @@ describe('flow audit', () => {
     expect(failure.detail).toContain('Closed after 30 days as a Could. Reopen it if it matters.');
   });
 
+  it('keeps a security Could open past its expiry, unless groom.neverExpireLabels drops it', async () => {
+    // Purpose: the config reaches the oracle; a security finding ranked Could is
+    // never closed for being old by default (Security, #183).
+    const withSecurityCould = (): FakeBacklog => {
+      const backlog = cleanBacklog();
+      backlog.items.push(
+        readyItem('FAKE-5', {
+          stateCategory: 'backlog',
+          labels: ['type/signal', 'area/security'],
+          priority: 4,
+          updatedAt: '2026-05-01T12:00:00.000Z',
+        })
+      );
+      return backlog;
+    };
+    temp = tempProject({ tracker: 'fake', identity: { agent: 'flow-bot' } });
+    expect((await runFlow(['audit', '--json'], temp, withSecurityCould())).code).toBe(EXIT.ok);
+    temp.cleanup();
+
+    temp = tempProject({
+      tracker: 'fake',
+      identity: { agent: 'flow-bot' },
+      groom: { neverExpireLabels: [] },
+    });
+    const none = await runFlow(['audit', '--json'], temp, withSecurityCould());
+    expect(none.code).toBe(EXIT.findings);
+    expect(JSON.parse(none.stdout).failures[0]).toMatchObject({ invariant: 'GRM-16' });
+  });
+
   it('audits a --snapshot file without calling the adapter', async () => {
     // Purpose: a drain reuses one pull across next, audit and status; with
     // --snapshot the tracker must not be touched at all.

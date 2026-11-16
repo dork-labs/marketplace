@@ -518,6 +518,42 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
     expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-52']);
   });
 
+  it('never expires a Could carrying a never-expire label: security unless set (Security, #183)', () => {
+    const old = daysAgo(400);
+    const items = [
+      item('ABC-60', { priority: 4, updatedAt: old, labels: ['type/signal', 'security'] }),
+      item('ABC-61', { priority: 4, updatedAt: old, labels: ['type/signal', 'area/security'] }),
+      item('ABC-62', { priority: 4, updatedAt: old, labels: ['type/idea', 'area/legal'] }),
+      item('ABC-63', { priority: 4, updatedAt: old }),
+    ];
+    // The default list: a security label, bare or as a family's leaf, keeps it open.
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-62', 'ABC-63']);
+    expect(audit(items, { now: NOW }).failures[0].detail).not.toContain('ABC-60');
+    // A custom list replaces the default.
+    expect(
+      expiredCoulds(items, NOW, 60, ['area/legal']).map((c) => c.identifier)
+    ).toEqual(['ABC-60', 'ABC-61', 'ABC-63']);
+    expect(
+      audit(items, { now: NOW, neverExpireLabels: ['legal'] }).failures[0].detail
+    ).not.toContain('ABC-62');
+    // An empty list expires every old Could, as before the setting existed.
+    expect(expiredCoulds(items, NOW, 60, []).map((c) => c.identifier)).toEqual([
+      'ABC-60',
+      'ABC-61',
+      'ABC-62',
+      'ABC-63',
+    ]);
+  });
+
+  it('reads neverExpireLabels from a stdin snapshot', () => {
+    const items = [item('ABC-64', { priority: 4, updatedAt: daysAgo(90), labels: ['type/idea', 'security'] })];
+    const run = (neverExpireLabels: unknown) =>
+      runOracle({ stdin: JSON.stringify({ items, opts: { now: NOW, neverExpireLabels } }) });
+    expect(run(undefined).status).toBe(0);
+    expect(run([]).status).toBe(1);
+    expect(run(['legal']).status).toBe(1);
+  });
+
   it('fails GRM-16 naming the item and the closing comment with the configured days', () => {
     const verdict = audit([item('ABC-40', { priority: 4, updatedAt: daysAgo(61) })], {
       now: NOW,
