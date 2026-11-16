@@ -143,7 +143,7 @@ describe('the module', () => {
   it('declares contract 3.0.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('3.0.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.1.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -1156,6 +1156,24 @@ describe('createItem', () => {
       project: '0f0e0d0c-0b0a-4908-8706-050403020100',
     });
     expect(calls.map((call) => call.operation)).toContain('FlowCreateProjectById');
+  });
+
+  it('sends a size as the estimate, and refuses a t-shirt size before any call (contract 3.1.0)', async () => {
+    // Purpose: flow create's required size reaches Linear's own estimate field;
+    // a shape Linear cannot hold fails loudly instead of filing an unsized item.
+    const sized = build(routeCreate());
+    await sized.adapter.createItem?.({ title: 't', description: 'd', labels: [], size: 3 });
+    const create = sized.calls.find((call) => call.operation === 'FlowCreateItem');
+    expect((create?.variables.input as Record<string, unknown>).estimate).toBe(3);
+
+    const shirt = build(routeCreate());
+    const error = await rejection(
+      shirt.adapter.createItem?.({ title: 't', description: 'd', labels: [], size: 'md' }) ??
+        Promise.resolve()
+    );
+    expect(error).toBeInstanceOf(PreconditionError);
+    expect((error as Error).message).toMatch(/whole points/);
+    expect(shirt.calls).toEqual([]);
   });
 
   it('derives the issue id from the key: the same key always sends the same id', async () => {

@@ -83,15 +83,18 @@ const pluginDir = args[args.indexOf('--plugin-dir') + 1];
 let acted = '';
 if (process.env.STUB_CAPTURE) {
   const file = path.join(process.cwd(), '.dork', 'flow', 'tmp', 'csv.md');
-  const content = 'People want the monthly report as a CSV file.\\nIt has "quotes" and a $sign.\\n';
+  const content = 'People want the monthly report as a CSV file.\\nIt has "quotes" and a $sign.\\n' +
+    '\\n## Proof\\n\\nThe operator asked for it.\\n\\n## Done when\\n\\n- The report downloads as a CSV file.\\n';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
   const flowTs = path.join(pluginDir, 'scripts', 'flow.ts');
   const argv = ['--experimental-strip-types', flowTs, 'create', '--title', 'Export the monthly report as CSV',
-    '--description-file', '.dork/flow/tmp/csv.md', '--label', 'type/idea', '--label', 'origin/human', '--key', 'csv', '--json'];
+    '--description-file', '.dork/flow/tmp/csv.md', '--label', 'type/idea', '--label', 'origin/human',
+    '--priority', '3', '--size', '2', '--for-project', 'proj-selftest', '--key', 'csv', '--json'];
   require('node:child_process').execFileSync(process.execPath, argv, { stdio: 'ignore' });
   const command = 'node ' + argv.slice(0, 3).join(' ') + " --title 'Export the monthly report as CSV'" +
-    ' --description-file .dork/flow/tmp/csv.md --label type/idea --label origin/human --key csv --json';
+    ' --description-file .dork/flow/tmp/csv.md --label type/idea --label origin/human' +
+    ' --priority 3 --size 2 --for-project proj-selftest --key csv --json';
   acted = [
     { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: file, content } }] } },
     { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } },
@@ -545,6 +548,8 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
           'origin/from-agent',
           '--priority',
           '3',
+          '--size',
+          '1',
           '--for-project',
           'proj-selftest',
           '--key',
@@ -554,7 +559,8 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
       ],
       {
         '.dork/flow/tmp/FAKE-2-followup-french.md':
-          'Translate the greeting into French.\n\nFrom FAKE-2 "On Completion".\n',
+          'Translate the greeting into French.\n\nFrom FAKE-2 "On Completion".\n\n' +
+          '## Proof\n\nFAKE-2 "On Completion" asks for it.\n\n## Done when\n\n- It greets in French.\n',
       }
     );
     expect(check).toMatchObject({ id: 'live/done/follow-up', status: 'pass' });
@@ -1042,6 +1048,18 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     writeFileSync(s.backlogFile, JSON.stringify(store));
   }
 
+  /** What `flow create` needs besides a title and labels: a complete, triaged item. */
+  const COMPLETE = [
+    '--description',
+    'Made up.\n\n## Proof\n\nSeen in the fixture.\n\n## Done when\n\n- It is done.',
+    '--priority',
+    '3',
+    '--size',
+    '1',
+    '--for-project',
+    'proj-selftest',
+  ];
+
   /** Run the real flow CLI in a case's sandbox, against its store. */
   function flow(sandbox: { dir: string; backlogFile: string }, ...args: string[]) {
     execFileSync(
@@ -1136,7 +1154,7 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('done', (s) => {
         flow(s, 'done', 'FAKE-2', '--summary', 'Shipped');
-        flow(s, 'create', '--title', 'Unasked', '--description', 'x', '--label', 'type/task');
+        flow(s, 'create', '--title', 'Unasked', ...COMPLETE, '--label', 'type/task');
       })
     ).toMatch(/nothing follows FAKE-2, but FAKE-3 was filed/);
   });
@@ -1149,6 +1167,9 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       id: 'x',
       identifier: 'FAKE-2',
       labels: ['type/idea', 'origin/human'],
+      priority: 3 as const,
+      size: 2,
+      project: { id: 'proj-selftest', name: 'Self-test project', stateCategory: 'started' as const },
     };
     const after = { ...c.backlog, items: [...c.backlog.items, captured] };
     const input = { sandbox: tmp, before: c.backlog, after };
@@ -1183,8 +1204,7 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         'create',
         '--title',
         'Export the monthly report as CSV',
-        '--description',
-        'People want a CSV export.',
+        ...COMPLETE,
         ...labels.flatMap((label) => ['--label', label])
       );
     expect(await judge('capture', (s) => create(s, 'type/idea', 'origin/human'))).toBeUndefined();
@@ -1192,7 +1212,18 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('capture', (s) => {
         create(s, 'type/idea', 'origin/human');
-        create(s, 'type/idea', 'origin/human');
+        // A second, different idea: the same title twice is refused as a duplicate.
+        flow(
+          s,
+          'create',
+          '--title',
+          'Email the monthly report every week',
+          ...COMPLETE,
+          '--label',
+          'type/idea',
+          '--label',
+          'origin/human'
+        );
       })
     ).toMatch(/gained 2 items/);
     expect(await judge('capture', (s) => create(s, 'type/idea'))).toMatch(/no origin\/\* label/);
@@ -1204,6 +1235,22 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         writeFileSync(s.backlogFile, JSON.stringify(store));
       })
     ).toMatch(/carries agent\/ready/);
+    // An item that reached the store some other way, without a triage's fields.
+    for (const [field, message] of [
+      ['priority', /has no priority/],
+      ['size', /has no size/],
+      ['project', /is not in Self-test project/],
+    ] as const) {
+      expect(
+        await judge('capture', (s) => {
+          create(s, 'type/idea', 'origin/human');
+          plant(s, (store) => {
+            delete store.items[1][field];
+          });
+        }),
+        field
+      ).toMatch(message);
+    }
   });
 
   it('triage passes on a ready or a parked item, and fails every planted wrong outcome', async () => {
@@ -1245,7 +1292,7 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('triage', (s) => {
         ready(s);
-        flow(s, 'create', '--title', 'Another', '--description', 'x', '--label', 'type/idea');
+        flow(s, 'create', '--title', 'Another', ...COMPLETE, '--label', 'type/idea');
       })
     ).toMatch(/the backlog went from FAKE-1, FAKE-2 to FAKE-1, FAKE-2, FAKE-3/);
   });
@@ -1255,23 +1302,28 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     // well-formed follow-up, triage it, and ready it only when it is ready.
     const close = (s: ReturnType<typeof makeSandbox>) =>
       flow(s, 'done', 'FAKE-2', '--summary', 'Shipped');
+    // flow create refuses an item without a type, priority or project, so a
+    // follow-up missing one is filed whole and then planted without it.
     const file = (s: ReturnType<typeof makeSandbox>, ...over: string[]) => {
-      const flags: Record<string, string[]> = {
-        type: ['--label', 'type/task'],
-        origin: ['--label', 'origin/from-agent'],
-        priority: ['--priority', '3'],
-        project: ['--for-project', 'proj-selftest'],
-      };
-      for (const name of over) delete flags[name];
       flow(
         s,
         'create',
         '--title',
         'Translate the greeting',
-        '--description',
-        'Into French.',
-        ...Object.values(flags).flat()
+        ...COMPLETE,
+        '--label',
+        'type/task',
+        '--label',
+        'origin/from-agent'
       );
+      if (over.length === 0) return;
+      plant(s, (store) => {
+        const next = store.items.find((i) => i.title === 'Translate the greeting') as WorkItem;
+        if (over.includes('type')) next.labels = next.labels.filter((l) => !l.startsWith('type/'));
+        if (over.includes('origin')) next.labels = next.labels.filter((l) => !l.startsWith('origin/'));
+        if (over.includes('priority')) delete next.priority;
+        if (over.includes('project')) delete next.project;
+      });
     };
     const park = (s: ReturnType<typeof makeSandbox>) =>
       flow(s, 'triage', 'FAKE-3', '--park', 'Which greeting?');
@@ -1291,7 +1343,18 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('done/follow-up', (s) => {
         good(s);
-        file(s);
+        // A second, different follow-up: the same title twice is refused as a duplicate.
+        flow(
+          s,
+          'create',
+          '--title',
+          'Document the greeting in the README',
+          ...COMPLETE,
+          '--label',
+          'type/task',
+          '--label',
+          'origin/from-agent'
+        );
       })
     ).toMatch(/2 follow-ups were filed/);
     for (const [missing, message] of [
@@ -1315,15 +1378,15 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         file(s);
       })
     ).toMatch(/follow-up FAKE-3 was neither readied nor parked/);
-    // Readied although it is not sized and has no engine-read sections: the
-    // readiness rules say no, whatever the label says.
+    // Readied although it has no engine-read sections: the readiness rules
+    // say no, whatever the label says.
     expect(
       await judge('done/follow-up', (s) => {
         close(s);
         file(s);
         flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
       })
-    ).toMatch(/FAKE-3 is ready but fails the readiness rules \(GRM-4, GRM-5, GRM-6\)/);
+    ).toMatch(/FAKE-3 is ready but fails the readiness rules \(GRM-5, GRM-6\)/);
     // The same follow-up, made ready-worthy by hand, passes: the oracle does not
     // refuse readiness itself.
     expect(

@@ -6,7 +6,7 @@
  * verdict + exit code, exactly like `validate-adapter.test.ts`.
  *
  * The keystone property here is **every check can fail**: for each of the
- * fifteen GRM invariants there is a seeded mutation of the good fixture that
+ * sixteen GRM invariants there is a seeded mutation of the good fixture that
  * must turn the verdict red, naming exactly that invariant. This ports the
  * "prove the check can fail" self-test from the 2026-08-03 tracker
  * reorganization into committed tests - a groom verification that cannot go
@@ -26,6 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { COULD_EXPIRY_COMMENT, audit, expiredCoulds } from '../scripts/audit-backlog.ts';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 // engine-tests -> plugins/flow
 const PLUGIN_DIR = path.resolve(here, '..');
@@ -42,7 +44,7 @@ interface Verdict {
 
 interface Snapshot {
   items: Array<Record<string, unknown>>;
-  opts?: { agentIdentity?: string; unnamespacedLabels?: string[] };
+  opts?: { agentIdentity?: string; unnamespacedLabels?: string[]; now?: string };
 }
 
 /** Spawn the oracle, returning its exit code + captured streams. */
@@ -196,6 +198,15 @@ describe('audit-backlog', () => {
         invariant: 'GRM-13',
         seed: (s) => {
           (s.items[0].labels as string[]).push('agent/needs-input');
+        },
+      },
+      {
+        // The parked idea becomes a Could last touched 42 days before opts.now.
+        invariant: 'GRM-16',
+        seed: (s) => {
+          s.items[1].priority = 4;
+          s.items[1].updatedAt = '2026-08-20T00:00:00.000Z';
+          s.opts = { ...s.opts, now: '2026-10-01T00:00:00.000Z' };
         },
       },
       {
@@ -390,6 +401,7 @@ describe('audit-backlog', () => {
       expect(status).toBe(0);
       expect(stdout).toContain('GRM-1');
       expect(stdout).toContain('GRM-15');
+      expect(stdout).toContain('GRM-16');
       expect(stdout).toContain('--fixture');
     });
   });
@@ -407,5 +419,69 @@ describe('audit-backlog', () => {
       expect(status).toBe(2);
       expect((JSON.parse(stdout) as Verdict).ok).toBe(false);
     });
+  });
+});
+
+describe('Could expiry (GRM-16, DOR-4546)', () => {
+  // Purpose: a Could the team has not touched in 30 days is closed by the groom,
+  // and nothing else is: not a fresher Could, not a Should or Must of any age.
+  const NOW = '2026-11-16T12:00:00.000Z';
+  const daysAgo = (days: number) => new Date(Date.parse(NOW) - days * 86_400_000).toISOString();
+  const item = (identifier: string, over: Record<string, unknown>) => ({
+    id: `id-${identifier}`,
+    identifier,
+    title: `Made-up item ${identifier}`,
+    description: '',
+    type: 'idea',
+    stateCategory: 'backlog',
+    stateName: 'Backlog',
+    parent: null,
+    relations: { blocks: [], blockedBy: [], children: [], relatedTo: [] },
+    labels: ['type/idea'],
+    project: { id: 'p1', name: 'Maintenance', stateCategory: 'started' },
+    ...over,
+  });
+
+  it('selects a Could untouched 31 days, and not one untouched 29', () => {
+    const items = [
+      item('ABC-1', { priority: 4, updatedAt: daysAgo(31) }),
+      item('ABC-2', { priority: 4, updatedAt: daysAgo(29) }),
+    ];
+    expect(expiredCoulds(items, NOW)).toEqual([
+      { identifier: 'ABC-1', title: 'Made-up item ABC-1', days: 31 },
+    ]);
+  });
+
+  it('leaves every other priority alone, however old', () => {
+    const old = daysAgo(400);
+    const items = [1, 2, 3, 0].map((priority) =>
+      item(`ABC-${priority + 10}`, { priority, updatedAt: old })
+    );
+    items.push(item('ABC-20', { updatedAt: old }));
+    expect(expiredCoulds(items, NOW)).toEqual([]);
+  });
+
+  it('reads the last touch from updatedAt, else createdAt, and never expires an undated or closed item', () => {
+    const items = [
+      // Created long ago but touched yesterday: not expired.
+      item('ABC-30', { priority: 4, createdAt: daysAgo(90), updatedAt: daysAgo(1) }),
+      // Never updated since it was filed 45 days ago: expired.
+      item('ABC-31', { priority: 4, createdAt: daysAgo(45) }),
+      // No date at all: neutral.
+      item('ABC-32', { priority: 4 }),
+      // Already closed.
+      item('ABC-33', { priority: 4, updatedAt: daysAgo(60), stateCategory: 'canceled' }),
+    ];
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-31']);
+  });
+
+  it('fails GRM-16 naming the item and the closing comment', () => {
+    const verdict = audit([item('ABC-40', { priority: 4, updatedAt: daysAgo(31) })], {
+      now: NOW,
+    });
+    expect(verdict.failures.map((f) => f.invariant)).toEqual(['GRM-16']);
+    expect(verdict.failures[0].detail).toContain('ABC-40');
+    expect(verdict.failures[0].detail).toContain(COULD_EXPIRY_COMMENT);
+    expect(COULD_EXPIRY_COMMENT).toBe('Closed after 30 days as a Could. Reopen it if it matters.');
   });
 });
