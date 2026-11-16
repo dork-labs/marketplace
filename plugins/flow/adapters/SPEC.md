@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.0.2** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.1.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -71,6 +71,7 @@ native representation into these fields is the adapter's core job.
 | `assignee`         | `string` (optional)                                                                 | Account id of the assignee, or `undefined` when unassigned. Raw input to ownership classification; the model does not itself classify.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `agentDisposition` | `'ready' \| 'claimed' \| 'completed' \| 'needs-input'` (optional)                   | Derived from the `agent/*` label family (the durable state machine).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `createdAt`        | `string` (optional)                                                                 | ISO-8601 creation timestamp. Feeds the dispatch age tier (oldest first). Missing is `undefined` (neutral).                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `updatedAt`        | `string` (optional)                                                                 | ISO-8601 time of the last change (since 3.1.0). The groom's Could expiry (GRM-16) reads it, falling back to `createdAt`. Missing is `undefined` (neutral).                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 `WorkItemProject = { id: string, name: string, stateCategory?: StateCategory, lead?: string }`.
 
@@ -615,7 +616,7 @@ below 3: older code cannot say whether a comment's author is a team member.
 It exports two things:
 
 ```ts
-export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '3.0.0'
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '3.1.0'
 export function createAdapter(ctx: AdapterContext): CodeAdapter;
 ```
 
@@ -694,6 +695,7 @@ interface NewItem {
   project?: string; // a project of the team, by id or exact name
   parent?: string; // the parent's identifier; it must be the team's own
   priority?: 0 | 1 | 2 | 3 | 4;
+  size?: number | string; // since 3.1.0: the estimate, in the tracker's shape (points or a t-shirt size)
   key?: string; // idempotency key: a second create with the same key returns the first item
 }
 
@@ -729,7 +731,7 @@ interface WorkStateChange {
 | `getItem`            | `getItem` (optional read, below)            | every write, to check it landed; `flow status <id>` |
 | `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`            |
 | `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
-| `createItem`         | creating an item (capture, follow-ups)      | `flow selftest --file`                              |
+| `createItem`         | creating an item (capture, follow-ups)      | `flow create`, `flow selftest --file`               |
 | `getInbox`           | `getInbox` (since 3.0.0)                    | `flow inbox`, the only inbox read a model may use   |
 
 **The two optional reads.**
@@ -759,6 +761,9 @@ interface WorkStateChange {
   unmarked item. It finds the project by id or
   exact name with a filtered read, so no page limit can miss it, and refuses a
   project or parent that is missing or another team's.
+- It sets the `size` asked for as the tracker's estimate (since 3.1.0). A size
+  the tracker cannot hold (a t-shirt size where estimates are points) is
+  refused before any write, never dropped.
 - The item lands where the tracker puts new work (Linear: its triage state).
 - It creates at most one item per call and returns its `id`, `identifier` and a
   `url` a person can open. It throws when the tracker does not confirm.
@@ -823,7 +828,7 @@ the seven `WorkItemType` values), `stateCategory` (one of the five categories),
 `stateName` (`string`), `parent` (`string | null`), `relations` (an object whose
 `blocks`/`blockedBy`/`children`/`relatedTo` are `string[]` and whose `duplicateOf`
 is an optional `string`), and `labels` (`string[]`). Optional fields (`priority`,
-`size`, `project`, `assignee`, `agentDisposition`, `createdAt`) are either absent
+`size`, `project`, `assignee`, `agentDisposition`, `createdAt`, `updatedAt`) are either absent
 or correctly typed (`priority` in `{0,1,2,3,4}`; `size` a non-empty `string` or a
 non-negative finite `number`;
 `agentDisposition` one of its four values). A missing optional MUST be `undefined`,
@@ -895,6 +900,15 @@ declaration.
 
 ### What each version added
 
+- **3.1.0** - additive (MINOR, DOR-4546): `NewItem` gains an optional `size`,
+  which `createItem` writes as the tracker's estimate (and refuses when the
+  tracker cannot hold its shape), and `WorkItem` gains an optional
+  `updatedAt`, the time of the item's last change. `flow create` now files
+  only a triaged item (type, priority 1-4, size, project, proof and done-when
+  sections) and checks the open items for a near-duplicate title first; the
+  groom's GRM-16 reads `updatedAt` to close a Could left untouched for 30
+  days. An adapter at 3.0 still loads, but its creates carry no size and its
+  items no `updatedAt` (GRM-16 then falls back to `createdAt`).
 - **3.0.2** - wording (PATCH, DOR-3777): `getItem` throws when it cannot read an
   item's labels in full. The shipped Linear code now does.
 - **3.0.1** - wording (PATCH, DOR-3677): a trusted author is a member of the

@@ -37,13 +37,16 @@ The item's type and `## On Completion` say what follows (a `type/hypothesis` get
 
 ```bash
 flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
-  --label type/<type> --label origin/from-agent --priority <1-4> \
+  --label type/<type> --label origin/from-agent --priority <1-4> --size <n> \
   --for-project '<project>' --key <id>-followup-<slug> --json
 ```
 
-Always a type, a priority and a project (this item's); never an `agent/*` label. The
-`--key` makes a retry return the first item. Write titles and descriptions as
-`<flow-root>/skills/capturing-work/SKILL.md` step 3 says.
+Always a type, a priority and a project (this item's), and a size; never an `agent/*`
+label. The priority is a MoSCoW bucket and the description carries `## Proof` and
+`## Done when`, as `<flow-root>/skills/capturing-work/SKILL.md` steps 3 and 4 say;
+exit 5 names a near-duplicate already open: comment there instead. Small follow-ups
+from one item are **one** follow-up with a checklist, not one each. The `--key`
+makes a retry return the first item.
 
 Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B): ready
 only if it has a size and an `## On Completion` section
