@@ -65,9 +65,11 @@ person an approval is "just a formality".
      with the token only after they approve.
    - `autoApproved` appears only on a Trusted install, and only because the
      untouched starter template may start without a card. It lists what that template
-     may run with (`runtime`, `net`, `run`, `agents`). Report it plainly, and tell the
-     person your first edit will ask them before it runs. It isn't a promise about
-     any later version.
+     may run with (`runtime`, `net`, `run`, `agents`). Report it plainly. It isn't a
+     promise about any later version. Tell the person what happens to your changes: a
+     change to its screen waits for their yes before it shows. On a Trusted install at
+     Full, a change to its server code runs right away and is listed in Activity; below
+     Full, or when your turn read someone else's words, it waits for them too.
 3. Edit the files in the `path` it returns. Keep the starter's structure. Set
    `minHostVersion` to the first DorkOS release with every API you use; the starter's
    `0.1.0` is a placeholder.
@@ -110,10 +112,11 @@ Don't claim it was reviewed, safe or approved unless that happened.
 
 ## Changing an app later
 
-Every version goes back to the person for approval, and to your team's security
-reviewer for a placement check if you have one. Bump `version` in `extension.json`,
-rerun `test_extension`, check `serverStatus` again, redo the screenshots for any surface
-that changed, and repeat the reach list with what changed marked.
+Show every version to the person, and to your team's security reviewer for a
+placement check if you have one, even when DorkOS lets it run without asking.
+Bump `version` in `extension.json`, rerun `test_extension`, check `serverStatus`
+again, redo the screenshots for any surface that changed, and repeat the reach list
+with what changed marked.
 
 ## When the docs don't answer
 
