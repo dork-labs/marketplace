@@ -112,11 +112,10 @@ Don't claim it was reviewed, safe or approved unless that happened.
 
 ## Changing an app later
 
-Show every version to the person, and to your team's security reviewer for a
-placement check if you have one, even when DorkOS lets it run without asking.
-Bump `version` in `extension.json`, rerun `test_extension`, check `serverStatus`
-again, redo the screenshots for any surface that changed, and repeat the reach list
-with what changed marked.
+Every version goes back to the person for approval, and to your team's security
+reviewer for a placement check if you have one. Bump `version` in `extension.json`,
+rerun `test_extension`, check `serverStatus` again, redo the screenshots for any surface
+that changed, and repeat the reach list with what changed marked.
 
 ## When the docs don't answer
 
