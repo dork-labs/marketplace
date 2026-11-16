@@ -131,6 +131,28 @@ describe('GET /accounts/eligibility', () => {
     flow.dispose();
   });
 
+  it('leaves out an account DorkOS can’t launch, as DorkOS’s own read does', async () => {
+    const projects = fakeProjects([]);
+    const { ctx } = fakeCtx(world, {
+      summaries: [
+        ...SUMMARIES,
+        // A hand-edited id that fails the pattern, and a registered row named `default`.
+        { runtime: 'claude-code', id: 'bad id!', label: 'Bad', color: '#000000', implicit: false },
+        { runtime: 'claude-code', id: 'default', label: 'Fake', color: '#000000', implicit: false },
+      ],
+      projects: projects.api,
+    });
+    const flow = createFlowExtension(ctx);
+    const answer = await send(flow.app, 'GET', '/accounts/eligibility');
+    const body = answer.body as { accounts: { id: string; implicit: boolean }[] };
+    expect(body.accounts.map((row) => [row.id, row.implicit])).toEqual([
+      ['work', false],
+      ['personal', false],
+      ['default', true],
+    ]);
+    flow.dispose();
+  });
+
   it('refuses a folder that is not one of flow’s projects, in flow’s words', async () => {
     const flow = routes();
     const answer = await send(

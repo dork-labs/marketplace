@@ -6,8 +6,14 @@
  * `/x/flow/p/<name>/settings`. A project's name is core's, URL-safe as given,
  * so it is only encoded, never rewritten.
  *
+ * A web page (a tracker item, flow's guide) can't open in a new tab from a
+ * screen: on DorkOS client API v2 the frame may not open windows. Its links
+ * keep their address, and {@link openWebPage} shows the page on the canvas.
+ *
  * @module @dorkos/flow/extension/ui/links
  */
+
+import type { ClientApi } from '../lib/host-types.ts';
 
 /** Flow home. */
 export const HOME_PATH = '/x/flow';
@@ -67,4 +73,32 @@ export function webHref(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** The host's canvas, once `activate` has handed it in. */
+let canvas: Pick<ClientApi, 'openCanvas'> | null = null;
+
+/**
+ * Hand the links the frame's canvas. `activate` calls it in every frame.
+ *
+ * @param api - The frame's `api`, or `null` to forget it (tests).
+ */
+export function setWebOpener(api: Pick<ClientApi, 'openCanvas'> | null): void {
+  canvas = api;
+}
+
+/**
+ * A web link's click: show the page on DorkOS's canvas instead of a new tab,
+ * which the frame can't open. Where the host has no canvas the link opens as
+ * it always did.
+ *
+ * @param event - The click.
+ * @param url - The page, already checked by {@link webHref}.
+ * @param title - The canvas tab's title.
+ */
+export function openWebPage(event: { preventDefault(): void }, url: string, title: string): void {
+  const open = canvas?.openCanvas;
+  if (typeof open !== 'function') return;
+  event.preventDefault();
+  void Promise.resolve(open.call(canvas, { type: 'browser', url, title })).catch(() => {});
 }

@@ -661,7 +661,7 @@ export class ModelService {
 
   /**
    * Resume flow in one project or every set-up one, where it is paused. The
-   * schedules a pause switched off go on the list the Flow tab switches back on.
+   * schedules a pause switched off go on the list a person switches back on.
    *
    * @param body - `{ project?, all? }`.
    * @returns The new model.

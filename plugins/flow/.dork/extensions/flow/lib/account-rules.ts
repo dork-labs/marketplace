@@ -26,6 +26,7 @@ import {
   canonicalRoot,
   readProjectEligibilityRules,
 } from '../../../../scripts/fleet/project-eligibility.ts';
+import { isValidAccountId } from '../../../../scripts/fleet/usage-ledger.ts';
 import { RouteError } from './fleet.ts';
 import type { AccountSummary, ProjectInfo, ProjectRef } from './host-types.ts';
 
@@ -117,7 +118,7 @@ export async function readEligibility(
   const nameOf = (root: string): ProjectRef =>
     byRoot.get(root) ?? { root, name: path.basename(root) || root };
   const accounts = (await deps.listAccounts())
-    .filter((account) => account.runtime === 'claude-code')
+    .filter((account) => account.runtime === 'claude-code' && routable(account))
     .map((account): AccountEligibilityRow => {
       const own = rules.onlyProjects.get(account.id) ?? null;
       const allowedByAccount = own === null || (hereRoot !== null && own.includes(hereRoot));
@@ -140,6 +141,16 @@ export async function readEligibility(
       Number(b.id === MAIN_ACCOUNT_ID && b.implicit)
   );
   return { project: here, allow, accounts };
+}
+
+/**
+ * Whether DorkOS can launch the account, so its own eligibility read lists it:
+ * Main, or a registered row whose id passes the id pattern and is not the
+ * reserved `default`.
+ */
+function routable(account: AccountSummary): boolean {
+  if (account.implicit) return account.id === MAIN_ACCOUNT_ID;
+  return account.id !== MAIN_ACCOUNT_ID && isValidAccountId(account.id);
 }
 
 /** A project reference with only its root and name. */

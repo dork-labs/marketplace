@@ -35,6 +35,7 @@ import { PANEL_TAB_ID, followMarker } from './ui/marker.ts';
 import { registerPalette } from './ui/palette.ts';
 import { registerRunChip } from './ui/run-chip.ts';
 import { setFlowRequester } from './ui/api.ts';
+import { setWebOpener } from './ui/links.ts';
 import { createSettingsTab } from './ui/settings-tab.ts';
 import { FlowStore } from './ui/store.ts';
 
@@ -50,6 +51,7 @@ export type FlowExtensionApi = ClientApi;
  */
 export function activate(api: FlowExtensionApi): () => void {
   setFlowRequester(api);
+  setWebOpener(api);
   const store = new FlowStore(api);
   store.start();
   const removeTab = api.registerSettingsTab('fleet', 'Flow', createSettingsTab(api, store), {

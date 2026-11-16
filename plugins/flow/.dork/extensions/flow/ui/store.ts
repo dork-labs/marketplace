@@ -10,8 +10,9 @@
  *   DorkOS that does not.
  * - A frame has no network of its own and DorkOS passes it no extension
  *   events, so the store reads the model again every 15 s, and whenever the
- *   chat's folder changes. Every change a screen makes answers the new model,
- *   which shows at once.
+ *   chat's folder changes. While DorkOS's window is hidden it skips those
+ *   reads, and reads once when it shows again. Every change a screen makes
+ *   answers the new model, which shows at once.
  * - It never switches DorkOS schedules back on after a pause: only a person
  *   can, in Schedules, and the project's screens say so.
  *
@@ -75,6 +76,7 @@ export class FlowStore {
   };
   private readonly listeners = new Set<() => void>();
   private poll: ReturnType<typeof setInterval> | null = null;
+  private stopVisibility: (() => void) | null = null;
   private stopState: (() => void) | null = null;
   private started = false;
   private loading: Promise<void> | null = null;
@@ -196,7 +198,16 @@ export class FlowStore {
         if (moved) void this.refresh();
       }
     );
-    this.poll = setInterval(() => void this.refresh(), POLL_MS);
+    this.poll = setInterval(() => {
+      if (!pageHidden()) void this.refresh();
+    }, POLL_MS);
+    if (typeof document !== 'undefined') {
+      const shown = () => {
+        if (!pageHidden()) void this.refresh();
+      };
+      document.addEventListener('visibilitychange', shown);
+      this.stopVisibility = () => document.removeEventListener('visibilitychange', shown);
+    }
   }
 
   /** Stop reading and following the chat's folder. */
@@ -204,9 +215,16 @@ export class FlowStore {
     this.started = false;
     if (this.poll !== null) clearInterval(this.poll);
     this.poll = null;
+    this.stopVisibility?.();
+    this.stopVisibility = null;
     this.stopState?.();
     this.stopState = null;
   }
+}
+
+/** Whether DorkOS's window is hidden (a frame shares its window's visibility). */
+function pageHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
 /**

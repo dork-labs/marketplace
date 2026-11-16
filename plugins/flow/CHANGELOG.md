@@ -12,8 +12,10 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Two things now send you to DorkOS instead of happening inside Flow, because only a person can do them and Flow's screens can no longer change DorkOS's own settings:
   - **Accounts this project may use** shows each account and whether it may work in the project, without checkboxes. To change it, press **Change in Settings → Runtimes**. Moving an account's **Only for these repos** list works the same way: **Open Settings → Runtimes**, limit the account to the projects the row names, then come back to Settings → Flow to let flow follow DorkOS's rule.
   - **Schedules a pause switched off** are no longer switched back on by the Flow tab. Once the pause is over, the project says they're still off, with **Open Schedules** to switch them on and **They're on again** to tell flow you did.
-- The screens now check for changes every 15 seconds instead of getting them live, so something an agent changed can take up to 15 seconds to show. Anything you change on a Flow screen shows at once.
-- The Flow tab beside a chat shows DorkOS's default icon for now, since an app's own icon can't cross into its frame.
+- Resuming from the palette says when schedules the pause switched off are still off. `/flow resume` in a chat still switches them back on itself.
+- Links to your tracker and to flow's guide open on DorkOS's canvas instead of a new browser tab, which an app's frame can't open.
+- The screens now check for changes every 15 seconds instead of getting them live, so something an agent changed can take up to 15 seconds to show. They don't check while DorkOS's window is hidden. Anything you change on a Flow screen shows at once.
+- For now DorkOS shows its default icons for the Flow tab and Flow home, and no highlight on the run chip when something needs you, since those can't cross into an app's frame. The chip's words still say so.
 
 ## 0.98.5
 

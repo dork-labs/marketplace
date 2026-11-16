@@ -7,6 +7,7 @@
  */
 
 import type { FleetView } from '../lib/fleet.ts';
+import { openWebPage } from './links.ts';
 import { h, type Node } from './react.ts';
 import { NOTICE } from './styles.ts';
 
@@ -101,6 +102,7 @@ export function FleetNotice(props: { kind: NoticeKind }): Node {
           href: GUIDE_URL,
           target: '_blank',
           rel: 'noopener noreferrer',
+          onClick: (event: { preventDefault(): void }) => openWebPage(event, GUIDE_URL, GUIDE_LINK_TEXT),
           style: { color: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' },
         },
         GUIDE_LINK_TEXT

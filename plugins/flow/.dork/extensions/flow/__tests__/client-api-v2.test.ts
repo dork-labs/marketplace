@@ -30,10 +30,17 @@ const GONE_GLOBALS = new Set([
   'WebSocket',
   'localStorage',
   'sessionStorage',
+  'indexedDB',
 ]);
 
+/** Names the global object goes by, so `window.fetch` counts as `fetch`. */
+const GLOBAL_OBJECTS = new Set(['window', 'globalThis', 'self']);
+
 /** Members the frame does not have: `window.electronAPI`, `document.cookie`, `api.executeCommand`. */
-const GONE_MEMBERS = new Set(['electronAPI', 'cookie', 'parent', 'executeCommand']);
+const GONE_MEMBERS = new Set(['electronAPI', 'cookie', 'parent', 'executeCommand', 'sendBeacon']);
+
+/** Packages the page half value-imports, which the frame can't load (it bundles none). */
+const packages = new Set<string>();
 
 /** Every file `index.ts` reaches through relative value imports. */
 function pageHalf(): string[] {
@@ -48,7 +55,10 @@ function pageHalf(): string[] {
       if (!isImport && !isExport) continue;
       const specifier = statement.moduleSpecifier;
       if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
-      if (!specifier.text.startsWith('.')) continue;
+      if (!specifier.text.startsWith('.')) {
+        packages.add(`${path.relative(EXTENSION_DIR, file)}: ${specifier.text}`);
+        continue;
+      }
       visit(path.resolve(path.dirname(file), specifier.text));
     }
   };
@@ -72,6 +82,14 @@ function goneUses(text: string): string[] {
     }
     if (ts.isPropertyAccessExpression(node) && GONE_MEMBERS.has(node.name.text)) {
       found.push(`${at(node)}: .${node.name.text}`);
+    }
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      GLOBAL_OBJECTS.has(node.expression.text) &&
+      GONE_GLOBALS.has(node.name.text)
+    ) {
+      found.push(`${at(node)}: ${node.expression.text}.${node.name.text}`);
     }
     // `h('a', { download: … })`: a download link does nothing in the frame.
     if (
@@ -109,6 +127,11 @@ describe('client API version 2', () => {
     expect(files).toContain('ui/project-accounts.ts');
   });
 
+  it('loads no package: React and the SDK come from DorkOS, and node builtins never run there', () => {
+    pageHalf();
+    expect([...packages]).toEqual([]);
+  });
+
   it('uses nothing the frame dropped in any file the page half runs', () => {
     const uses = Object.fromEntries(
       pageHalf()
@@ -132,8 +155,16 @@ describe('client API version 2', () => {
           '// fetch( in a comment, and "fetch(" in a string, are only words.',
           "const words = 'fetch(';",
           'api.request({ fetch: 1 });',
+          "void window.fetch('/api/x'); void globalThis.localStorage;",
         ].join('\n')
       )
-    ).toEqual(['1: fetch', '2: .electronAPI', '3: EventSource', '4: download']);
+    ).toEqual([
+      '1: fetch',
+      '2: .electronAPI',
+      '3: EventSource',
+      '4: download',
+      '8: window.fetch',
+      '8: globalThis.localStorage',
+    ]);
   });
 });

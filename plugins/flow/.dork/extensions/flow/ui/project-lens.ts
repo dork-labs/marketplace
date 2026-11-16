@@ -18,7 +18,7 @@ import {
 } from './api.ts';
 import { StartButton, hasInbox, type AnswerApi } from './answers.ts';
 import { DecisionRow } from './page-parts.ts';
-import { HOME_PATH, TASKS_ROUTE, settingsPath, webHref } from './links.ts';
+import { HOME_PATH, TASKS_ROUTE, openWebPage, settingsPath, webHref } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
@@ -639,6 +639,8 @@ export function ProjectLens(props: {
                 target: '_blank',
                 rel: 'noopener noreferrer',
                 style: { ...LINK, color: 'inherit' },
+                onClick: (event: { preventDefault(): void }) =>
+                  openWebPage(event, trackerUrl, `${project.name} in ${trackerName(project)}`),
               },
               `Open in ${trackerName(project)} ↗`
             )

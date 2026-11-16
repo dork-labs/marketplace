@@ -713,6 +713,11 @@ export interface ClientApi extends FlowRequester {
   /** Show a toast. */
   notify?(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
   /**
+   * Show a web page (`http:` or `https:`) on the canvas, in a new tab that
+   * names flow. A frame can't open windows, so this is how flow's web links open.
+   */
+  openCanvas?(content: { type: 'browser'; url: string; title?: string }): Promise<void> | void;
+  /**
    * Mount a full page at `/x/flow/<path>`.
    *
    * @returns A function that removes it.
