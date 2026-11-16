@@ -1497,13 +1497,14 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
 
     async createItem(spec: NewItem): Promise<CreatedItem> {
       // Linear's estimate is a number of points on every scale it offers, so a
-      // t-shirt size has nowhere to go: refuse it before any call.
+      // t-shirt size has nowhere to go: refuse it before any call. Whether the
+      // number is on the team's scale is not checked here; Linear may refuse it.
       if (
         spec.size !== undefined &&
         !(typeof spec.size === 'number' && Number.isInteger(spec.size) && spec.size >= 0)
       ) {
         throw new PreconditionError(
-          `Linear estimates are whole points; pass the size as a number on the team's estimate scale, not "${spec.size}"`
+          `a Linear estimate is a whole number of points (the tracker may refuse a value off its scale), not "${spec.size}"`
         );
       }
       const { id: teamId, key } = await team();

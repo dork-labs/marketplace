@@ -96,7 +96,7 @@
     "target": 1077
   },
   "docs/intake.mdx": {
-    "baseline": 494,
+    "baseline": 445,
     "target": 426
   },
   "docs/landing.mdx": {
@@ -212,7 +212,7 @@
     "target": 228
   },
   "skills/flow-triage/SKILL.md": {
-    "baseline": 449,
+    "baseline": 426,
     "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
@@ -228,7 +228,7 @@
     "target": 1117
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1495,
+    "baseline": 1503,
     "target": 1380
   },
   "skills/specifying-work/SKILL.md": {

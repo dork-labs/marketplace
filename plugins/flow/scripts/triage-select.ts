@@ -4,12 +4,13 @@
  * would move its last-changed time, and a Could would never reach the groom's
  * 30-day expiry.
  *
- * An open item needs triage when it has no `agent/*` label, no assignee but
- * the agent, and either:
+ * An item needs triage when it is waiting (a `backlog` or `unstarted` state),
+ * has no `agent/*` label and no assignee but the agent, and either:
  *
  * - no MoSCoW bucket yet (no priority 1-4) or no project; or
- * - it is a Must (priority 1 or 2): a Must is readied or parked, and either
- *   one gives it an `agent/*` label, so it is taken up once.
+ * - it is a Must (priority 1 or 2) and not a `type/meta` tracker (never
+ *   readied): a Must is readied or parked, and either one gives it an
+ *   `agent/*` label, so it is taken up once.
  *
  * A Should or Could (priority 3 or 4) with a project is triaged already: it
  * waits in the backlog for the groom, and the daily run leaves it alone. There
@@ -32,12 +33,14 @@ import type { WorkItem } from './work-item.ts';
  * @returns `true` when it still needs a bucket, a project, or (a Must) its readying.
  */
 export function needsTriage(
-  item: Pick<WorkItem, 'labels' | 'priority' | 'project' | 'assignee'>,
+  item: Pick<WorkItem, 'stateCategory' | 'labels' | 'priority' | 'project' | 'assignee'>,
   agent?: string
 ): boolean {
+  if (item.stateCategory !== 'backlog' && item.stateCategory !== 'unstarted') return false;
   if (item.labels.some((label) => label.startsWith('agent/'))) return false;
   if (item.assignee !== undefined && item.assignee !== agent) return false;
   const bucketed = item.priority !== undefined && item.priority >= 1 && item.priority <= 4;
   if (!bucketed || item.project === undefined) return true;
+  if (item.labels.includes('type/meta')) return false;
   return item.priority === 1 || item.priority === 2;
 }

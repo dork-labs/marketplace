@@ -77,7 +77,7 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'untriaged',
         kind: 'boolean',
         description:
-          'Keep only the items the daily triage takes up: no agent/* label, no assignee but the agent, and no priority 1-4, no project, or a Must.',
+          'Keep only the items the daily triage takes up: waiting (backlog or unstarted), no agent/* label, no assignee but the agent, and no priority 1-4, no project, or a Must that is not type/meta.',
       },
       {
         name: 'out',

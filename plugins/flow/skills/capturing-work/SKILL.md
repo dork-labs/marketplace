@@ -43,9 +43,9 @@ and lands it in the tracker's intake state.
      is filed): the input, with its source path if it came from a file, then a
      `## Proof` section (what was seen or asked: a log line, `file:line`, a
      failing command, steps, or the operator's own words) and a `## Done when`
-     section (one to three lines you can check), then one line saying what you
-     searched for duplicates (`Searched: <words>`). A one-line
-     `--description '<text>'` cannot hold all that: use the file;
+     section (one to three lines you can check); `flow create` adds a line saying
+     what its duplicate check compared. A one-line `--description '<text>'`
+     cannot hold both sections: use the file;
    - `type/idea` always: TRIAGE re-classifies it. `origin/human`: the operator
      had the thought;
    - `--key`: a short, specific slug, so a retried capture returns the first

@@ -94,8 +94,8 @@ WorkItem {
 
 - The buckets (`<flow-root>/skills/triaging-work/SKILL.md`) are Linear's own priority:
   Must is High (Urgent only when broken now), Should Medium, Could Low.
-- `flow create` sends `--size` as `estimate`, whole points on the team's scale, and
-  refuses a t-shirt size. It finds duplicates in its own backlog pull: no `searchIssues`.
+- `flow create` sends `--size` as `estimate`: a whole number of points; the tracker may
+  refuse a value off its scale. A t-shirt size is refused. It finds duplicates in its own backlog pull: no `searchIssues`.
 - A new item lands in Triage. A readied Must moves to Todo; moving a Should or Could to
   Backlog is an `issueUpdate` of `stateId`, never a reason to triage it again.
 

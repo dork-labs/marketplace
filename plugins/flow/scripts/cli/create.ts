@@ -22,8 +22,8 @@
  *   exits 5 with `nearMatches` in the JSON (identifier, title, score) and a
  *   first text line starting `near duplicate:`; a caller keys on those, not
  *   on the exit code. `--not-duplicate-of <ids>` files anyway once it names
- *   every near match, and the description records the ones checked. One
- *   backlog pull per create.
+ *   every near match. Every description gains a line naming the words compared
+ *   and any items ruled out. One backlog pull per create.
  * - Signs the description with the project's identity marker and this
  *   session's provenance line, as `flow done` signs its summary.
  * - With `--key`, the description carries a `<!-- flow-create:key=<k> -->`
@@ -49,7 +49,7 @@
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
-import { nearMatches, type NearMatch } from '../duplicate-title.ts';
+import { nearMatches, titleWords, type NearMatch } from '../duplicate-title.ts';
 import { ConfigError, EXIT } from '../errors.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, CodeAdapter, NewItem } from '../tracker/types.ts';
@@ -125,14 +125,21 @@ function stringFlag(ctx: VerbContext, name: string): string | undefined {
 }
 
 /**
- * The line a description gains when the filer checked near matches and filed
- * anyway, so a reader sees which items were ruled out.
+ * The line every filed description gains, saying what the duplicate check
+ * compared and which near matches the filer ruled out with
+ * `--not-duplicate-of`, so a reader can see the search was done.
  *
+ * @param title - The new title.
  * @param ids - The items `--not-duplicate-of` named.
  * @returns The line.
  */
-export function checkedLine(ids: readonly string[]): string {
-  return `Checked for duplicates: not ${ids.join(', ')}.`;
+export function duplicateLine(title: string, ids: readonly string[]): string {
+  const words = [...titleWords(title)];
+  const compared =
+    words.length === 0
+      ? 'Duplicate check: the title has no words to compare with open items'
+      : `Duplicate check: open item titles compared on "${words.join(' ')}"`;
+  return ids.length === 0 ? `${compared}.` : `${compared}; not a duplicate of ${ids.join(', ')}.`;
 }
 
 /**
@@ -287,7 +294,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   requireSizeContract(adapter);
 
   const parts = [description];
-  if (checked.length > 0) parts.push(checkedLine(checked));
+  parts.push(duplicateLine(title, checked));
   if (key !== undefined) parts.push(keyMarker(key));
   const body = parts.join('\n\n');
   const spec: NewItem = {
