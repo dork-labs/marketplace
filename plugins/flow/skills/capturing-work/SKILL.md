@@ -24,22 +24,13 @@ and lands it in the tracker's intake state.
    ask for the **single** missing detail and stop — do not expand scope or
    research. (CAPTURE is an intent stage: when genuinely unsure, lean toward
    asking — spec §5 stage bias.)
-3. **Bucket it (MoSCoW, on the tracker's own priority).** If the repo has its own
-   prioritization rubric (its agent instructions name it), follow it; this is the
-   generic one:
-
-   | Bucket     | `--priority`                    | Means                                         |
-   | ---------- | ------------------------------- | --------------------------------------------- |
-   | **Must**   | `2` (`1` only if broken now)    | needed for the current milestone              |
-   | **Should** | `3`                             | important, with a workaround, or can wait     |
-   | **Could**  | `4`                             | nice to have; closed after 30 days untouched  |
-   | **Won't**  | not filed                       | say so and stop                               |
-
-   Most items are Should; in doubt, pick the lower bucket. Urgent (`1`) is for
-   something broken right now. Size it as the tracker's estimate (`1` under an
-   hour, `2` half a day, `3` a day, `5` a few days, `8` about a week; bigger is a
-   project: split it). Pick its project (`flow snapshot --json` lists them); if
-   none fits, ask.
+3. **Bucket, size and place it.** Priority is a MoSCoW bucket on the tracker's own
+   field, by _The MoSCoW buckets_ in `<flow-root>/skills/triaging-work/SKILL.md` (or
+   the repo's own rubric, where its agent instructions name one): `2` Must (`1` only
+   if broken now), `3` Should, `4` Could. A Won't is not filed: say so and stop. Size
+   is the tracker's estimate (`1` under an hour, `2` half a day, `3` a day, `5` a few
+   days, `8` about a week; bigger is a project: split it). The project is one of the
+   team's; if none fits, ask.
 4. **Create the item.** Never add `agent/*` or `stage/*` labels: TRIAGE decides.
 
    ```bash

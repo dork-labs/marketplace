@@ -1,6 +1,6 @@
 {
   "commands/capture.md": {
-    "baseline": 76,
+    "baseline": 106,
     "target": 71
   },
   "commands/decompose.md": {
@@ -96,7 +96,7 @@
     "target": 1077
   },
   "docs/intake.mdx": {
-    "baseline": 426,
+    "baseline": 478,
     "target": 426
   },
   "docs/landing.mdx": {
@@ -128,7 +128,7 @@
     "target": 592
   },
   "docs/SPEC.md": {
-    "baseline": 2575,
+    "baseline": 2588,
     "target": 2575
   },
   "docs/the-dials.mdx": {
@@ -144,7 +144,7 @@
     "target": 409
   },
   "docs/what-flow-is.mdx": {
-    "baseline": 1691,
+    "baseline": 1692,
     "target": 1691
   },
   "docs/why.md": {
@@ -168,11 +168,11 @@
     "target": 932
   },
   "skills/capturing-work/SKILL.md": {
-    "baseline": 477,
+    "baseline": 706,
     "target": 477
   },
   "skills/closing-work/SKILL.md": {
-    "baseline": 614,
+    "baseline": 657,
     "target": 598
   },
   "skills/decomposing-work/SKILL.md": {
@@ -204,7 +204,7 @@
     "target": 716
   },
   "skills/flow-groom/SKILL.md": {
-    "baseline": 163,
+    "baseline": 185,
     "target": 163
   },
   "skills/flow-retro/SKILL.md": {
@@ -212,11 +212,11 @@
     "target": 228
   },
   "skills/flow-triage/SKILL.md": {
-    "baseline": 378,
+    "baseline": 445,
     "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
-    "baseline": 1156,
+    "baseline": 1322,
     "target": 1156
   },
   "skills/ideating-features/SKILL.md": {
@@ -228,7 +228,7 @@
     "target": 1117
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1380,
+    "baseline": 1544,
     "target": 1380
   },
   "skills/specifying-work/SKILL.md": {
@@ -240,7 +240,7 @@
     "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 1135,
+    "baseline": 1343,
     "target": 1135
   },
   "skills/verifying-work/proof-test.md": {
