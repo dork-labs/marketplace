@@ -1503,7 +1503,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         !(typeof spec.size === 'number' && Number.isInteger(spec.size) && spec.size >= 0)
       ) {
         throw new PreconditionError(
-          `Linear estimates are whole points; pass the size as a number (for example 1, 2, 3, 5 or 8), not "${spec.size}"`
+          `Linear estimates are whole points; pass the size as a number on the team's estimate scale, not "${spec.size}"`
         );
       }
       const { id: teamId, key } = await team();

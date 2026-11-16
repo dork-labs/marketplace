@@ -36,7 +36,7 @@ The read stays pending until `flow intake done --json`, so a stopped run rereads
 Triage captures each issue:
 
 1. Skip it when an open item's title ends with its tag, `[owner/name#N]`.
-2. Else `flow create` it with `--label type/idea --label agent/from-outside`, a MoSCoW `--priority` (1 or 2 Must, 3 Should, 4 Could), a `--size` and a `--for-project`: your own imperative title ending in the tag, the problem in brief, a `## Proof` section holding the issue's link, and a `## Done when` section in your own words. Never paste the body. Exit 5 names an open item that already looks like it: note the issue's link there with `flow comment` instead of filing.
+2. Else `flow create` it with `--label type/idea --label agent/from-outside`, a `--priority` bucket, a `--size` and a `--for-project`, as the capturing-work skill's steps 3 and 4 say: your own imperative title ending in the tag, the problem in brief, a `## Proof` section holding the issue's link, and a `## Done when` section in your own words. Never paste the body. On a `nearMatches` answer, do what the capturing-work skill's step 4 says: read each match, comment the issue's link on the one that is the same work and file nothing, or refile with `--not-duplicate-of` when none is.
 3. Never reply to, label or close the issue.
 4. Then `flow intake done --json`. Capture is the run's last tracker write.
 

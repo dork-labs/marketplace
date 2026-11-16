@@ -92,16 +92,12 @@ WorkItem {
 
 ## Filing and priority
 
-- **Priority is MoSCoW on Linear's own field**, never a label: Must = High (`2`; Urgent
-  `1` only for something broken now), Should = Medium (`3`), Could = Low (`4`), Won't =
-  not filed or Canceled with a reason. Size is Linear's estimate, in points.
-- `flow create` sends the size as `estimate` and refuses a t-shirt size (Linear's
-  estimate is always points); it finds duplicates by title in its own backlog pull, so
-  no `searchIssues` call is needed.
-- After triage: a Must goes to an `unstarted` state (Todo) when readied, a Should and a
-  Could to Backlog, a Won't to a `canceled` state with a comment. A new item lands in
-  Triage; moving a Should or Could out of it to Backlog is an `issueUpdate` of
-  `stateId`.
+- The buckets (`<flow-root>/skills/triaging-work/SKILL.md`) are Linear's own priority:
+  Must is High (Urgent only when broken now), Should Medium, Could Low.
+- `flow create` sends `--size` as `estimate`, whole points on the team's scale, and
+  refuses a t-shirt size. It finds duplicates in its own backlog pull: no `searchIssues`.
+- A new item lands in Triage. A readied Must moves to Todo; moving a Should or Could to
+  Backlog is an `issueUpdate` of `stateId`, never a reason to triage it again.
 
 ## The state machine
 

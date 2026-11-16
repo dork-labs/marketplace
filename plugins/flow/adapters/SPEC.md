@@ -907,8 +907,10 @@ declaration.
   only a triaged item (type, priority 1-4, size, project, proof and done-when
   sections) and checks the open items for a near-duplicate title first; the
   groom's GRM-16 reads `updatedAt` to close a Could left untouched for 30
-  days. An adapter at 3.0 still loads, but its creates carry no size and its
-  items no `updatedAt` (GRM-16 then falls back to `createdAt`).
+  days. An adapter at 3.0 still loads, but `flow create`, which always sends a
+  size, refuses it (exit 3) until it is regenerated, rather than file an
+  unsized item; its items carry no `updatedAt` (GRM-16 then falls back to
+  `createdAt`).
 - **3.0.2** - wording (PATCH, DOR-3777): `getItem` throws when it cannot read an
   item's labels in full. The shipped Linear code now does.
 - **3.0.1** - wording (PATCH, DOR-3677): a trusted author is a member of the

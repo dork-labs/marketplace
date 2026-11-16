@@ -127,7 +127,8 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-15  state coherence: state, agent/* and stage/* agree (STATE-1 .. STATE-5):
           at most one stage/* label, none on a started item, agent/claimed only
           when started, no agent/ready when started, no agent/completed when open
-  GRM-16  no open Could (priority 4) untouched for 30 or more days (updatedAt,
+  GRM-16  no waiting Could (priority 4; backlog or unstarted, not agent/claimed)
+          untouched for 30 or more days (updatedAt,
           else createdAt, against opts.now): close it as canceled with the comment
           "Closed after 30 days as a Could. Reopen it if it matters."
 `;
@@ -393,8 +394,8 @@ interface ExpiredCould {
 }
 
 /**
- * The open Could (priority 4) items untouched for {@link COULD_EXPIRY_DAYS} or
- * more days: the ones the groom proposes to close as canceled with
+ * The waiting Could (priority 4) items, in a `backlog` or `unstarted` state and
+ * not `agent/claimed`, untouched for {@link COULD_EXPIRY_DAYS} or more days: the ones the groom proposes to close as canceled with
  * {@link COULD_EXPIRY_COMMENT}. "Touched" is the tracker's `updatedAt`, else
  * `createdAt`; an item with neither, or an unreadable date, never expires
  * (missing is neutral). Every other priority is left alone.
@@ -407,7 +408,10 @@ function expiredCoulds(items: readonly unknown[], now?: string): ExpiredCould[] 
   const at = now === undefined ? Date.now() : Date.parse(now);
   const expired: ExpiredCould[] = [];
   items.forEach((item, index) => {
-    if (!isPlainObject(item) || !isOpen(item) || item.priority !== 4) return;
+    if (!isPlainObject(item) || item.priority !== 4) return;
+    // Waiting work only: a started or claimed Could is being worked on.
+    if (item.stateCategory !== 'backlog' && item.stateCategory !== 'unstarted') return;
+    if (labelsOf(item).includes('agent/claimed')) return;
     let touched: string | undefined;
     if (isNonEmptyString(item.updatedAt)) touched = item.updatedAt;
     else if (isNonEmptyString(item.createdAt)) touched = item.createdAt;

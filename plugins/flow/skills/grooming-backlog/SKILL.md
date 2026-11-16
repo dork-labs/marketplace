@@ -64,11 +64,10 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
   Same-defect-class families are `related`, and stay open.
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
-- **Expired Coulds:** every GRM-16 failure in the baseline audit is an open Could
-  (priority 4) untouched for 30 or more days. Propose closing each as `canceled` with
-  the comment "Closed after 30 days as a Could. Reopen it if it matters." (the code's
-  `COULD_EXPIRY_COMMENT` in `audit-backlog.ts`). Its evidence is its last-touched date;
-  it needs no ship proof.
+- **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
+  untouched for 30 or more days. Propose closing it as `canceled` with the comment the
+  failure quotes (`COULD_EXPIRY_COMMENT` in `audit-backlog.ts`). Its evidence is its
+  last-touched date; it needs no ship proof.
 - **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
   one (the current maintenance project when none fits); never leave one project-less.
 
@@ -81,14 +80,11 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 
 1. One `type/*`: bug → `signal`; investigate/decide → `research`; wish → `idea`;
    scoped work → `task`; programme tracker → `meta` (never ready).
-2. A MoSCoW bucket on the native priority, by the table in
-   `<flow-root>/skills/triaging-work/SKILL.md` (_The MoSCoW buckets_), or the repo's own
-   rubric where its agent instructions name one: **Must** `2` (`1` urgent only if broken
-   now: mainline red, an open hole, data loss, a blocked user), **Should** `3`, **Could**
-   `4`, **Won't** proposed for closing with a reason. Most items are Should; a Must share
-   above about one in five means the bar slipped. Each cycle a Should is promoted, kept
-   or dropped to Could. Only a Must is proposed `agent/ready`.
-3. A size (required for ready).
+2. A MoSCoW bucket, by _The MoSCoW buckets_ in
+   `<flow-root>/skills/triaging-work/SKILL.md` (a Won't is proposed for closing with a
+   reason). Each cycle a Should is promoted, kept or dropped to Could. Only a Must is
+   proposed `agent/ready`.
+3. A size, on the tracker's own estimate scale.
 4. `stage/execute` (one component, no new pattern) or `stage/ideate` (multi-layer, new
    pattern, architectural decision). In doubt: complex.
 5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete

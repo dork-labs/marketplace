@@ -2,18 +2,24 @@
  * What makes a new item complete enough for `flow create` to file it
  * (DOR-4546): every item is triaged the moment it is filed, so it arrives with
  * a type, a MoSCoW priority, a size, a project, a proof section and a done-when
- * section. `flow create` names every missing one in a single refusal.
+ * section. `flow create` names every problem, malformed or missing, in a
+ * single refusal.
  *
  * **MoSCoW on the tracker's own priority (1-4).** 1 urgent and 2 high are
  * Must (urgent only for something broken now), 3 medium is Should, 4 low is
  * Could; a Won't is not filed. 0 ("none") is refused: an item with no priority
- * has not been triaged.
+ * has not been triaged. The buckets themselves are explained once, in the
+ * triaging-work skill.
  *
  * **Sections.** A section is a markdown heading (`#` to `######`) or a bold
  * label line (`**Proof:**`), matched without case, with a trailing colon or
- * not, and it must hold some text before the next heading or section label. Proof also reads
- * as "Evidence"; done-when also reads as "Definition of done", "Acceptance
- * criteria" or "Validation criteria" (the section a ready item needs anyway).
+ * not, and it must hold some text. A heading section runs to the next heading
+ * of its own level or higher (a sub-heading is part of it); a bold-label
+ * section runs to the next heading. Either also ends at the next proof or
+ * done-when label. Lines inside a code fence are text, never headings. Proof
+ * also reads as "Evidence"; done-when also reads as "Definition of done",
+ * "Acceptance criteria" or "Validation criteria" (the section a ready item
+ * needs anyway).
  *
  * @module @dorkos/flow/cli/create-fields
  */
@@ -27,14 +33,20 @@ const PROOF_NAMES = ['proof', 'evidence'];
 /** The headings that count as the done-when section, normalized. */
 const DONE_NAMES = ['done when', 'definition of done', 'acceptance criteria', 'validation criteria'];
 
+/** Every section name a section ends at. */
+const SECTION_NAMES = [...PROOF_NAMES, ...DONE_NAMES];
+
 /** The t-shirt sizes a tracker without numeric estimates uses, as `WorkItem.size`. */
 const TSHIRT = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
 
 /** A markdown heading line, `#` to `######`. */
-const HEADING = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/;
+const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 
 /** A bold label line, `**Proof:** text` or `__Proof__`. */
 const BOLD_LABEL = /^\s{0,3}(?:\*\*|__)(.+?)(?:\*\*|__)\s*:?\s*(.*)$/;
+
+/** A code fence's opening or closing line. */
+const FENCE = /^\s{0,3}(```|~~~)/;
 
 /** A heading's name, normalized: lower case, single spaces, no trailing colon. */
 function normalizeName(name: string): string {
@@ -46,20 +58,33 @@ function normalizeName(name: string): string {
     .trim();
 }
 
-/** A heading on one line: its normalized name and any text after it on that line. */
-function headingOf(line: string): { name: string; rest: string } | undefined {
-  const heading = HEADING.exec(line);
-  if (heading) return { name: normalizeName(heading[1]), rest: '' };
-  const bold = BOLD_LABEL.exec(line);
-  if (bold) return { name: normalizeName(bold[1]), rest: bold[2] };
-  return undefined;
+/** One line of a description, read for sections. */
+interface Line {
+  /** The line's text. */
+  text: string;
+  /** Its heading level (1-6), 7 for a bold label, or `undefined` for plain text. */
+  level?: number;
+  /** The heading's normalized name. */
+  name?: string;
+  /** Text after a bold label on its own line. */
+  rest?: string;
 }
 
-/** Whether a line starts a new section: a markdown heading, or a proof or done-when label. */
-function endsSection(line: string): boolean {
-  if (HEADING.test(line)) return true;
-  const heading = headingOf(line);
-  return heading !== undefined && [...PROOF_NAMES, ...DONE_NAMES].includes(heading.name);
+/** Read each line once: headings and labels outside code fences, everything else text. */
+function readLines(description: string): Line[] {
+  let fenced = false;
+  return description.split('\n').map((text) => {
+    if (FENCE.test(text)) {
+      fenced = !fenced;
+      return { text };
+    }
+    if (fenced) return { text };
+    const heading = HEADING.exec(text);
+    if (heading) return { text, level: heading[1].length, name: normalizeName(heading[2]), rest: '' };
+    const bold = BOLD_LABEL.exec(text);
+    if (bold) return { text, level: 7, name: normalizeName(bold[1]), rest: bold[2] };
+    return { text };
+  });
 }
 
 /**
@@ -70,15 +95,19 @@ function endsSection(line: string): boolean {
  * @returns `true` when one of those sections has text in it.
  */
 export function hasSection(description: string, names: readonly string[]): boolean {
-  const lines = description.split('\n');
+  const lines = readLines(description);
   for (let i = 0; i < lines.length; i += 1) {
-    const heading = headingOf(lines[i]);
-    if (heading === undefined || !names.includes(heading.name)) continue;
-    let body = heading.rest;
-    // The section runs to the next markdown heading or the next proof or
-    // done-when label: any other bold line ("**Seen in:** the log") is text.
-    for (let j = i + 1; j < lines.length && !endsSection(lines[j]); j += 1) {
-      body += lines[j];
+    const start = lines[i];
+    if (start.level === undefined || !names.includes(start.name ?? '')) continue;
+    let body = start.rest ?? '';
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j];
+      const heading = line.level !== undefined && line.level <= 6;
+      if (heading && (line.level as number) <= start.level) break;
+      if (line.level !== undefined && SECTION_NAMES.includes(line.name ?? '')) break;
+      // A sub-heading belongs to the section but is not its text; any other
+      // bold line ("**Seen in:** the log") is.
+      if (!heading) body += line.text;
     }
     if (body.trim() !== '') return true;
   }
@@ -106,43 +135,45 @@ export function hasDoneWhen(description: string): boolean {
 }
 
 /**
- * `--priority` as 1-4, when given.
+ * `--priority` as 1-4, when given and well formed.
  *
  * @param raw - The flag's value, when given.
- * @returns The priority, or `undefined` when the flag was not given.
- * @throws {UsageError} On 0 ("none") or anything but 1-4.
+ * @param problems - Where a malformed value is recorded.
+ * @returns The priority, or `undefined` when absent or malformed.
  */
-export function priorityOf(raw: string | undefined): NewItem['priority'] {
+export function priorityOf(raw: string | undefined, problems: string[]): NewItem['priority'] {
   if (raw === undefined) return undefined;
   if (raw === '0') {
-    throw new UsageError(
-      '--priority 0 means none, and a new item is triaged as it is filed: pass 1 or 2 (Must), 3 (Should) or 4 (Could); a Won\'t is not filed'
+    problems.push(
+      "--priority 0 means none, and a new item is triaged as it is filed: pass 1 or 2 (Must), 3 (Should) or 4 (Could); a Won't is not filed"
     );
+    return undefined;
   }
   if (!/^[1-4]$/.test(raw)) {
-    throw new UsageError(
-      `--priority must be 1 to 4 (1 or 2 Must, 3 Should, 4 Could), not "${raw}"`
-    );
+    problems.push(`--priority must be 1 to 4 (1 or 2 Must, 3 Should, 4 Could), not "${raw}"`);
+    return undefined;
   }
   return Number(raw) as NewItem['priority'];
 }
 
 /**
- * `--size` as the tracker's estimate, when given: a whole number of points
- * above 0, or a t-shirt size.
+ * `--size` as the tracker's estimate, when given and well formed: a whole
+ * number of points above 0, or a t-shirt size. Which of the two, and which
+ * numbers, is the tracker's own scale; the adapter refuses one it cannot hold.
  *
  * @param raw - The flag's value, when given.
- * @returns The size, or `undefined` when the flag was not given.
- * @throws {UsageError} On anything else, 0 included (it would read as "unknown").
+ * @param problems - Where a malformed value is recorded.
+ * @returns The size, or `undefined` when absent or malformed (0 included: it would read as "unknown").
  */
-export function sizeOf(raw: string | undefined): NewItem['size'] {
+export function sizeOf(raw: string | undefined, problems: string[]): NewItem['size'] {
   if (raw === undefined) return undefined;
   const value = raw.trim().toLowerCase();
   if (/^[1-9]\d{0,3}$/.test(value)) return Number(value);
   if (TSHIRT.includes(value)) return value;
-  throw new UsageError(
-    `--size takes whole points above 0 (for example 1, 2, 3, 5 or 8) or a t-shirt size (${TSHIRT.join(', ')}), not "${raw}"`
+  problems.push(
+    `--size takes a whole number of points above 0, on the tracker's own estimate scale, or a t-shirt size (${TSHIRT.join(', ')}), not "${raw}"`
   );
+  return undefined;
 }
 
 /** What {@link missingFields} reads. */
@@ -153,19 +184,20 @@ export interface Draft {
   description: string | undefined;
   /** The labels. */
   labels: readonly string[];
-  /** The priority, when given. */
-  priority: NewItem['priority'];
-  /** The size, when given. */
-  size: NewItem['size'];
-  /** The project, when given. */
+  /** The priority flag as given, malformed or not. */
+  priority: string | undefined;
+  /** The size flag as given, malformed or not. */
+  size: string | undefined;
+  /** The project flag as given, empty or not. */
   project: string | undefined;
 }
 
 /**
  * Every field a draft lacks, each as a phrase naming the flag that fills it.
+ * A field given but malformed is not missing: its own problem names it.
  *
  * @param draft - The item as asked for.
- * @returns The missing fields, in a fixed order; empty when it is complete.
+ * @returns The missing fields, in a fixed order; empty when none is.
  */
 export function missingFields(draft: Draft): string[] {
   const missing: string[] = [];
@@ -181,7 +213,9 @@ export function missingFields(draft: Draft): string[] {
   if (draft.priority === undefined) {
     missing.push('a priority (--priority 1 or 2 Must, 3 Should, 4 Could)');
   }
-  if (draft.size === undefined) missing.push('a size (--size, for example 1, 2, 3, 5 or 8)');
+  if (draft.size === undefined) {
+    missing.push("a size (--size, on the tracker's own estimate scale)");
+  }
   if (draft.project === undefined) missing.push('a project (--for-project)');
   if (draft.description !== undefined) {
     if (!hasProof(draft.description)) {
@@ -199,14 +233,15 @@ export function missingFields(draft: Draft): string[] {
 }
 
 /**
- * The refusal for an incomplete draft.
+ * The one refusal for an incomplete or malformed draft.
  *
- * @param missing - What {@link missingFields} returned (not empty).
- * @returns The error, naming every missing field.
+ * @param problems - Every malformed value and missing field (not empty).
+ * @returns The error, naming each of them.
  */
-export function incomplete(missing: readonly string[]): UsageError {
+export function refusal(problems: readonly string[]): UsageError {
+  const what = problems.length === 1 ? 'Fix this' : `Fix these ${problems.length}`;
   return new UsageError(
-    `flow create files only a triaged item, and this one is missing ${missing.length === 1 ? 'one thing' : `${missing.length} things`}: ${missing.join('; ')}. Nothing was filed.`
+    `flow create files only a complete, triaged item. ${what}: ${problems.join('; ')}. Nothing was filed.`
   );
 }
 
@@ -218,19 +253,17 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
  * may list several, separated by commas or spaces.
  *
  * @param values - The flag's values, in order.
+ * @param problems - Where a malformed value is recorded.
  * @returns The identifiers, upper-cased as trackers show them.
- * @throws {UsageError} When one is empty or not an identifier.
  */
-export function notDuplicateOf(values: readonly string[]): string[] {
+export function notDuplicateOf(values: readonly string[], problems: string[]): string[] {
   const ids = new Set<string>();
   for (const value of values) {
     const parts = value.split(/[\s,]+/).filter((part) => part !== '');
-    if (parts.length === 0) throw new UsageError('a --not-duplicate-of is empty');
+    if (parts.length === 0) problems.push('a --not-duplicate-of is empty');
     for (const part of parts) {
-      if (!IDENTIFIER.test(part)) {
-        throw new UsageError(`--not-duplicate-of takes item identifiers, and "${part}" is not one`);
-      }
-      ids.add(part.toUpperCase());
+      if (IDENTIFIER.test(part)) ids.add(part.toUpperCase());
+      else problems.push(`--not-duplicate-of takes item identifiers, and "${part}" is not one`);
     }
   }
   return [...ids];

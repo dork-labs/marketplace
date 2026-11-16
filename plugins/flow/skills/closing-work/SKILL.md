@@ -42,16 +42,15 @@ flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
 ```
 
 Always a type, a priority and a project (this item's), and a size; never an `agent/*`
-label. The priority is a MoSCoW bucket and the description carries `## Proof` and
-`## Done when`, as `<flow-root>/skills/capturing-work/SKILL.md` steps 3 and 4 say;
-exit 5 names a near-duplicate already open: comment there instead. Small follow-ups
-from one item are **one** follow-up with a checklist, not one each. The `--key`
-makes a retry return the first item.
+label. Write it as `<flow-root>/skills/capturing-work/SKILL.md` steps 3 and 4 say,
+`nearMatches` included. Small follow-ups from one item are **one** follow-up with a
+checklist, not one each. The `--key` makes a retry return the first item.
 
-Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B): ready
-only if it has a size and an `## On Completion` section
-and passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
-phase 4 step 5), otherwise park it with one question. Note any items this one was
+Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B) by its
+bucket. A Should or Could stays in the backlog, unreadied. A Must is readied only if
+it has an `## On Completion` section and passes the six readiness rules
+(`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5); otherwise
+park it with one question. Note any items this one was
 blocking as unblocked (`getRelations`); `link` only real typed relations.
 
 ### 5. Project pulse check

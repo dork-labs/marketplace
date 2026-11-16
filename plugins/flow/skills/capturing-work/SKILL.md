@@ -24,13 +24,11 @@ and lands it in the tracker's intake state.
    ask for the **single** missing detail and stop — do not expand scope or
    research. (CAPTURE is an intent stage: when genuinely unsure, lean toward
    asking — spec §5 stage bias.)
-3. **Bucket, size and place it.** Priority is a MoSCoW bucket on the tracker's own
-   field, by _The MoSCoW buckets_ in `<flow-root>/skills/triaging-work/SKILL.md` (or
-   the repo's own rubric, where its agent instructions name one): `2` Must (`1` only
-   if broken now), `3` Should, `4` Could. A Won't is not filed: say so and stop. Size
-   is the tracker's estimate (`1` under an hour, `2` half a day, `3` a day, `5` a few
-   days, `8` about a week; bigger is a project: split it). The project is one of the
-   team's; if none fits, ask.
+3. **Bucket, size and place it** by _The MoSCoW buckets_ in
+   `<flow-root>/skills/triaging-work/SKILL.md`, or the repo's own rubric where its
+   agent instructions name one. A Won't is not filed: say so and stop. The size is on
+   the tracker's own estimate scale. The project is one of the team's; if none fits,
+   use the default or maintenance project the repo's rubric names, else ask.
 4. **Create the item.** Never add `agent/*` or `stage/*` labels: TRIAGE decides.
 
    ```bash
@@ -45,19 +43,19 @@ and lands it in the tracker's intake state.
      is filed): the input, with its source path if it came from a file, then a
      `## Proof` section (what was seen or asked: a log line, `file:line`, a
      failing command, steps, or the operator's own words) and a `## Done when`
-     section (one to three lines you can check). A one-line
-     `--description '<text>'` works only when it holds both sections, which it
-     cannot: use the file;
+     section (one to three lines you can check), then one line saying what you
+     searched for duplicates (`Searched: <words>`). A one-line
+     `--description '<text>'` cannot hold all that: use the file;
    - `type/idea` always: TRIAGE re-classifies it. `origin/human`: the operator
      had the thought;
    - `--key`: a short, specific slug, so a retried capture returns the first
      item instead of filing twice.
 
-   `flow create` names every missing field in one message (exit 2): fill them and
-   run it again. **Exit 5 names an open item with a near-matching title:** read
-   it. The same work: comment on it with what is new (`flow comment`) and report
-   that instead of filing. Different work: run again with
-   `--not-duplicate-of <ids>` naming every match it listed.
+   `flow create` names every problem in one message (exit 2): fix them and run it
+   again. **A `nearMatches` list in its JSON** names open items with a near-matching
+   title: read each. The same work: comment on it with what is new (`flow comment`)
+   and report that instead of filing. Different work: run again with
+   `--not-duplicate-of <ids>` naming every one it listed.
 
 5. **Report** `<identifier> - <title>`, its bucket, and that it awaits triage.
    When `created` is false, say it was already captured and show that item's

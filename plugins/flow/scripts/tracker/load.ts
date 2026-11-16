@@ -161,7 +161,9 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     transport: options.transport ?? createExternalCliTransport(),
     warn,
   });
-  return guardAdapter(checkShape(adapter, tracker, file), tracker);
+  const guarded = guardAdapter(checkShape(adapter, tracker, file), tracker);
+  guarded.contractVersion = module.CONTRACT_VERSION;
+  return guarded;
 }
 
 /**

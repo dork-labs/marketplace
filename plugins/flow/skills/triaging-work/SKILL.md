@@ -35,8 +35,10 @@ From an intake source → C; the trigger names an item → B; else A.
 
 ## The MoSCoW buckets
 
-Every item gets one, on the tracker's own priority, never a label. A repo may keep its
-own rubric (its agent instructions name it); follow it where it says more.
+The one rubric every flow skill points at. Every item gets one bucket, on the tracker's
+own priority, never a label, and a size on the tracker's own estimate scale. A repo may
+keep its own rubric (its agent instructions name it, with its scale and its default
+project); follow it where it says more.
 
 | Bucket     | Priority                          | After triage                                                     |
 | ---------- | --------------------------------- | ---------------------------------------------------------------- |
@@ -67,14 +69,12 @@ a project**; small follow-ups from one PR are one parent item with a checklist.
    No strong signal: **Idea**.
 
 3. Create the item(s) with `flow create`, as `<flow-root>/skills/capturing-work/SKILL.md`
-   step 4 says: imperative title, the full input as description (with its source path)
-   plus `## Proof` and `## Done when`, the type, origin `human`, the bucket's priority,
-   a size and the project. `flow create` refuses an item missing any of them, and
-   names an open near-duplicate (exit 5): comment there instead. A dependency in the
-   description becomes a typed blocking relation (dispatch reads relations, never
-   prose). Then route it by its bucket (above): a Must is readied with
-   `flow triage --ready` at the stage Path B step 4 picks. Only an Ambiguous input
-   (parked) or an `idea` held for Path B stays unready.
+   step 4 says (its `nearMatches` handling included), with the type, origin `human`,
+   the bucket's priority, a size and the project. A dependency in the description
+   becomes a typed blocking relation (dispatch reads relations, never prose). Then
+   route it by its bucket (above): a Must is readied with `flow triage --ready` at the
+   stage Path B step 4 picks. Anything but a Must stays unready; an Ambiguous input
+   is parked.
 4. **A Brief is a floor gate.** Have the proposed decomposition checked (`answeredBy`)
    before creating a project; only on approval create it, the children, and the links.
 5. Provenance comment and report (below).

@@ -1,6 +1,6 @@
 {
   "commands/capture.md": {
-    "baseline": 106,
+    "baseline": 105,
     "target": 71
   },
   "commands/decompose.md": {
@@ -96,7 +96,7 @@
     "target": 1077
   },
   "docs/intake.mdx": {
-    "baseline": 478,
+    "baseline": 494,
     "target": 426
   },
   "docs/landing.mdx": {
@@ -152,7 +152,7 @@
     "target": 1267
   },
   "README.md": {
-    "baseline": 2287,
+    "baseline": 2286,
     "target": 2249
   },
   "skills/building-adapters/references/conformance-harness.md": {
@@ -168,11 +168,11 @@
     "target": 932
   },
   "skills/capturing-work/SKILL.md": {
-    "baseline": 706,
+    "baseline": 682,
     "target": 477
   },
   "skills/closing-work/SKILL.md": {
-    "baseline": 657,
+    "baseline": 647,
     "target": 598
   },
   "skills/decomposing-work/SKILL.md": {
@@ -212,11 +212,11 @@
     "target": 228
   },
   "skills/flow-triage/SKILL.md": {
-    "baseline": 445,
+    "baseline": 449,
     "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
-    "baseline": 1322,
+    "baseline": 1259,
     "target": 1156
   },
   "skills/ideating-features/SKILL.md": {
@@ -228,7 +228,7 @@
     "target": 1117
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1544,
+    "baseline": 1495,
     "target": 1380
   },
   "skills/specifying-work/SKILL.md": {
@@ -240,7 +240,7 @@
     "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 1343,
+    "baseline": 1333,
     "target": 1135
   },
   "skills/verifying-work/proof-test.md": {

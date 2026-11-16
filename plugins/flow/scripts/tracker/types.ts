@@ -255,6 +255,12 @@ export type ItemWithComments = WorkItem & {
 export interface CodeAdapter {
   /** The methods this adapter implements. */
   capabilities: readonly Capability[];
+  /**
+   * The contract version the adapter's code declares (`CONTRACT_VERSION`). Set
+   * by flow's loader, never by the adapter; absent for an adapter flow did not
+   * load (a test's), which is then taken to be current.
+   */
+  contractVersion?: string;
   /** The account the adapter acts as. */
   getCurrentUser(): Promise<TrackerAccount>;
   /** Optional bounded, shared display cache. Unsupported adapters refuse timer snapshots. */
