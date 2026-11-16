@@ -847,3 +847,19 @@ describe('FlowConfigSchema — the groom block', () => {
     expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(false);
   });
 });
+
+describe('groom.couldExpiryDays (DOR-4546)', () => {
+  // Purpose: how long a waiting Could may sit untouched is the team's call,
+  // 60 days unless set, and only a positive whole number of days is a setting.
+  it('defaults to 60', () => {
+    expect(FlowConfigSchema.parse({}).groom.couldExpiryDays).toBe(60);
+  });
+
+  it('takes a positive whole number', () => {
+    expect(FlowConfigSchema.parse({ groom: { couldExpiryDays: 30 } }).groom.couldExpiryDays).toBe(30);
+  });
+
+  it.each([0, -1, 1.5, '60', null])('refuses %j', (value) => {
+    expect(FlowConfigSchema.safeParse({ groom: { couldExpiryDays: value } }).success).toBe(false);
+  });
+});

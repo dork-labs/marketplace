@@ -114,6 +114,38 @@ describe('flow audit', () => {
     expect(failure.detail).not.toContain('cloud-contract');
   });
 
+  it('expires a waiting Could after groom.couldExpiryDays, 60 unless set (GRM-16)', async () => {
+    // Purpose: the config reaches the oracle, and the closing comment names its days.
+    // The run's clock is 2026-09-26; this Could was last touched 40 days before.
+    const withCould = (): FakeBacklog => {
+      const backlog = cleanBacklog();
+      backlog.items.push(
+        readyItem('FAKE-4', {
+          stateCategory: 'backlog',
+          labels: ['type/idea'],
+          priority: 4,
+          updatedAt: '2026-08-17T12:00:00.000Z',
+        })
+      );
+      return backlog;
+    };
+    temp = tempProject({ tracker: 'fake', identity: { agent: 'flow-bot' } });
+    const byDefault = await runFlow(['audit', '--json'], temp, withCould());
+    expect(byDefault.code).toBe(EXIT.ok);
+    temp.cleanup();
+
+    temp = tempProject({
+      tracker: 'fake',
+      identity: { agent: 'flow-bot' },
+      groom: { couldExpiryDays: 30 },
+    });
+    const short = await runFlow(['audit', '--json'], temp, withCould());
+    expect(short.code).toBe(EXIT.findings);
+    const [failure] = JSON.parse(short.stdout).failures;
+    expect(failure).toMatchObject({ invariant: 'GRM-16' });
+    expect(failure.detail).toContain('Closed after 30 days as a Could. Reopen it if it matters.');
+  });
+
   it('audits a --snapshot file without calling the adapter', async () => {
     // Purpose: a drain reuses one pull across next, audit and status; with
     // --snapshot the tracker must not be touched at all.

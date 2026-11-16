@@ -2,7 +2,7 @@
  * What the daily triage takes up (DOR-4546): an item with a bucket and a
  * project is never triaged again (a Must excepted, until it is readied or
  * parked), so a Could's last-changed time is left alone for the groom's
- * 30-day expiry. Made-up items only.
+ * expiry (groom.couldExpiryDays). Made-up items only.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
