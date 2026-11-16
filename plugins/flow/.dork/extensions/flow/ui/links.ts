@@ -75,15 +75,21 @@ export function webHref(url: string | null | undefined): string | null {
   }
 }
 
-/** The host's canvas, once `activate` has handed it in. */
-let canvas: Pick<ClientApi, 'openCanvas'> | null = null;
+/** The host's canvas and toasts, once `activate` has handed them in. */
+let canvas: Pick<ClientApi, 'openCanvas' | 'notify'> | null = null;
+
+/** The longest canvas title DorkOS takes. */
+const TITLE_MAX = 120;
+
+/** Said when DorkOS would not show the page. */
+export const PAGE_FAILED_TEXT = "DorkOS couldn't show that page. Try again.";
 
 /**
  * Hand the links the frame's canvas. `activate` calls it in every frame.
  *
  * @param api - The frame's `api`, or `null` to forget it (tests).
  */
-export function setWebOpener(api: Pick<ClientApi, 'openCanvas'> | null): void {
+export function setWebOpener(api: Pick<ClientApi, 'openCanvas' | 'notify'> | null): void {
   canvas = api;
 }
 
@@ -100,5 +106,9 @@ export function openWebPage(event: { preventDefault(): void }, url: string, titl
   const open = canvas?.openCanvas;
   if (typeof open !== 'function') return;
   event.preventDefault();
-  void Promise.resolve(open.call(canvas, { type: 'browser', url, title })).catch(() => {});
+  const host = canvas;
+  const shown = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
+  void Promise.resolve()
+    .then(() => open.call(host, { type: 'browser', url, title: shown }))
+    .catch(() => host?.notify?.(PAGE_FAILED_TEXT, { type: 'error' }));
 }

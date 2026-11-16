@@ -267,10 +267,8 @@ Autonomy is never a loss of control, in any setup:
   scheduled tick checks first, so the tick stops at once under any scheduler and a plugin update
   cannot undo the pause. On DorkOS it also switches this project's flow schedules off on the
   Schedules page when it can reach them, and `/flow resume` in a chat switches back on only those.
-  Resuming from the Flow screens, or a pause ending on its own, leaves them off: the project's
-  Flow tab says so, with a button to the Schedules page, where only you can switch them on.
-  Elsewhere the
-  scheduler still starts each tick on time and the tick stops at its first step; disable your cron
+  Resuming from the Flow screens leaves them off: the project's Flow tab says so, with a button
+  to the Schedules page, where only you can switch them on. Elsewhere the scheduler still starts each tick on time and the tick stops at its first step; disable your cron
   or CI job to stop it starting at all.
 - **A pause can end on its own.** In DorkOS every Pause asks how long: until tomorrow 9am, for 1
   hour, or until you resume. The Flow tab then says "Paused until 9:00" with Resume beside it, and

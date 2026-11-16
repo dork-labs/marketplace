@@ -13,7 +13,8 @@
  *   dial, which lives in DorkOS and only a person writes), whether it starts
  *   work on its own and how much at once (the project's git-ignored
  *   `config.local.json`), the pause menu's default, and the accounts the
- *   project may use (DorkOS's rule, written from the browser).
+ *   project may use (DorkOS's rule, shown read-only; a person changes it in
+ *   Settings → Runtimes).
  *
  * Every change saves at once. If flow or DorkOS refuses it, the control goes
  * back to the saved value and says why under it.

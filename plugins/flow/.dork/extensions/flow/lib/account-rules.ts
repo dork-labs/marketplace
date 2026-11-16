@@ -143,14 +143,19 @@ export async function readEligibility(
   return { project: here, allow, accounts };
 }
 
+/** The id DorkOS reserves for DorkOS credits, never a registered row's (core `isReservedAccountId`). */
+const CREDITS_ACCOUNT_ID = 'dorkos-credits';
+
 /**
  * Whether DorkOS can launch the account, so its own eligibility read lists it:
- * Main, or a registered row whose id passes the id pattern and is not the
- * reserved `default`.
+ * Main, or a registered row whose id passes the id pattern and is not one
+ * DorkOS reserves (`default`, `dorkos-credits`).
  */
 function routable(account: AccountSummary): boolean {
   if (account.implicit) return account.id === MAIN_ACCOUNT_ID;
-  return account.id !== MAIN_ACCOUNT_ID && isValidAccountId(account.id);
+  return (
+    account.id !== MAIN_ACCOUNT_ID && account.id !== CREDITS_ACCOUNT_ID && isValidAccountId(account.id)
+  );
 }
 
 /** A project reference with only its root and name. */
