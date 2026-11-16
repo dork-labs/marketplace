@@ -34,11 +34,12 @@ function store(over: Partial<WorkItem>, comments = 0): FakeBacklog {
       'ABC-1': Array.from({ length: comments }, (_, i) => ({
         id: `c${i}`,
         author: 'flow',
+        authorIsTrusted: true,
         body: 'Which one?',
         createdAt: '2026-11-16T00:00:00.000Z',
       })),
     },
-  } as FakeBacklog;
+  };
 }
 
 const BEFORE = store({});
@@ -57,9 +58,13 @@ describe('notTriaged', () => {
 
   it('passes a readied Must, and a parked Must with one question', () => {
     const ready = { labels: ['type/task', 'agent/ready', 'stage/execute'] };
-    expect(judge(store({ priority: 2, project: PROJECT, stateCategory: 'unstarted', ...ready })))
-      .toBeUndefined();
-    const parked = store({ priority: 2, project: PROJECT, labels: ['type/task', 'agent/needs-input'] }, 1);
+    expect(
+      judge(store({ priority: 2, project: PROJECT, stateCategory: 'unstarted', ...ready }))
+    ).toBeUndefined();
+    const parked = store(
+      { priority: 2, project: PROJECT, labels: ['type/task', 'agent/needs-input'] },
+      1
+    );
     expect(judge(parked)).toBeUndefined();
   });
 

@@ -824,13 +824,16 @@ describe('FlowConfigSchema — the groom block', () => {
   // Purpose: with no groom block, GRM-12 exempts nothing; a default that
   // quietly allowed some label would hide bare tracker labels from the audit.
   it('defaults unnamespacedLabels to an empty list', () => {
-    expect(FlowConfigSchema.parse({}).groom).toEqual({ unnamespacedLabels: [] });
+    expect(FlowConfigSchema.parse({}).groom).toEqual({
+      unnamespacedLabels: [],
+      couldExpiryDays: 60,
+    });
   });
 
   // Purpose: a valid bare label reads back through Zod and the JSON Schema.
   it('accepts bare labels', () => {
     const groom = { unnamespacedLabels: ['cloud-contract', 'Needs Design'] };
-    expect(FlowConfigSchema.parse({ groom }).groom).toEqual(groom);
+    expect(FlowConfigSchema.parse({ groom }).groom).toEqual({ ...groom, couldExpiryDays: 60 });
     expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(true);
   });
 
@@ -856,7 +859,9 @@ describe('groom.couldExpiryDays (DOR-4546)', () => {
   });
 
   it('takes a positive whole number', () => {
-    expect(FlowConfigSchema.parse({ groom: { couldExpiryDays: 30 } }).groom.couldExpiryDays).toBe(30);
+    expect(FlowConfigSchema.parse({ groom: { couldExpiryDays: 30 } }).groom.couldExpiryDays).toBe(
+      30
+    );
   });
 
   it.each([0, -1, 1.5, '60', null])('refuses %j', (value) => {

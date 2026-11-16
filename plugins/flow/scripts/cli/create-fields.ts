@@ -31,7 +31,12 @@ import type { NewItem } from '../tracker/types.ts';
 const PROOF_NAMES = ['proof', 'evidence'];
 
 /** The headings that count as the done-when section, normalized. */
-const DONE_NAMES = ['done when', 'definition of done', 'acceptance criteria', 'validation criteria'];
+const DONE_NAMES = [
+  'done when',
+  'definition of done',
+  'acceptance criteria',
+  'validation criteria',
+];
 
 /** Every section name a section ends at. */
 const SECTION_NAMES = [...PROOF_NAMES, ...DONE_NAMES];
@@ -50,12 +55,7 @@ const FENCE = /^\s{0,3}(```|~~~)/;
 
 /** A heading's name, normalized: lower case, single spaces, no trailing colon. */
 function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[-_]+/g, ' ')
-    .replace(/:\s*$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return name.toLowerCase().replace(/[-_]+/g, ' ').replace(/:\s*$/, '').replace(/\s+/g, ' ').trim();
 }
 
 /** One line of a description, read for sections. */
@@ -80,7 +80,8 @@ function readLines(description: string): Line[] {
     }
     if (fenced) return { text };
     const heading = HEADING.exec(text);
-    if (heading) return { text, level: heading[1].length, name: normalizeName(heading[2]), rest: '' };
+    if (heading)
+      return { text, level: heading[1].length, name: normalizeName(heading[2]), rest: '' };
     const bold = BOLD_LABEL.exec(text);
     if (bold) return { text, level: 7, name: normalizeName(bold[1]), rest: bold[2] };
     return { text };

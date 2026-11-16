@@ -1170,7 +1170,11 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       labels: ['type/idea', 'origin/human'],
       priority: 3 as const,
       size: 2,
-      project: { id: 'proj-selftest', name: 'Self-test project', stateCategory: 'started' as const },
+      project: {
+        id: 'proj-selftest',
+        name: 'Self-test project',
+        stateCategory: 'started' as const,
+      },
     };
     const after = { ...c.backlog, items: [...c.backlog.items, captured] };
     const input = { sandbox: tmp, before: c.backlog, after };
@@ -1266,16 +1270,18 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       await judge('triage', (s) => flow(s, 'triage', 'FAKE-1', '--park', 'Which report?'))
     ).toMatch(/carries agent\/needs-input/);
     expect(
-      await judge('triage', (s) => plant(s, (store) => Object.assign(store.items[0], { priority: 2 })))
+      await judge('triage', (s) =>
+        plant(s, (store) => Object.assign(store.items[0], { priority: 2 }))
+      )
     ).toMatch(/FAKE-1 is a Must/);
     expect(
       await judge('triage', (s) =>
         plant(s, (store) => Object.assign(store.items[0], { stateCategory: 'unstarted' }))
       )
     ).toMatch(/neither readied, parked, nor left/);
-    expect(
-      await judge('triage', (s) => flow(s, 'release', 'FAKE-2', '--to', 'none'))
-    ).toMatch(/FAKE-2 changed/);
+    expect(await judge('triage', (s) => flow(s, 'release', 'FAKE-2', '--to', 'none'))).toMatch(
+      /FAKE-2 changed/
+    );
     expect(
       await judge('triage', (s) =>
         flow(s, 'create', '--title', 'Another', ...COMPLETE, '--label', 'type/idea')
@@ -1306,7 +1312,8 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       plant(s, (store) => {
         const next = store.items.find((i) => i.title === 'Translate the greeting') as WorkItem;
         if (over.includes('type')) next.labels = next.labels.filter((l) => !l.startsWith('type/'));
-        if (over.includes('origin')) next.labels = next.labels.filter((l) => !l.startsWith('origin/'));
+        if (over.includes('origin'))
+          next.labels = next.labels.filter((l) => !l.startsWith('origin/'));
         if (over.includes('priority')) delete next.priority;
         if (over.includes('project')) delete next.project;
         // A Must: only a Must is readied, and it may not be left unreadied.

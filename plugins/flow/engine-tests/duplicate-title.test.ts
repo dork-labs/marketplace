@@ -22,18 +22,17 @@ describe('titleWords', () => {
       'person',
       'clock',
     ]);
-    expect([...titleWords('Status of the analysis pages')]).toEqual([
-      'status',
-      'analysis',
-      'page',
-    ]);
+    expect([...titleWords('Status of the analysis pages')]).toEqual(['status', 'analysis', 'page']);
   });
 });
 
 describe('isNearMatch', () => {
   it.each([
     ['Export the monthly report as CSV', 'Let people export the monthly report as a CSV file'],
-    ['Room times show in UTC instead of the person clock', 'Show room times on the person own clock'],
+    [
+      'Room times show in UTC instead of the person clock',
+      'Show room times on the person own clock',
+    ],
     [
       'OpenCode turns end at 2 minutes on a slow local model',
       'OpenCode turns wait for a slow local model',
@@ -82,8 +81,8 @@ describe('nearMatches', () => {
       { identifier: 'ABC-1', title: 'Export the monthly report as CSV' },
       { identifier: 'ABC-2', title: 'Add a greeting command' },
     ];
-    expect(
-      nearMatches('Export the monthly report as CSV', items).map((m) => m.identifier)
-    ).toEqual(['ABC-1', 'ABC-3']);
+    expect(nearMatches('Export the monthly report as CSV', items).map((m) => m.identifier)).toEqual(
+      ['ABC-1', 'ABC-3']
+    );
   });
 });

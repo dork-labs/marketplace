@@ -501,7 +501,12 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
   it('leaves a started Could and a claimed Could alone: someone is working on them', () => {
     const old = daysAgo(90);
     const items = [
-      item('ABC-50', { priority: 4, updatedAt: old, stateCategory: 'started', stateName: 'In Progress' }),
+      item('ABC-50', {
+        priority: 4,
+        updatedAt: old,
+        stateCategory: 'started',
+        stateName: 'In Progress',
+      }),
       item('ABC-51', {
         priority: 4,
         updatedAt: old,

@@ -186,7 +186,9 @@ describe('flow create', () => {
     const description = t.fake.backlog.items[0].description;
     // The body, then the line saying what the duplicate check compared, then the signature.
     const checked = `${BODY}\n\n${duplicateLine('Export the monthly report as CSV', [])}`;
-    expect(checked).toContain('Duplicate check: open item titles compared on "export monthly report csv".');
+    expect(checked).toContain(
+      'Duplicate check: open item titles compared on "export monthly report csv".'
+    );
     expect(description.startsWith(checked)).toBe(true);
     expect(description.slice(checked.length)).toMatch(
       /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"claude-work",.*\} -->$/
@@ -300,7 +302,10 @@ describe('flow create', () => {
     writeFileSync(path.join(project, 'kept.md'), `Kept idea.${SECTIONS}\n`);
     // A look-alike outside the scratch folder is kept.
     mkdirSync(path.join(project, '.dork', 'flow', 'tmp-not'), { recursive: true });
-    writeFileSync(path.join(project, '.dork', 'flow', 'tmp-not', 'x.md'), `Near miss.${SECTIONS}\n`);
+    writeFileSync(
+      path.join(project, '.dork', 'flow', 'tmp-not', 'x.md'),
+      `Near miss.${SECTIONS}\n`
+    );
     const t = tracker();
     const args = (file: string) => ['create', '--title', 'T', ...REST, '--description-file', file];
 
@@ -601,10 +606,7 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
   it('collects malformed values into the same one refusal', async () => {
     // Purpose: a bad priority, a bad size and a missing project are fixed in one go.
     const message = await refused(
-      createArgs({ priority: '9', size: 'huge', 'for-project': null }, [
-        'type/idea',
-        'agent/ready',
-      ])
+      createArgs({ priority: '9', size: 'huge', 'for-project': null }, ['type/idea', 'agent/ready'])
     );
     expect(message).toContain('Fix these 4:');
     expect(message).toContain('--priority must be 1 to 4');
@@ -656,7 +658,9 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
 
   it('refuses an empty section: a heading with nothing under it is not proof', async () => {
     const message = await refused(
-      createArgs({ description: 'People want a CSV.\n\n## Proof\n\n## Done when\n\n- It downloads.' })
+      createArgs({
+        description: 'People want a CSV.\n\n## Proof\n\n## Done when\n\n- It downloads.',
+      })
     );
     expect(message).toContain(NAMES.proof);
     expect(message).not.toContain(NAMES.done);
@@ -665,7 +669,10 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
   it.each([
     ['other heading levels and a colon', '# proof:\n\nSeen in the log.\n\n### Done when:\n\n- Ok.'],
     ['bold labels', '**Proof:** the failing command.\n**Done-when:** the command passes.'],
-    ['Evidence and Acceptance criteria', '## Evidence\n\nA log line.\n\n## Acceptance criteria\n\n- Ok.'],
+    [
+      'Evidence and Acceptance criteria',
+      '## Evidence\n\nA log line.\n\n## Acceptance criteria\n\n- Ok.',
+    ],
     ['Validation criteria', '## Proof\n\nA log line.\n\n## Validation criteria\n\n- Ok.'],
   ])('accepts %s', async (_what, description) => {
     const t = tracker();
@@ -748,9 +755,9 @@ describe('flow create checks for a duplicate first (DOR-4546)', () => {
     });
     const partial = await flow([...CAPTURE, '--not-duplicate-of', 'FAKE-7'], t);
     expect(partial.code).toBe(EXIT.precondition);
-    expect((partial.json.nearMatches as { identifier: string }[]).map((m) => m.identifier)).toEqual([
-      'FAKE-8',
-    ]);
+    expect((partial.json.nearMatches as { identifier: string }[]).map((m) => m.identifier)).toEqual(
+      ['FAKE-8']
+    );
 
     const run = await flow([...CAPTURE, '--not-duplicate-of', 'fake-7, FAKE-8'], t);
     expect(run.code).toBe(EXIT.ok);
