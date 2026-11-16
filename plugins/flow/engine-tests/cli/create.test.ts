@@ -571,7 +571,7 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
     // Purpose: each required field alone is enough to stop the filing.
     const message = await refused([...argv]);
     expect(message).toContain(NAMES[field]);
-    expect(message).toContain('missing one thing');
+    expect(message).toContain('Fix this:');
     for (const [other, phrase] of Object.entries(NAMES)) {
       if (other !== field) expect(message).not.toContain(phrase);
     }
@@ -586,9 +586,51 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
       '--description',
       'Just a thought.',
     ]);
-    expect(message).toContain('missing 6 things');
+    expect(message).toContain('Fix these 6:');
     for (const phrase of Object.values(NAMES)) expect(message).toContain(phrase);
     expect(message).toContain('Nothing was filed');
+  });
+
+  it('collects malformed values into the same one refusal', async () => {
+    // Purpose: a bad priority, a bad size and a missing project are fixed in one go.
+    const message = await refused(
+      createArgs({ priority: '9', size: 'huge', 'for-project': null }, [
+        'type/idea',
+        'agent/ready',
+      ])
+    );
+    expect(message).toContain('Fix these 4:');
+    expect(message).toContain('--priority must be 1 to 4');
+    expect(message).toContain('--size takes');
+    expect(message).toContain('agent/* label');
+    expect(message).toContain(NAMES.project);
+    // Given but malformed is not also reported missing.
+    expect(message).not.toContain(NAMES.priority);
+    expect(message).not.toContain(NAMES.size);
+  });
+
+  it('reads no heading inside a code fence, and keeps a sub-heading inside its section', async () => {
+    const fenced = await refused(
+      createArgs({
+        description: 'Body.\n\n```\n## Proof\n\nnot really\n```\n\n## Done when\n\n- Ok.',
+      })
+    );
+    expect(fenced).toContain(NAMES.proof);
+    expect(fenced).not.toContain(NAMES.done);
+
+    const t = tracker();
+    const nested = await flow(
+      createArgs({
+        description: 'Body.\n\n## Proof\n\n### The log\n\nA line.\n\n## Done when\n\n- Ok.',
+      }),
+      t
+    );
+    expect(nested.code).toBe(EXIT.ok);
+    // A sub-heading alone is not proof.
+    const bare = await refused(
+      createArgs({ description: 'Body.\n\n## Proof\n\n### The log\n\n## Done when\n\n- Ok.' })
+    );
+    expect(bare).toContain(NAMES.proof);
   });
 
   it('names the title and description too when nothing at all is given', async () => {
@@ -632,6 +674,17 @@ describe('flow create files only a triaged item (DOR-4546)', () => {
     expect(t.fake.backlog.items[0].size).toBe('md');
   });
 
+  it('exits 3 naming the contract when the adapter is older than 3.1.0 and would drop the size', async () => {
+    const t = tracker();
+    const old = { ...t.adapter, capabilities: t.adapter.capabilities, contractVersion: '3.0.0' };
+    const run = await flow(CAPTURE, { ...t, adapter: old });
+    expect(run.code).toBe(EXIT.config);
+    expect(JSON.stringify(run.json)).toContain('contract 3.0.0');
+    expect(t.fake.writes).toEqual([]);
+    const current = { ...old, contractVersion: '3.1.0' };
+    expect((await flow(CAPTURE, { ...t, adapter: current })).code).toBe(EXIT.ok);
+  });
+
   it('exits 3 naming getBacklogSnapshot when the adapter cannot read the backlog', async () => {
     // Purpose: no duplicate check, no filing.
     const t = tracker({
@@ -653,12 +706,24 @@ describe('flow create checks for a duplicate first (DOR-4546)', () => {
     const t = tracker({ items: [existing('FAKE-7', { title: NEAR })] });
     const run = await flow(CAPTURE, t);
     expect(run.code).toBe(EXIT.precondition);
-    const said = JSON.stringify(run.json) + run.err;
-    expect(said).toContain(`FAKE-7 - ${NEAR}`);
-    expect(said).toContain('Comment on it');
-    expect(said).toContain('--not-duplicate-of FAKE-7');
+    expect(run.json).toMatchObject({
+      ok: false,
+      created: false,
+      nearMatches: [{ identifier: 'FAKE-7', title: NEAR, score: 0.8 }],
+    });
+    expect(String(run.json.message)).toContain('--not-duplicate-of FAKE-7');
     expect(t.calls).not.toContain('createItem');
     expect(t.fake.backlog.items).toHaveLength(1);
+    // The text mode's first line says what it is, whatever the exit code.
+    const text = await flow(CAPTURE, t, false);
+    expect(text.out.startsWith(`near duplicate: FAKE-7 - ${NEAR}`)).toBe(true);
+  });
+
+  it('leaves the --parent out of the check: a sub-item shares its words', async () => {
+    const t = tracker({ items: [existing('FAKE-7', { title: NEAR })] });
+    const run = await flow([...CAPTURE, '--parent', 'FAKE-7'], t);
+    expect(run.code).toBe(EXIT.ok);
+    expect(added(t, ['FAKE-7'])[0].parent).toBe('FAKE-7');
   });
 
   it('refuses on --dry-run too', async () => {
@@ -676,9 +741,9 @@ describe('flow create checks for a duplicate first (DOR-4546)', () => {
     });
     const partial = await flow([...CAPTURE, '--not-duplicate-of', 'FAKE-7'], t);
     expect(partial.code).toBe(EXIT.precondition);
-    const said = JSON.stringify(partial.json) + partial.err;
-    expect(said).toContain('FAKE-8');
-    expect(said).not.toContain(`FAKE-7 - ${NEAR}`);
+    expect((partial.json.nearMatches as { identifier: string }[]).map((m) => m.identifier)).toEqual([
+      'FAKE-8',
+    ]);
 
     const run = await flow([...CAPTURE, '--not-duplicate-of', 'fake-7, FAKE-8'], t);
     expect(run.code).toBe(EXIT.ok);

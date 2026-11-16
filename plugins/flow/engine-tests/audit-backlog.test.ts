@@ -475,6 +475,21 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
     expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-31']);
   });
 
+  it('leaves a started Could and a claimed Could alone: someone is working on them', () => {
+    const old = daysAgo(90);
+    const items = [
+      item('ABC-50', { priority: 4, updatedAt: old, stateCategory: 'started', stateName: 'In Progress' }),
+      item('ABC-51', {
+        priority: 4,
+        updatedAt: old,
+        stateCategory: 'unstarted',
+        labels: ['type/idea', 'agent/claimed'],
+      }),
+      item('ABC-52', { priority: 4, updatedAt: old, stateCategory: 'unstarted' }),
+    ];
+    expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-52']);
+  });
+
   it('fails GRM-16 naming the item and the closing comment', () => {
     const verdict = audit([item('ABC-40', { priority: 4, updatedAt: daysAgo(31) })], {
       now: NOW,

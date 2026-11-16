@@ -526,7 +526,7 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     expect(ready).toMatchObject({ id: 'live/triage', status: 'pass' });
     const none = await actAs('triage', []);
     expect(none).toMatchObject({ status: 'fail' });
-    expect(none.detail).toMatch(/neither readied nor parked/);
+    expect(none.detail).toMatch(/neither readied, parked, nor left/);
   });
 
   it('passes done/follow-up when the agent closes, files one follow-up with flow create, and parks it', async () => {
@@ -1262,7 +1262,17 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       flow(s, 'triage', 'FAKE-1', '--park', 'Which report?');
     expect(await judge('triage', ready)).toBeUndefined();
     expect(await judge('triage', park)).toBeUndefined();
-    expect(await judge('triage', () => {})).toMatch(/neither readied nor parked/);
+    expect(await judge('triage', () => {})).toMatch(/neither readied, parked, nor left/);
+    // A Should left in the backlog, in a project, is triaged; a Must left so is not.
+    const bucket = (priority: 2 | 3) => (s: ReturnType<typeof makeSandbox>) =>
+      plant(s, (store) => {
+        Object.assign(store.items[0], {
+          priority,
+          project: { id: 'proj-selftest', name: 'Self-test project', stateCategory: 'started' },
+        });
+      });
+    expect(await judge('triage', bucket(3))).toBeUndefined();
+    expect(await judge('triage', bucket(2))).toMatch(/FAKE-1 is a Must/);
     expect(
       await judge('triage', (s) => {
         park(s);
@@ -1323,6 +1333,8 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         if (over.includes('origin')) next.labels = next.labels.filter((l) => !l.startsWith('origin/'));
         if (over.includes('priority')) delete next.priority;
         if (over.includes('project')) delete next.project;
+        // A Must: only a Must is readied, and it may not be left unreadied.
+        if (over.includes('must')) next.priority = 2;
       });
     };
     const park = (s: ReturnType<typeof makeSandbox>) =>
@@ -1372,18 +1384,32 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         missing
       ).toMatch(message);
     }
+    // A Should follow-up left in the backlog unreadied is triaged; a Must is not.
     expect(
       await judge('done/follow-up', (s) => {
         close(s);
         file(s);
       })
-    ).toMatch(/follow-up FAKE-3 was neither readied nor parked/);
-    // Readied although it has no engine-read sections: the readiness rules
-    // say no, whatever the label says.
+    ).toBeUndefined();
+    expect(
+      await judge('done/follow-up', (s) => {
+        close(s);
+        file(s, 'must');
+      })
+    ).toMatch(/follow-up FAKE-3 is a Must \(priority 2\) but was neither readied nor parked/);
     expect(
       await judge('done/follow-up', (s) => {
         close(s);
         file(s);
+        flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
+      })
+    ).toMatch(/FAKE-3 is a Should but was readied/);
+    // A Must readied although it has no engine-read sections: the readiness
+    // rules say no, whatever the label says.
+    expect(
+      await judge('done/follow-up', (s) => {
+        close(s);
+        file(s, 'must');
         flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
       })
     ).toMatch(/FAKE-3 is ready but fails the readiness rules \(GRM-5, GRM-6\)/);
@@ -1392,7 +1418,7 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('done/follow-up', (s) => {
         close(s);
-        file(s);
+        file(s, 'must');
         flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
         plant(s, (store) => {
           const next = store.items.find((i) => i.identifier === 'FAKE-3') as WorkItem;

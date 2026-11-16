@@ -74,7 +74,7 @@ async function load() {
 }
 
 describe('the shipped fake tracker', () => {
-  it('declares contract 3.0.0 and is what the loader finds for a project linked to it', async () => {
+  it('declares contract 3.1.0 and is what the loader finds for a project linked to it', async () => {
     expect(fakeModule.CONTRACT_VERSION).toBe('3.1.0');
     vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
     const adapter = await load();

@@ -140,7 +140,7 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.0.0 and all seven capabilities', () => {
+  it('declares contract 3.1.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
     expect(linear.CONTRACT_VERSION).toBe('3.1.0');
