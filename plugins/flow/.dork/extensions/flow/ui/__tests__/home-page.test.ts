@@ -36,7 +36,14 @@ import { ANSWERED_IN_FLOW_NOTE, type AnswerApi } from '../answers.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { SHARED_FILE, SHARED_NOTE } from '../project-settings.ts';
 import { FlowStore } from '../store.ts';
-import { clientApi, flowModel, flowProject, routeFetch, runRow, settingsView } from './helpers.ts';
+import {
+  clientApi,
+  flowModel,
+  flowProject,
+  routeRequests,
+  runRow,
+  settingsView,
+} from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -191,8 +198,8 @@ describe('homeBands', () => {
 
 /** Serve `model` for every read and `answer` for writes. */
 function serve(model: FlowModel, write?: (method: string, url: string, body: unknown) => unknown) {
-  return routeFetch((method, url, body) => {
-    if (url.includes('/ext/flow/capacity')) return { status: 200, body: capacity() };
+  return routeRequests((method, url, body) => {
+    if (url.startsWith('/capacity')) return { status: 200, body: capacity() };
     if (method === 'GET') return { status: 200, body: model };
     return { status: 200, body: write?.(method, url, body) ?? model };
   });
@@ -374,7 +381,7 @@ describe('Flow home', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
     });
-    expect(fetch.calls.at(-1)).toMatchObject({ url: '/api/ext/flow/resume', body: { all: true } });
+    expect(fetch.calls.at(-1)).toMatchObject({ url: '/resume', body: { all: true } });
   });
 
   it('resumes one paused project from its line', async () => {
@@ -384,7 +391,7 @@ describe('Flow home', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Resume flow in client-api' }));
     });
     expect(fetch.calls.at(-1)).toMatchObject({
-      url: '/api/ext/flow/resume',
+      url: '/resume',
       body: { project: 'client-api' },
     });
   });
@@ -476,10 +483,10 @@ describe('a project’s page', () => {
 describe('a project’s settings page', () => {
   it('shows the project’s settings, split by who a change reaches, under its name', async () => {
     const model = threeProjects();
-    routeFetch((method, url) => {
-      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility'))
-        return { status: 404, body: {} };
+    routeRequests((method, url) => {
+      if (url.startsWith('/settings/')) return { status: 200, body: settingsView() };
+      if (url.startsWith('/accounts/eligibility'))
+        return { status: 200, body: { project: null, allow: null, accounts: [] } };
       return { status: 200, body: model };
     });
     const { api } = await renderPage('settings', model, { params: { name: 'dorkos' } });

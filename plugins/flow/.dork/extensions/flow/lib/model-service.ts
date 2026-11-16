@@ -392,7 +392,7 @@ export class ModelService {
 
   /**
    * Add schedules for a project to switch back on. The list is changed inside
-   * the storage's save queue, so a sweep and a Flow tab's report never lose
+   * the storage's save queue, so a sweep and a person's report never lose
    * each other's change.
    */
   private async addRestore(root: string, ids: readonly string[]): Promise<void> {
@@ -405,7 +405,7 @@ export class ModelService {
   }
 
   /**
-   * Forget schedules the Flow tab switched back on (or found gone).
+   * Forget schedules the person switched back on in Schedules (or found gone).
    *
    * @param projectName - The project, by name.
    * @param ids - The schedule ids.

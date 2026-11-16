@@ -90,7 +90,6 @@ export function createFlowTab(api: AnswerApi, store: FlowStore): ComponentType {
           model,
           api,
           store,
-          schedulesStuck: snapshot.schedulesStuck.has(project.name),
         })
       );
     }

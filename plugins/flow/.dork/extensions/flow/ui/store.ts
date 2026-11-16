@@ -1,41 +1,30 @@
 /**
- * One live Flow model for the whole client extension (spec `flow-multiproject`
- * §3.5). `activate` starts it once; the Flow tab, the palette commands and
- * their dialog read it, so there is one event stream however many Flow tabs
- * are open.
+ * One live Flow model per frame (spec `flow-multiproject` §3.5). On DorkOS
+ * client API version 2 each screen runs `activate` in a frame of its own, and
+ * so does the hidden registration run that keeps the tab's dot and the palette
+ * commands; each starts one store, which the screens in it read.
  *
  * - Its first read for a chat's folder is `POST /folders`, as the person, so
  *   flow looks for a project there too (DOR-3581); after that it reads
  *   `GET /model` with the folder, so flow says which project it is on a
- *   DorkOS that does not. It follows the server's `ext:flow:model` event on
- *   DorkOS's `/api/events` stream.
- * - While that stream is not open it re-reads every 30 s, and it reads once
- *   each time the stream opens (events sent while it was down are lost).
- * - It reads again when the chat's folder changes.
- * - When a pause that had switched DorkOS schedules off is over, it switches
- *   them back on, as the person whose browser this is (the server half has no
- *   way to), then tells flow.
+ *   DorkOS that does not.
+ * - A frame has no network of its own and DorkOS passes it no extension
+ *   events, so the store reads the model again every 15 s, and whenever the
+ *   chat's folder changes. Every change a screen makes answers the new model,
+ *   which shows at once.
+ * - It never switches DorkOS schedules back on after a pause: only a person
+ *   can, in Schedules, and the project's screens say so.
  *
  * @module @dorkos/flow/extension/ui/store
  */
 
-import type { FlowModel, FlowProject } from '../lib/model.ts';
+import type { FlowModel } from '../lib/model.ts';
 import type { ClientApi, ProjectRef, ReadableState } from '../lib/host-types.ts';
-import { addFolder, getModel, resolveApiBaseUrl, schedulesRestored } from './api.ts';
-import { enableSchedule, type EnableResult } from './core-api.ts';
+import { addFolder, getModel } from './api.ts';
 import { useEffect, useState } from './react.ts';
 
-/** How often the model is read again while the live stream is down, in ms. */
-export const FALLBACK_POLL_MS = 30_000;
-
-/** The host event the server's `ctx.emit('model', …)` arrives as. */
-export const MODEL_EVENT = 'ext:flow:model';
-
-/** How long after a schedule could not be switched back on the store tries again, in ms. */
-export const RESTORE_RETRY_MS = 5 * 60_000;
-
-/** `EventSource.OPEN`, spelled out so a stand-in without the constant still compares. */
-const OPEN_STATE = 1;
+/** How often the model is read again, in ms. */
+export const POLL_MS = 15_000;
 
 /** Where the store is. */
 export type StorePhase = 'loading' | 'ready' | 'failed';
@@ -55,31 +44,22 @@ export interface StoreSnapshot {
    * on a DorkOS that does not say (then `model.cwdProject` answers).
    */
   currentProject: ProjectRef | null | undefined;
-  /** Projects whose schedules could not be switched back on, by name. */
-  schedulesStuck: ReadonlySet<string>;
   /** When a model last arrived (ms since the epoch), or `null` before one. */
   heardAt: number | null;
-  /** Whether the live stream is open, so a quiet model is still current. */
-  live: boolean;
 }
 
-/** How long without a model, while the live stream is down, before flow's facts count as old, in ms. */
+/** How long without a model before flow's facts count as old, in ms. */
 export const STALE_STORE_MS = 5 * 60_000;
 
 /**
- * Whether the store's facts are current: the live stream is open (the server
- * sends a model whenever one changes), or a model arrived in the last five
+ * Whether the store's facts are current: a model arrived in the last five
  * minutes.
  *
  * @param snapshot - The store.
  * @param now - The clock, in ms.
  * @returns True when current.
  */
-export function storeIsFresh(
-  snapshot: Pick<StoreSnapshot, 'heardAt' | 'live'>,
-  now: number
-): boolean {
-  if (snapshot.live) return true;
+export function storeIsFresh(snapshot: Pick<StoreSnapshot, 'heardAt'>, now: number): boolean {
   return snapshot.heardAt !== null && now - snapshot.heardAt <= STALE_STORE_MS;
 }
 
@@ -91,28 +71,15 @@ export class FlowStore {
     failures: 0,
     cwd: null,
     currentProject: undefined,
-    schedulesStuck: new Set(),
     heardAt: null,
-    live: false,
   };
   private readonly listeners = new Set<() => void>();
-  private source: EventSource | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
   private stopState: (() => void) | null = null;
   private started = false;
   private loading: Promise<void> | null = null;
   /** The folder flow was last told to look in, so later reads only read. */
   private told: string | null = null;
-  /** Whether the stream has opened before, so a later open is a reconnect. */
-  private opened = false;
-  /** Schedule ids already being switched back on, so no two tries overlap. */
-  private readonly restoring = new Set<string>();
-  /**
-   * When switching a schedule back on was last tried, by id: a schedule is
-   * tried at most every few minutes, whether it failed or flow has not yet
-   * heard that it worked.
-   */
-  private readonly triedAt = new Map<string, number>();
 
   /**
    * @param api - DorkOS's client API (state and its changes).
@@ -157,13 +124,12 @@ export class FlowStore {
   }
 
   /**
-   * Take a model (from a route's answer or the stream).
+   * Take a model (from a route's answer or a read).
    *
    * @param model - The model.
    */
   apply(model: FlowModel): void {
     this.set({ model, phase: 'ready', failures: 0, heardAt: this.clock() });
-    void this.restoreSchedules(model);
   }
 
   /**
@@ -176,6 +142,9 @@ export class FlowStore {
       .then(
         (model) => this.apply(model),
         () => {
+          // The server may be restarting and forget the folder: tell it again
+          // on the next read.
+          this.told = null;
           // Only a failed first load (or one after a failure) is shown; a
           // failed re-read keeps the model already on screen.
           if (this.snapshot.phase !== 'ready') {
@@ -212,7 +181,7 @@ export class FlowStore {
     void this.refresh();
   }
 
-  /** Start: read the model, follow the stream and the chat's folder. Idempotent. */
+  /** Start: read the model now and every {@link POLL_MS}, and follow the chat's folder. Idempotent. */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -227,90 +196,16 @@ export class FlowStore {
         if (moved) void this.refresh();
       }
     );
-    const startPolling = () => {
-      this.poll ??= setInterval(() => void this.refresh(), FALLBACK_POLL_MS);
-    };
-    const stopPolling = () => {
-      if (this.poll !== null) clearInterval(this.poll);
-      this.poll = null;
-    };
-    if (typeof EventSource !== 'function') {
-      startPolling();
-      return;
-    }
-    const stream = new EventSource(`${resolveApiBaseUrl()}/events`);
-    this.source = stream;
-    stream.addEventListener(MODEL_EVENT, (event) => {
-      try {
-        this.apply(JSON.parse((event as MessageEvent<string>).data) as FlowModel);
-      } catch {
-        // A frame that is not a model is ignored; the next one replaces it.
-      }
-    });
-    stream.addEventListener('error', () => {
-      if (stream.readyState !== OPEN_STATE) {
-        if (this.snapshot.live) this.set({ live: false });
-        startPolling();
-      }
-    });
-    stream.addEventListener('open', () => {
-      stopPolling();
-      // On a reopen the server may have restarted while the stream was down,
-      // and forgotten the folder.
-      if (this.opened) this.told = null;
-      this.opened = true;
-      this.set({ live: true });
-      void this.refresh();
-    });
+    this.poll = setInterval(() => void this.refresh(), POLL_MS);
   }
 
-  /** Stop following the stream and the chat's folder. */
+  /** Stop reading and following the chat's folder. */
   stop(): void {
     this.started = false;
-    this.source?.close();
-    this.source = null;
-    if (this.snapshot.live) this.set({ live: false });
     if (this.poll !== null) clearInterval(this.poll);
     this.poll = null;
     this.stopState?.();
     this.stopState = null;
-  }
-
-  /**
-   * Switch back on the DorkOS schedules a finished pause had switched off,
-   * then tell flow which are done. A schedule deleted since counts as done; one
-   * DorkOS would not switch on stays on the list, and the project says so.
-   */
-  private async restoreSchedules(model: FlowModel): Promise<void> {
-    for (const project of model.projects) {
-      const now = Date.now();
-      const ids = project.restoreSchedules.filter(
-        (id) =>
-          !this.restoring.has(id) && now - (this.triedAt.get(id) ?? -Infinity) >= RESTORE_RETRY_MS
-      );
-      if (ids.length === 0) continue;
-      for (const id of ids) this.restoring.add(id);
-      try {
-        const results: EnableResult[] = await Promise.all(ids.map((id) => enableSchedule(id)));
-        const done = ids.filter((_, i) => results[i] !== 'failed');
-        for (const id of ids) this.triedAt.set(id, now);
-        this.markStuck(project, results.includes('failed'));
-        if (done.length > 0) this.apply(await schedulesRestored(project.name, done));
-      } catch {
-        for (const id of ids) this.triedAt.set(id, now);
-        this.markStuck(project, true);
-      } finally {
-        for (const id of ids) this.restoring.delete(id);
-      }
-    }
-  }
-
-  /** Note whether a project's schedules could not be switched back on. */
-  private markStuck(project: FlowProject, stuck: boolean): void {
-    const next = new Set(this.snapshot.schedulesStuck);
-    if (stuck) next.add(project.name);
-    else next.delete(project.name);
-    this.set({ schedulesStuck: next });
   }
 }
 

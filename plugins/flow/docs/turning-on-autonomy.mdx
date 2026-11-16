@@ -266,7 +266,9 @@ Autonomy is never a loss of control, in any setup:
   terminal drain and writes a pause flag into your project (`.agents/flow/paused.json`) that every
   scheduled tick checks first, so the tick stops at once under any scheduler and a plugin update
   cannot undo the pause. On DorkOS it also switches this project's flow schedules off on the
-  Schedules page when it can reach them, and resume switches back on only those. Elsewhere the
+  Schedules page when it can reach them, and resume switches back on only those. If any are still
+  off once the pause is over, the project's Flow tab says so, with a button to the Schedules page:
+  only you can switch them on there. Elsewhere the
   scheduler still starts each tick on time and the tick stops at its first step; disable your cron
   or CI job to stop it starting at all.
 - **A pause can end on its own.** In DorkOS every Pause asks how long: until tomorrow 9am, for 1

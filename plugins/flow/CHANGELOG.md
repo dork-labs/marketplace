@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.99.0
+
+**Flow's screens in DorkOS now work on DorkOS 0.135.12, which runs each app in a frame of its own. Reinstall flow when you update DorkOS: an older flow shows "This app needs an update" there and its screens don't load.**
+
+- The Flow tab, Flow home, each project's pages, Settings → Flow, the run chip and the palette commands work as before. They now need DorkOS 0.135.12 or newer.
+- Two things now send you to DorkOS instead of happening inside Flow, because only a person can do them and Flow's screens can no longer change DorkOS's own settings:
+  - **Accounts this project may use** shows each account and whether it may work in the project, without checkboxes. To change it, press **Change in Settings → Runtimes**. Moving an account's **Only for these repos** list works the same way: **Open Settings → Runtimes**, limit the account to the projects the row names, then come back to Settings → Flow to let flow follow DorkOS's rule.
+  - **Schedules a pause switched off** are no longer switched back on by the Flow tab. Once the pause is over, the project says they're still off, with **Open Schedules** to switch them on and **They're on again** to tell flow you did.
+- The screens now check for changes every 15 seconds instead of getting them live, so something an agent changed can take up to 15 seconds to show. Anything you change on a Flow screen shows at once.
+- The Flow tab beside a chat shows DorkOS's default icon for now, since an app's own icon can't cross into its frame.
+
 ## 0.98.5
 
 **Reinstall Flow to receive this change.**

@@ -11,7 +11,6 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClientApi } from '../../lib/host-types.ts';
 import type { FlowProject } from '../../lib/model.ts';
-import { forgetEligibilityProbe } from '../core-api.ts';
 import {
   DIAL_NEEDS_NEWER_DORKOS_TEXT,
   DIAL_NEEDS_NEWER_FLOW_TEXT,
@@ -29,11 +28,10 @@ import {
 import { createSettingsTab } from '../settings-tab.ts';
 import { FlowStore } from '../store.ts';
 import { WAITING_FOR_FLOW_TEXT, type MigrationDeps } from '../migrate-repos.ts';
-import { clientApi, flowModel, flowProject, routeFetch, settingsView } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeRequests, settingsView } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  forgetEligibilityProbe();
 });
 
 /** A project flow first saw with no history (its dial defaults to Tell me after). */
@@ -65,7 +63,7 @@ function projectSettings(initial: Record<string, unknown> = {}) {
   };
 }
 
-/** Answer flow's settings route and DorkOS's (no eligibility routes unless given). */
+/** Answer flow's settings routes (every account allowed, with none listed, unless given). */
 function serve(
   opts: {
     view?: ReturnType<typeof settingsView>;
@@ -74,17 +72,19 @@ function serve(
     eligibility?: { status: number; body: unknown };
   } = {}
 ) {
-  return routeFetch((method, url, body) => {
-    if (url.includes('/ext/flow/settings/')) {
+  return routeRequests((method, url, body) => {
+    if (url.startsWith('/settings/')) {
       if (method === 'PUT')
         return opts.put?.(body) ?? { status: 200, body: opts.view ?? settingsView() };
       return { status: 200, body: opts.view ?? settingsView() };
     }
-    if (url.includes('/runtimes/claude-code/account-eligibility')) {
-      return opts.eligibility ?? { status: 404, body: {} };
+    if (url.startsWith('/accounts/eligibility')) {
+      return (
+        opts.eligibility ?? { status: 200, body: { project: null, allow: null, accounts: [] } }
+      );
     }
-    if (url.includes('/ext/flow/fleet/migration')) return { status: 200, body: { accounts: {} } };
-    if (url.includes('/ext/flow/fleet')) {
+    if (url.startsWith('/fleet/migration')) return { status: 200, body: { accounts: {} } };
+    if (url.startsWith('/fleet')) {
       return {
         status: 200,
         body: {
@@ -115,13 +115,15 @@ async function renderSettings(project: FlowProject, api: Partial<SettingsApi> = 
 
 /** A migration that finds nothing to move. */
 const NO_MOVE: MigrationDeps = {
-  hasEligibilityRoutes: async () => false,
-  getFleet: async () => {
-    throw new Error('not called');
-  },
+  getFleet: async () => ({
+    handoff: 'auto',
+    crossRuntimeFallback: 'off',
+    groups: [],
+    anyRoleStored: false,
+    warnings: [],
+  }),
   listProjects: async () => [],
   getEligibility: async () => ({ project: null, allow: null, accounts: [] }),
-  putOnlyProjects: async () => ({}),
   putAccount: async () => ({}),
   getRecord: async () => ({ accounts: {} }),
   putRecord: async () => ({}),
@@ -188,10 +190,12 @@ describe('one component, two entry points', () => {
 
 describe('Settings → Flow and "Only for these repos"', () => {
   /** One kept-out Claude account whose repo is client-app, and DorkOS with no rule for it. */
-  function movable(put: ReturnType<typeof vi.fn>): MigrationDeps {
+  function movable(
+    putRecord: ReturnType<typeof vi.fn>,
+    onlyProjects: { root: string; name: string }[] | null = null
+  ): MigrationDeps {
     return {
       ...NO_MOVE,
-      hasEligibilityRoutes: async () => true,
       getFleet: async () => ({
         handoff: 'auto',
         crossRuntimeFallback: 'off',
@@ -231,18 +235,18 @@ describe('Settings → Flow and "Only for these repos"', () => {
             label: 'Work',
             color: '#000000',
             implicit: false,
-            onlyProjects: null,
+            onlyProjects,
             allowedByAccount: true,
             allowedByProject: true,
             eligible: true,
           },
         ],
       }),
-      putOnlyProjects: put,
+      putRecord,
     };
   }
 
-  it('writes nothing on open; the account row offers the move, which runs only on a click', async () => {
+  it('writes nothing on open, nor on a click: the row sends the person to Settings → Runtimes', async () => {
     const fleetBody = {
       handoff: 'auto',
       crossRuntimeFallback: 'off',
@@ -270,38 +274,69 @@ describe('Settings → Flow and "Only for these repos"', () => {
       anyRoleStored: true,
       warnings: [],
     };
-    routeFetch((_method, url) => {
-      if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetBody };
-      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility'))
-        return { status: 404, body: {} };
+    routeRequests((_method, url) => {
+      if (url.startsWith('/fleet')) return { status: 200, body: fleetBody };
+      if (url.startsWith('/settings/')) return { status: 200, body: settingsView() };
+      if (url.startsWith('/accounts/eligibility'))
+        return { status: 200, body: { project: null, allow: null, accounts: [] } };
       return { status: 200, body: flowModel([newProject()]) };
     });
     const store = new FlowStore(clientApi());
     store.start();
     const put = vi.fn(async () => ({}));
-    render(React.createElement(createSettingsTab(clientApi(), store, movable(put))));
+    const putAccount = vi.fn(async () => ({}));
+    const api = clientApi();
+    render(React.createElement(createSettingsTab(api, store, { ...movable(put), putAccount })));
     await act(async () => {});
     await act(async () => {});
     await act(async () => {});
     expect(
       screen.getByText(
-        'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.',
+        'Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit Work to client-app',
         { exact: false }
       )
     ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
+    await act(async () => {});
+    expect(api.navigate).toHaveBeenCalledWith('?settings=runtimes');
     expect(put).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
-    await act(async () => {});
-    await act(async () => {});
-    expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
+    expect(putAccount).not.toHaveBeenCalled();
   });
 
-  it('with no model loaded, a click holds flow’s own rule and no Switch is offered', async () => {
-    // flow's model never loads: it can't know every project runs flow 0.52 yet.
+  it('says why when DorkOS will not open Settings → Runtimes', async () => {
     const fleetWithWork = await movable(vi.fn()).getFleet();
-    routeFetch((_method, url) => {
-      if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetWithWork };
+    routeRequests((_method, url) => {
+      if (url.startsWith('/fleet')) return { status: 200, body: fleetWithWork };
+      if (url.startsWith('/settings/')) return { status: 200, body: settingsView() };
+      if (url.startsWith('/accounts/eligibility'))
+        return { status: 200, body: { project: null, allow: null, accounts: [] } };
+      return { status: 200, body: flowModel([newProject()]) };
+    });
+    const store = new FlowStore(clientApi());
+    store.start();
+    const api = {
+      ...clientApi(),
+      navigate: vi.fn(async () => ({
+        ok: false as const,
+        reason: 'unknown-route',
+        message: 'DorkOS has no page at that address.',
+      })),
+    };
+    render(React.createElement(createSettingsTab(api, store, movable(vi.fn()))));
+    await act(async () => {});
+    await act(async () => {});
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
+    await act(async () => {});
+    expect(screen.getByText('DorkOS has no page at that address.')).toBeTruthy();
+  });
+
+  it('once DorkOS keeps the account there, with no model loaded, a click notes the move and holds flow’s own rule', async () => {
+    // flow's model never loads: it can't know every project runs flow 0.52 yet.
+    const kept = [{ root: '/work/client-app', name: 'client-app' }];
+    const fleetWithWork = await movable(vi.fn(), kept).getFleet();
+    routeRequests((_method, url) => {
+      if (url.startsWith('/fleet')) return { status: 200, body: fleetWithWork };
       return { status: 500, body: {} };
     });
     const store = new FlowStore(clientApi());
@@ -309,16 +344,27 @@ describe('Settings → Flow and "Only for these repos"', () => {
     const put = vi.fn(async () => ({}));
     const putAccount = vi.fn(async () => ({}));
     render(
-      React.createElement(createSettingsTab(clientApi(), store, { ...movable(put), putAccount }))
+      React.createElement(
+        createSettingsTab(clientApi(), store, { ...movable(put, kept), putAccount })
+      )
     );
     await act(async () => {});
     await act(async () => {});
     await act(async () => {});
     expect(screen.getByText(WAITING_FOR_FLOW_TEXT, { exact: false })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Note it' }));
     await act(async () => {});
     await act(async () => {});
-    expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
+    expect(put).toHaveBeenCalledWith({
+      accounts: {
+        'claude-code:work': {
+          movedRoots: ['/work/client-app'],
+          pendingRepos: [],
+          at: '2026-09-29T10:00:00.000Z',
+          held: true,
+        },
+      },
+    });
     expect(putAccount).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Switch to DorkOS’s rule' })).toBeNull();
   });
@@ -397,13 +443,13 @@ describe('the shared and just-me writes', () => {
 
   it('puts a refused change back to the latest saved value, not an older one', async () => {
     const answers: ((reply: { status: number; body: unknown }) => void)[] = [];
-    routeFetch((method, url) => {
-      if (url.includes('/ext/flow/settings/') && method === 'PUT') {
+    routeRequests((method, url) => {
+      if (url.startsWith('/settings/') && method === 'PUT') {
         return new Promise((resolve) => answers.push(resolve));
       }
-      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility'))
-        return { status: 404, body: {} };
+      if (url.startsWith('/settings/')) return { status: 200, body: settingsView() };
+      if (url.startsWith('/accounts/eligibility'))
+        return { status: 200, body: { project: null, allow: null, accounts: [] } };
       return { status: 200, body: flowModel([newProject()]) };
     });
     await renderSettings(newProject());

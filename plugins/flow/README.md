@@ -85,8 +85,10 @@ reads the same files and tracker the commands do.
 - **Settings** (⚙ on a project's page, or Settings → Flow) are split by who a change
   reaches. "Shared with the repo" saves to `.agents/flow/config.json`, which reaches
   everyone once you commit it; "Just me" stays on this computer. The "How much it does
-  on its own" dial and "Accounts this project may use" are here, and only a person
-  can change them.
+  on its own" dial is here, and only a person can change it. "Accounts this project
+  may use" shows which accounts may work there; you change that in Settings → Runtimes.
+
+The Flow screens need DorkOS 0.135.12 or newer.
 
 ## Stages
 

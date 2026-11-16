@@ -7,6 +7,7 @@
 import * as React from 'react';
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
+import { resetRequests } from './helpers.ts';
 
 (globalThis as unknown as { React: typeof React }).React = React;
 // Tells React this is a test environment, so `act` warnings stay meaningful.
@@ -14,4 +15,5 @@ import { afterEach } from 'vitest';
 
 afterEach(() => {
   cleanup();
+  resetRequests();
 });

@@ -9,7 +9,15 @@ import {
   NOTHING_USABLE_TEXT,
   ROLE_LINES,
 } from '../notice.ts';
-import { NO_JSON, account, claudeGroup, codexGroup, fleet, stubFetch } from './helpers.ts';
+import {
+  NO_JSON,
+  account,
+  claudeGroup,
+  codexGroup,
+  fleet,
+  routeRequests,
+  stubRequests,
+} from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -28,7 +36,7 @@ function roles(name: string) {
 
 describe('FleetTab: groups and rows', () => {
   it('captions the Claude Code group even when it is the only runtime', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
     });
@@ -40,7 +48,10 @@ describe('FleetTab: groups and rows', () => {
   });
 
   it('shows a Codex group with its implicit account in the stone color', async () => {
-    stubFetch({ status: 200, body: fleet([claudeGroup([account('Main', 'main')]), codexGroup()]) });
+    stubRequests({
+      status: 200,
+      body: fleet([claudeGroup([account('Main', 'main')]), codexGroup()]),
+    });
     await renderTab();
     expect(screen.getByText('Claude Code')).toBeTruthy();
     expect(screen.getByText('Codex')).toBeTruthy();
@@ -49,7 +60,7 @@ describe('FleetTab: groups and rows', () => {
   });
 
   it('renders warnings as a muted list', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Main', 'main')])], {
         warnings: ['Ignored a bad reserve.'],
@@ -60,7 +71,7 @@ describe('FleetTab: groups and rows', () => {
   });
 
   it('says to add accounts first when there are none', async () => {
-    stubFetch({ status: 200, body: fleet([claudeGroup([])]) });
+    stubRequests({ status: 200, body: fleet([claudeGroup([])]) });
     await renderTab();
     expect(screen.getByText('Add Claude accounts in Settings → Runtimes first.')).toBeTruthy();
     expect(screen.queryByRole('radiogroup')).toBeNull();
@@ -70,7 +81,7 @@ describe('FleetTab: groups and rows', () => {
 describe('FleetTab: the role radio group', () => {
   it('marks the chosen role, keeps one tab stop, and arrows move and write', async () => {
     const after = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'kept-out')])]);
-    const stub = stubFetch(
+    const stub = stubRequests(
       {
         status: 200,
         body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
@@ -93,7 +104,7 @@ describe('FleetTab: the role radio group', () => {
     expect(stub.puts()).toEqual([
       {
         method: 'PUT',
-        url: '/api/ext/flow/fleet/accounts/claude-code%3AAcct%202',
+        url: '/fleet/accounts/claude-code:Acct 2',
         body: { role: 'kept-out' },
       },
     ]);
@@ -103,7 +114,7 @@ describe('FleetTab: the role radio group', () => {
   });
 
   it('wraps with the arrows and jumps with Home and End', async () => {
-    const stub = stubFetch(
+    const stub = stubRequests(
       { status: 200, body: fleet([claudeGroup([account('Solo', 'main')])]) },
       [],
       { hold: true }
@@ -124,7 +135,7 @@ describe('FleetTab: the role radio group', () => {
 
   it('shows the answered body: a new Main shows the old one as Rotation', async () => {
     const answered = fleet([claudeGroup([account('Main', 'rotation'), account('Acct 2', 'main')])]);
-    stubFetch(
+    stubRequests(
       {
         status: 200,
         body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
@@ -144,7 +155,7 @@ describe('FleetTab: the role radio group', () => {
   });
 
   it('shows a write at once, then rolls back and says why on a 409', async () => {
-    const stub = stubFetch(
+    const stub = stubRequests(
       {
         status: 200,
         body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
@@ -180,7 +191,10 @@ describe('FleetTab: the role radio group', () => {
 
 describe('FleetTab: the Main inset', () => {
   it('names the reserve slider, moves the number on input and writes only on change', async () => {
-    const stub = stubFetch({ status: 200, body: fleet([claudeGroup([account('Main', 'main')])]) });
+    const stub = stubRequests({
+      status: 200,
+      body: fleet([claudeGroup([account('Main', 'main')])]),
+    });
     await renderTab();
     const slider = screen.getByRole('slider', {
       name: 'Share of the weekly limit kept for you',
@@ -200,7 +214,7 @@ describe('FleetTab: the Main inset', () => {
   });
 
   it('lists 6-72 hours, adds a stored value outside the list, and writes a choice', async () => {
-    const stub = stubFetch({
+    const stub = stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Main', 'main', { spendDownWindowHours: 36 })])]),
     });
@@ -232,7 +246,7 @@ describe('FleetTab: repos for a Kept out account', () => {
     ]);
 
   it('labels each remove button and writes the list without it', async () => {
-    const stub = stubFetch({ status: 200, body: keptOut() });
+    const stub = stubRequests({ status: 200, body: keptOut() });
     await renderTab();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Remove acme/client-app' }));
@@ -241,7 +255,7 @@ describe('FleetTab: repos for a Kept out account', () => {
   });
 
   it('"+ add" opens a field; Enter adds a valid repo', async () => {
-    const stub = stubFetch({ status: 200, body: keptOut() });
+    const stub = stubRequests({ status: 200, body: keptOut() });
     await renderTab();
     fireEvent.click(screen.getByRole('button', { name: '+ add' }));
     const field = screen.getByPlaceholderText('owner/name');
@@ -255,7 +269,7 @@ describe('FleetTab: repos for a Kept out account', () => {
   });
 
   it('Escape cancels without writing', async () => {
-    const stub = stubFetch({ status: 200, body: keptOut() });
+    const stub = stubRequests({ status: 200, body: keptOut() });
     await renderTab();
     fireEvent.click(screen.getByRole('button', { name: '+ add' }));
     const field = screen.getByPlaceholderText('owner/name');
@@ -267,7 +281,7 @@ describe('FleetTab: repos for a Kept out account', () => {
   });
 
   it('a value that is not owner/name says how to write it and writes nothing', async () => {
-    const stub = stubFetch({ status: 200, body: keptOut() });
+    const stub = stubRequests({ status: 200, body: keptOut() });
     await renderTab();
     fireEvent.click(screen.getByRole('button', { name: '+ add' }));
     const field = screen.getByPlaceholderText('owner/name');
@@ -281,7 +295,10 @@ describe('FleetTab: repos for a Kept out account', () => {
 
 describe('FleetTab: fleet-wide rows', () => {
   it('the handoff control writes { handoff: "ask" }', async () => {
-    const stub = stubFetch({ status: 200, body: fleet([claudeGroup([account('Main', 'main')])]) });
+    const stub = stubRequests({
+      status: 200,
+      body: fleet([claudeGroup([account('Main', 'main')])]),
+    });
     await renderTab();
     const group = screen.getByRole('radiogroup', { name: 'When an account runs out' });
     expect(
@@ -293,12 +310,15 @@ describe('FleetTab: fleet-wide rows', () => {
       fireEvent.click(within(group).getByRole('radio', { name: 'Ask me' }));
     });
     expect(stub.puts()).toEqual([
-      { method: 'PUT', url: '/api/ext/flow/fleet/handoff', body: { handoff: 'ask' } },
+      { method: 'PUT', url: '/fleet/handoff', body: { handoff: 'ask' } },
     ]);
   });
 
   it('the cross-runtime row defaults to Off and writes { crossRuntimeFallback: "on" }', async () => {
-    const stub = stubFetch({ status: 200, body: fleet([claudeGroup([account('Main', 'main')])]) });
+    const stub = stubRequests({
+      status: 200,
+      body: fleet([claudeGroup([account('Main', 'main')])]),
+    });
     await renderTab();
     const group = screen.getByRole('radiogroup', { name: 'Cross-runtime fallback' });
     expect(within(group).getByRole('radio', { name: 'Off' }).getAttribute('aria-checked')).toBe(
@@ -315,7 +335,7 @@ describe('FleetTab: fleet-wide rows', () => {
     expect(stub.puts()).toEqual([
       {
         method: 'PUT',
-        url: '/api/ext/flow/fleet/cross-runtime',
+        url: '/fleet/cross-runtime',
         body: { crossRuntimeFallback: 'on' },
       },
     ]);
@@ -331,7 +351,7 @@ describe('FleetTab: notices', () => {
       }
     );
     const after = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]);
-    stubFetch({ status: 200, body: before }, [{ status: 200, body: after }]);
+    stubRequests({ status: 200, body: before }, [{ status: 200, body: after }]);
     await renderTab();
     const notice = screen.getByRole('status');
     for (const line of ROLE_LINES) expect(within(notice).getByText(line)).toBeTruthy();
@@ -352,7 +372,7 @@ describe('FleetTab: notices', () => {
   });
 
   it('with no role stored, only the first-visit notice shows, whatever the roles resolve to', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'kept-out')])], {
         anyRoleStored: false,
@@ -365,7 +385,7 @@ describe('FleetTab: notices', () => {
   });
 
   it('with no role stored and every account kept out, only the first-visit notice shows', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('A', 'kept-out'), account('B', 'kept-out')])], {
         anyRoleStored: false,
@@ -381,7 +401,7 @@ describe('FleetTab: notices', () => {
       claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')]),
       codexGroup(),
     ]);
-    stubFetch(
+    stubRequests(
       {
         status: 200,
         body: fleet([
@@ -404,7 +424,7 @@ describe('FleetTab: notices', () => {
   });
 
   it('with roles stored and nothing Main or Rotation, says flow cannot use any account', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('A', 'kept-out'), account('B', 'kept-out')])]),
     });
@@ -415,7 +435,7 @@ describe('FleetTab: notices', () => {
   });
 
   it("does not say that while Codex's implicit account is in Rotation", async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('A', 'kept-out')]), codexGroup('rotation')]),
     });
@@ -435,7 +455,7 @@ describe('FleetTab: what a failure says', () => {
       { status: 409, body: { error: 'Locked.', refusedBy: 'flow' } },
     ],
   ])('the first load shows only the load-failure line on %s', async (_name, answer) => {
-    stubFetch(answer);
+    stubRequests(answer);
     await renderTab();
     expect(screen.getByRole('alert').textContent).toBe(
       "Couldn't load Flow's settings. Try again in a moment."
@@ -444,7 +464,7 @@ describe('FleetTab: what a failure says', () => {
   });
 
   it('keeps Retry on screen and focused when the retried load fails too', async () => {
-    stubFetch({ status: 500, body: NO_JSON });
+    stubRequests({ status: 500, body: NO_JSON });
     await renderTab();
     const retry = screen.getByRole('button', { name: 'Retry' });
     retry.focus();
@@ -460,24 +480,15 @@ describe('FleetTab: what a failure says', () => {
   it('re-announces the load failure only once a retry has actually failed', async () => {
     let calls = 0;
     let failSecond: () => void = () => {};
-    const failed = {
-      ok: false,
-      status: 500,
-      json: async () => {
-        throw new SyntaxError('Unexpected token <');
-      },
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        calls += 1;
-        if (calls === 1) return failed;
-        await new Promise<void>((resolve) => {
-          failSecond = resolve;
-        });
-        return failed;
-      })
-    );
+    const failed = { status: 500, body: NO_JSON };
+    routeRequests(async () => {
+      calls += 1;
+      if (calls === 1) return failed;
+      await new Promise<void>((resolve) => {
+        failSecond = resolve;
+      });
+      return failed;
+    });
     await renderTab();
     const first = screen.getByRole('alert');
     await act(async () => {
@@ -498,21 +509,10 @@ describe('FleetTab: what a failure says', () => {
   it('Retry loads the settings again after a failed first load', async () => {
     const good = body();
     let calls = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        calls += 1;
-        const failed = calls === 1;
-        return {
-          ok: !failed,
-          status: failed ? 500 : 200,
-          json: async () => {
-            if (failed) throw new SyntaxError('Unexpected token <');
-            return good;
-          },
-        };
-      })
-    );
+    routeRequests(() => {
+      calls += 1;
+      return calls === 1 ? { status: 500, body: NO_JSON } : { status: 200, body: good };
+    });
     await renderTab();
     expect(screen.getByRole('alert').textContent).toBe(
       "Couldn't load Flow's settings. Try again in a moment."
@@ -533,7 +533,7 @@ describe('FleetTab: what a failure says', () => {
       { status: 500, body: { error: 'ENOENT: /secret/path', refusedBy: 'flow' } },
     ],
   ])('a write that fails with %s says flow could not be reached', async (_name, answer) => {
-    stubFetch({ status: 200, body: body() }, [answer]);
+    stubRequests({ status: 200, body: body() }, [answer]);
     await renderTab();
     await act(async () => {
       fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
@@ -547,7 +547,7 @@ describe('FleetTab: what a failure says', () => {
   });
 
   it("a write flow refuses shows flow's own words", async () => {
-    stubFetch({ status: 200, body: body() }, [
+    stubRequests({ status: 200, body: body() }, [
       { status: 400, body: { error: '"x" is not an owner/name repo.', refusedBy: 'flow' } },
     ]);
     await renderTab();
@@ -560,7 +560,7 @@ describe('FleetTab: what a failure says', () => {
 
 describe('FleetTab: answers that arrive out of order', () => {
   it('a new Main shows the old Main as Rotation at once, before flow answers', async () => {
-    stubFetch(
+    stubRequests(
       {
         status: 200,
         body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
@@ -582,7 +582,7 @@ describe('FleetTab: answers that arrive out of order', () => {
     const initial = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]);
     const answerA = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'kept-out')])]);
     const answerB = fleet([claudeGroup([account('Main', 'rotation'), account('Acct 2', 'main')])]);
-    const stub = stubFetch(
+    const stub = stubRequests(
       { status: 200, body: initial },
       [
         { status: 200, body: answerA },
@@ -642,7 +642,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
   });
 
   it('shows DorkOS’s rule on the account’s row, read-only, with the way to change it', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Work', 'rotation'), account('Acct 2', 'rotation')])]),
     });
@@ -656,7 +656,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
   });
 
   it("keeps 'Only for these repos' editable, since flow's own list stays in force until moved", async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
     });
@@ -667,12 +667,13 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
   });
 
   it('offers a move on the account’s row, and does nothing until it is clicked', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/app'] })])]),
     });
     const onMove = vi.fn();
-    const text = 'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.';
+    const text =
+      'Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit Work to client-app; flow notices when you come back.';
     render(
       React.createElement(FleetTab, {
         rules: rules({}),
@@ -680,7 +681,13 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
           [
             'claude-code:Work',
             {
-              plan: { key: 'claude-code:Work', kind: 'ready' as const, text, action: 'Move it' },
+              plan: {
+                key: 'claude-code:Work',
+                kind: 'ready' as const,
+                text,
+                action: 'Open Settings → Runtimes',
+                opens: '?settings=runtimes',
+              },
               result: null,
               busy: false,
               onMove,
@@ -692,12 +699,12 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
     await act(async () => {});
     expect(screen.getByText(text)).toBeTruthy();
     expect(onMove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
     expect(onMove).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the chips on a DorkOS without the rules', async () => {
-    stubFetch({
+    stubRequests({
       status: 200,
       body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
     });

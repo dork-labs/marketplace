@@ -78,8 +78,8 @@ function urgentLine(
   }
   const tracker = project.tracker?.label ?? 'the tracker';
   if (project.restoreSchedules.length > 0) {
-    // Only a DorkOS page can switch them back on; say so rather than look fine.
-    return { project, text: 'Schedules stay off until DorkOS is open', rank: 1.5 };
+    // Only a person can switch them back on, in Schedules; say so rather than look fine.
+    return { project, text: 'Schedules still off: switch them on in Schedules', rank: 1.5 };
   }
   const order: Record<string, number> = {
     'sign-in': 1,

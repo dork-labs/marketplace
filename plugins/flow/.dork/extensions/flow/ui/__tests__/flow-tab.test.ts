@@ -25,7 +25,8 @@ import { LOAD_FAILED_TEXT, createFlowTab } from '../flow-tab.ts';
 import {
   NOTHING_RUNNING_TEXT,
   NOT_SET_UP_TEXT,
-  SCHEDULES_OFF_TEXT,
+  OPEN_SCHEDULES_LABEL,
+  SCHEDULES_ON_LABEL,
   schedulesWaitingText,
   stoppedText,
 } from '../project-lens.ts';
@@ -34,9 +35,8 @@ import {
   clientApi,
   flowModel,
   flowProject,
-  routeFetch,
+  routeRequests,
   runRow,
-  type StubAnswer,
 } from './helpers.ts';
 
 afterEach(() => {
@@ -53,8 +53,8 @@ function host(project: ProjectRef | null | undefined, cwd: string | null = '/wor
 
 /** Render the tab over a store serving `model` for every read. */
 async function renderTab(model: FlowModel, api = host(null)) {
-  const fetch = routeFetch((method, url) => {
-    if (method === 'GET' && url.includes('/ext/flow/model')) return { status: 200, body: model };
+  const fetch = routeRequests((method, url) => {
+    if (method === 'GET' && url.startsWith('/model')) return { status: 200, body: model };
     return { status: 200, body: model };
   });
   const store = new FlowStore(api);
@@ -89,20 +89,20 @@ describe('which lens', () => {
     // The first read tells flow, as the person, to look in the chat's folder.
     expect(fetch.calls[0]).toMatchObject({
       method: 'POST',
-      url: '/api/ext/flow/folders',
+      url: '/folders',
       body: { cwd: '/work/blintz/wt' },
     });
   });
 
   it('says so when it could not load, and tries again', async () => {
-    routeFetch(() => ({ status: 500, body: {} }));
+    routeRequests(() => ({ status: 500, body: {} }));
     const api = host(DORKOS);
     const store = new FlowStore(api);
     store.start();
     render(React.createElement(createFlowTab(api, store)));
     await act(async () => {});
     expect(screen.getByRole('alert').textContent).toBe(LOAD_FAILED_TEXT);
-    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     });
@@ -290,38 +290,30 @@ describe('the project lens', () => {
     expect(api.navigate).toHaveBeenCalledWith('/marketplace');
   });
 
-  it('says while a finished pause’s schedules are still off, and to switch them on when DorkOS would not', async () => {
-    // The PATCH waits, then is refused, so the schedule stays on the list.
-    let refuse: (answer: StubAnswer) => void = () => {};
-    routeFetch((method) =>
-      method === 'PATCH'
-        ? new Promise<StubAnswer>((resolve) => {
-            refuse = resolve;
-          })
-        : { status: 200, body: flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })]) }
-    );
+  it('says while a finished pause’s schedules are still off, sends the person to Schedules, and forgets them when told', async () => {
+    const before = flowModel([flowProject('dorkos', { restoreSchedules: ['s-1', 's-2'] })], {
+      cwdProject: 'dorkos',
+    });
+    const after = flowModel([flowProject('dorkos')], { cwdProject: 'dorkos' });
     const api = host(DORKOS);
-    const store = new FlowStore(api);
-    render(React.createElement(createFlowTab(api, store)));
-    await act(async () => {
-      store.apply(
-        flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('blintz')], {
-          cwdProject: 'dorkos',
-        })
-      );
-    });
+    const { fetch } = await renderTab(before, api);
+    fetch.calls.length = 0;
     expect(screen.getByText(schedulesWaitingText('dorkos'))).toBeTruthy();
-    await act(async () => {
-      refuse({ status: 403, body: {} });
-    });
-    await act(async () => {
-      store.apply(
-        flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })], { cwdProject: 'dorkos' })
-      );
-    });
+    // Flow switches nothing on itself.
+    expect(fetch.calls).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: OPEN_SCHEDULES_LABEL }));
+    expect(api.navigate).toHaveBeenCalledWith('/tasks');
+    const { calls } = routeRequests(() => ({ status: 200, body: after }));
+    fireEvent.click(screen.getByRole('button', { name: SCHEDULES_ON_LABEL }));
     await act(async () => {});
-    expect(screen.getByText(SCHEDULES_OFF_TEXT)).toBeTruthy();
-    expect(SCHEDULES_OFF_TEXT).toMatch(/in Schedules\.$/);
+    expect(calls).toEqual([
+      {
+        method: 'POST',
+        url: '/schedules/restored',
+        body: { project: 'dorkos', ids: ['s-1', 's-2'] },
+      },
+    ]);
+    expect(screen.queryByText(schedulesWaitingText('dorkos'))).toBeNull();
   });
 
   it('says in one plain sentence when a run stopped because a chat it needs is gone (DOR-2490)', async () => {
@@ -382,7 +374,7 @@ describe('pausing from the lens', () => {
     const paused = flowModel([
       flowProject('dorkos', { pause: { since: null, until: tomorrow.toISOString() } }),
     ]);
-    const fetch = routeFetch((method, url) =>
+    const fetch = routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? { status: 200, body: paused }
         : { status: 200, body: quiet }
@@ -401,7 +393,7 @@ describe('pausing from the lens', () => {
     const post = fetch.calls.find(
       (call) => call.method === 'POST' && !call.url.endsWith('/folders')
     );
-    expect(post?.url).toBe('/api/ext/flow/pause');
+    expect(post?.url).toBe('/pause');
     const body = post?.body as { project: string; until: string };
     expect(body.project).toBe('dorkos');
     expect(Date.parse(body.until)).toBe(tomorrow.getTime());
@@ -411,14 +403,14 @@ describe('pausing from the lens', () => {
     });
     expect(fetch.calls.at(-1)).toMatchObject({
       method: 'POST',
-      url: '/api/ext/flow/resume',
+      url: '/resume',
       body: { project: 'dorkos' },
     });
   });
 
   it("shows DorkOS's refusal in plain words", async () => {
     const quiet = flowModel([flowProject('dorkos')]);
-    routeFetch((method, url) =>
+    routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? { status: 403, body: { error: 'nope' } }
         : { status: 200, body: quiet }
@@ -486,8 +478,8 @@ describe('schedules a finished pause left off', () => {
       flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')]),
       host(null)
     );
-    const line = screen.getByText(/^· Schedules stay off/).parentElement?.textContent;
-    expect(line).toBe('dorkos · Schedules stay off until DorkOS is open');
+    const line = screen.getByText(/^· Schedules still off/).parentElement?.textContent;
+    expect(line).toBe('dorkos · Schedules still off: switch them on in Schedules');
   });
 });
 

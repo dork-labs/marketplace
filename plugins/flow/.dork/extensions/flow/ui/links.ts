@@ -12,6 +12,9 @@
 /** Flow home. */
 export const HOME_PATH = '/x/flow';
 
+/** DorkOS's Schedules page (its route is `/tasks`), where flow's schedules are. */
+export const TASKS_ROUTE = '/tasks';
+
 /** The page paths flow registers, relative to {@link HOME_PATH}. */
 export const PAGE_PATHS = { home: '', project: 'p/:name', settings: 'p/:name/settings' } as const;
 

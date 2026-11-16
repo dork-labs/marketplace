@@ -13,7 +13,7 @@
  *   report it to DorkOS's project registry (DOR-3581).
  * - `POST /pause` and `POST /resume` pause or resume one project or all of
  *   them, with an end time, and answer the new model. `POST /schedules/restored`
- *   forgets DorkOS schedules the Flow tab switched back on after a pause.
+ *   forgets DorkOS schedules a person switched back on after a pause.
  * - `GET /capacity` answers "Capacity this week" on Flow home: each account's
  *   weekly use and each project's work from its journal. Read on demand, never pushed.
  * - flow asks in DorkOS's inbox (`ctx.inbox`) only when only a person can
@@ -26,10 +26,14 @@
  *   adapter, as it is now.
  * - `GET /settings/:name` answers a project's settings by who a change
  *   reaches, and `PUT /settings/:name` changes them: the shared file, the
- *   local file and the pause default. The dial and the accounts a project may
- *   use are DorkOS's, written only from the person's browser, never here.
+ *   local file and the pause default. The dial is DorkOS's, written only from
+ *   the person's browser, never here.
+ * - `GET /accounts/eligibility` and `GET /known-projects` read DorkOS's
+ *   account rules and projects for the screens (`lib/account-rules.ts`). A
+ *   person changes those rules in Settings → Runtimes; nothing here writes them.
  * - `GET /fleet/migration` and `PUT /fleet/migration` keep the record of
- *   moving "Only for these repos" into DorkOS, which the browser does.
+ *   moving "Only for these repos" into DorkOS, which a person does in
+ *   Settings → Runtimes.
  * - Every route that changes something runs behind DorkOS's person bar
  *   (`lib/person.ts`): an agent calling flow's routes cannot pause a project
  *   or change an account's policy. A path flow does not serve answers a JSON 404.
@@ -54,6 +58,7 @@ import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
+import { knownProjects, readEligibility } from './lib/account-rules.ts';
 import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
 import { ModelService } from './lib/model-service.ts';
@@ -341,6 +346,28 @@ export function createFlowExtension(
   app.post('/folders', person, async (c) => c.json(await model.addFolder(await jsonBody(c))));
   app.get('/settings/:name', async (c) => c.json(await model.settings(c.req.param('name'))));
   app.get('/fleet/migration', async (c) => c.json(await readRepoMigration(storage)));
+  // DorkOS's account rules and projects, read for the screens, which can call
+  // only flow's routes (client API v2). Reads only: a person changes the rules
+  // in Settings → Runtimes, never through flow.
+  app.get('/accounts/eligibility', async (c) => {
+    const project = queryValue(c, 'project');
+    return c.json(
+      await readEligibility(
+        {
+          dorkHome,
+          listAccounts: () => accounts.list(),
+          listProjects: async () => [
+            ...(await model.projects()),
+            ...(projects !== undefined ? await projects.list() : []),
+          ],
+        },
+        typeof project === 'string' ? project : undefined
+      )
+    );
+  });
+  app.get('/known-projects', async (c) =>
+    c.json({ projects: await knownProjects(projects && (() => projects.list())) })
+  );
   app.get('/capacity', async (c) => {
     const at = now();
     const usage = await accounts.usage().catch(() => []);

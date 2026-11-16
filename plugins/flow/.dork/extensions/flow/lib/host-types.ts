@@ -312,9 +312,10 @@ export interface ReadableState {
 
 /**
  * The server context DorkOS injects (DorkOS `DataProviderContext`). Flow's
- * `minHostVersion` (DorkOS 0.116.0, the first to serve a fetch handler with
- * its caller) guarantees `dorkHome` and `accounts`; the seams marked optional
- * below are still probed before use.
+ * `minHostVersion` (DorkOS 0.135.12, the first with client API version 2;
+ * 0.116.0 was the first to serve a fetch handler with its caller) guarantees
+ * `dorkHome` and `accounts`; the seams marked optional below are still probed
+ * before use.
  */
 export interface DataProviderContext {
   /** Scoped persistent storage for extension data. */
@@ -640,14 +641,35 @@ export interface ExtensionDialogControls {
   close(): void;
 }
 
+/** What `api.navigate` answers on client API version 2 (DorkOS `AppNavigateResult`). */
+export type NavigateResult = { ok: true } | { ok: false; reason: string; message: string };
+
+/** The frame's call to flow's own routes (DorkOS `FrameExtensionAPI['request']`). */
+export interface FlowRequester {
+  /**
+   * Call one of flow's routes, by its path under `/api/ext/flow`. A route
+   * that answers with an error rejects with its `status` and `body`.
+   */
+  request<T = unknown>(
+    path: string,
+    options?: { method?: 'GET' | 'PUT' | 'POST'; body?: unknown }
+  ): Promise<T>;
+}
+
 /**
- * The part of DorkOS's client `ExtensionAPI` this extension uses. Flow's
- * `minHostVersion` guarantees the methods that are not optional; each optional
- * one is probed before use (spec `flow-multiproject` §10).
+ * The part of DorkOS's client `FrameExtensionAPI` (client API version 2) this
+ * extension uses. Flow's `minHostVersion` guarantees the methods that are not
+ * optional; each optional one is probed before use (spec `flow-multiproject`
+ * §10).
  */
-export interface ClientApi {
-  /** Go to a client route. */
-  navigate(path: string): void;
+export interface ClientApi extends FlowRequester {
+  /**
+   * `registration` in the run that learns what flow adds (it stays loaded,
+   * hidden, and runs commands and the tab's dot); `view` inside each screen.
+   */
+  readonly context?: 'registration' | 'view';
+  /** Go to a client route. Answers why not, never throws. */
+  navigate(path: string): Promise<NavigateResult> | void;
   /** A snapshot of the host's state. */
   getState(): ReadableState;
   /** Call `callback` when the selected part of the state changes; returns a function that stops. */

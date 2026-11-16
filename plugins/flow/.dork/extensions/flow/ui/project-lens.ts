@@ -9,10 +9,16 @@
 import { lastReadLine } from '../shared/read-age.ts';
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
 import type { StartKind } from '../lib/start-words.ts';
-import { UNREACHABLE_MESSAGE, allowAdapter, pauseFlow, resumeFlow } from './api.ts';
+import {
+  UNREACHABLE_MESSAGE,
+  allowAdapter,
+  pauseFlow,
+  resumeFlow,
+  schedulesRestored,
+} from './api.ts';
 import { StartButton, hasInbox, type AnswerApi } from './answers.ts';
 import { DecisionRow } from './page-parts.ts';
-import { HOME_PATH, settingsPath, webHref } from './links.ts';
+import { HOME_PATH, TASKS_ROUTE, settingsPath, webHref } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
@@ -27,20 +33,23 @@ export const NOTHING_RUNNING_TEXT = 'Nothing is running.';
 export const TIMER_SORTING_NOTICE =
   "Daily sorting is off for now. Flow won't ask when nothing's ready.";
 
-/** Shown after a resume when DorkOS would not switch flow's schedules back on. */
-export const SCHEDULES_OFF_TEXT =
-  "DorkOS didn't let flow switch its schedules back on after the pause, so they are still off. Turn them on in Schedules.";
-
 /**
- * Shown while a finished pause's schedules wait to be switched back on: only
- * a DorkOS page open in a browser can do it, as the person.
+ * Shown once a pause is over while the DorkOS schedules it switched off are
+ * still off. Only a person switches a schedule on, in DorkOS's Schedules page,
+ * so flow says so and offers the way there.
  *
  * @param name - The project's name.
  * @returns The words.
  */
 export function schedulesWaitingText(name: string): string {
-  return `Schedules for ${name} stay off until DorkOS is open. Flow switches them back on as soon as it is.`;
+  return `The pause on ${name} is over, but the schedules it switched off are still off. Switch them back on in Schedules.`;
 }
+
+/** The button that opens DorkOS's Schedules page. */
+export const OPEN_SCHEDULES_LABEL = 'Open Schedules';
+
+/** The button that tells flow the person switched them back on. */
+export const SCHEDULES_ON_LABEL = 'They’re on again';
 
 /** Hidden from sight, read by screen readers. */
 const SR_ONLY: Style = {
@@ -235,7 +244,6 @@ export function ProjectLens(props: {
   model: FlowModel;
   api: AnswerApi;
   store: FlowStore;
-  schedulesStuck?: boolean;
   /**
    * Whether the project's asks show at the top: by default only on a DorkOS
    * without the inbox, where the lens is where they are answered (§3.2, §7.6).
@@ -403,11 +411,31 @@ export function ProjectLens(props: {
   }
   if (error !== null) body.push(h('p', { key: 'error', role: 'alert', style: ALERT }, error));
   if (project.restoreSchedules.length > 0) {
+    const ids = project.restoreSchedules;
     body.push(
       h(
-        'p',
+        'div',
         { key: 'schedules', style: CONDITION },
-        props.schedulesStuck === true ? SCHEDULES_OFF_TEXT : schedulesWaitingText(project.name)
+        h('p', { style: { margin: 0 } }, schedulesWaitingText(project.name)),
+        h(
+          'div',
+          { style: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '4px' } },
+          h(
+            'button',
+            { type: 'button', style: LINK, onClick: () => api.navigate(TASKS_ROUTE) },
+            OPEN_SCHEDULES_LABEL
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: LINK,
+              disabled: busy,
+              onClick: () => act(() => schedulesRestored(project.name, ids)),
+            },
+            SCHEDULES_ON_LABEL
+          )
+        )
       )
     );
   }

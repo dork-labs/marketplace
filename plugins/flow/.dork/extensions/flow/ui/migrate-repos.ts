@@ -6,21 +6,29 @@
  *
  * **Nothing moves by itself, and nothing ever widens.** Opening Settings → Flow
  * only works out, read-only, what could move ({@link planMoves}); each account
- * row then offers it in words, and only a person's click runs it
- * ({@link runMove}):
+ * row then offers it in words, and only a person's click does anything
+ * ({@link runMove}).
  *
- * - DorkOS is written only when it has **no rule at all** for the account, and
- *   then to **exactly** the projects the repos match. An account DorkOS already
+ * **Flow never writes DorkOS's rule.** On DorkOS client API version 2 the
+ * screen can call only flow's routes, and only a person changes where an
+ * account may work, so a row that would set DorkOS's rule sends the person
+ * to Settings → Runtimes ({@link MovePlan.opens}) to set it there:
+ *
+ * - It offers that only when DorkOS has **no rule at all** for the account,
+ *   naming **exactly** the projects the repos match. An account DorkOS already
  *   limits is left alone, and says so: its rule was a person's choice, and
  *   merging lists could let it work somewhere neither side allowed.
+ * - Once DorkOS keeps the account to exactly those projects, the row offers
+ *   flow's half: noting the move, and, when every project is current, letting
+ *   flow follow DorkOS's rule.
  * - flow's own role stays as it was (kept out, only these repos) until every
  *   known project's flow understands DorkOS's rule (behaviour level 2, flow
  *   0.52): an older flow's terminal runs would otherwise spend the account
  *   wherever DorkOS allows. Until then both rules apply. Once every project is
  *   current, a second click lets flow use DorkOS's rule (Rotation).
- * - A repo not on this computer yet is remembered; once it is, the row offers
- *   to add its project, but only while DorkOS's rule is still exactly the one
- *   flow set.
+ * - A repo not on this computer yet is remembered; once it is, the row says
+ *   so and sends the person to add its project, but only while DorkOS's rule
+ *   is still exactly the one the move set.
  *
  * @module @dorkos/flow/extension/ui/migrate-repos
  */
@@ -28,8 +36,8 @@
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
 import type { AccountMove, RepoMigration } from '../lib/repo-migration.ts';
 import type { AccountPatch } from './api.ts';
-import type { AccountEligibility, CoreProject } from './core-api.ts';
-import { joinNames } from './account-checkboxes.ts';
+import type { AccountEligibility, CoreProject } from './api.ts';
+import { RUNTIMES_SETTINGS_LINK, joinNames } from './project-accounts.ts';
 
 /** The behaviour level whose flow honours DorkOS's account rule in the terminal. */
 export const RULE_BEHAVIOUR = 2;
@@ -38,23 +46,22 @@ export const RULE_BEHAVIOUR = 2;
 export const WAITING_FOR_FLOW_TEXT =
   "Until every project runs flow 0.52 or newer, flow keeps its own list too; then a button here lets flow switch to DorkOS's rule.";
 
-/** Said when DorkOS was written but flow could not note the move. */
+/** Said when DorkOS keeps the account to the moved projects but flow could not note the move. */
 function unrecordedText(label: string, names: string): string {
-  return `DorkOS now keeps ${label} to ${names}, but flow couldn't note that it moved it there. Try again so flow can finish the move later.`;
+  return `DorkOS now keeps ${label} to ${names}, but flow couldn't note the move. Try again so flow can finish it later.`;
 }
+
+/** The button that opens Settings → Runtimes. */
+export const OPEN_RUNTIMES_ACTION = 'Open Settings → Runtimes';
 
 /** What the move needs, so tests can stand in for flow and DorkOS. */
 export interface MigrationDeps {
-  /** Whether DorkOS keeps account rules per project: yes, no, or it could not be asked. */
-  hasEligibilityRoutes(): Promise<boolean | null>;
   /** flow's accounts and their roles. */
   getFleet(): Promise<FleetView>;
   /** Every project DorkOS knows. */
   listProjects(): Promise<CoreProject[]>;
   /** Every Claude account's own rule, as DorkOS holds it. */
   getEligibility(): Promise<AccountEligibility>;
-  /** Keep an account to projects (DorkOS, person only). */
-  putOnlyProjects(id: string, projects: string[]): Promise<unknown>;
   /** Change an account's role in flow. */
   putAccount(key: string, patch: AccountPatch): Promise<unknown>;
   /** The record of earlier moves. */
@@ -67,19 +74,20 @@ export interface MigrationDeps {
 
 /** Where one account stands. */
 export type MoveKind =
-  /** DorkOS has no rule; some repos are here. A click keeps it to exactly those projects. */
+  /** DorkOS has no rule; some repos are here. A click opens Settings → Runtimes to set it. */
   | 'ready'
   /** Moved; flow's own rule is held until every project runs a current flow. */
   | 'held'
   /** Moved, and every project is current now. A click lets flow use DorkOS's rule. */
   | 'finish'
-  /** A remembered repo is here now. A click adds its project to the rule flow set. */
+  /** A remembered repo is here now. A click opens Settings → Runtimes to add its project. */
   | 'add'
   /** DorkOS already limits the account: nothing to do. */
   | 'core-has-rule'
   /**
-   * DorkOS holds exactly the rule a move would set, but flow's note of the move
-   * was never saved. A click saves it, so the move can finish later.
+   * DorkOS holds exactly the rule a move would set, and flow has not noted the
+   * move. A click notes it (and, when every project is current, lets flow
+   * follow DorkOS's rule).
    */
   | 'unrecorded'
   /** DorkOS does not list the account: nothing to do. */
@@ -95,6 +103,11 @@ export interface MovePlan {
   text: string;
   /** The button's words, or `null` when there is nothing to click. */
   action: string | null;
+  /**
+   * The DorkOS page the button opens instead of acting, where the person
+   * sets DorkOS's rule; `null` when the button runs {@link runMove}.
+   */
+  opens: string | null;
 }
 
 /** Whether `value` names the same repo as `other`, ignoring case. */
@@ -146,8 +159,13 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
   const matched = account.repos.flatMap((repo) => projectsOf(repo, world.projects));
   const pending = account.repos.filter((repo) => projectsOf(repo, world.projects).length === 0);
   const names = (list: readonly CoreProject[]) => joinNames(unique(list.map((p) => p.name)));
-  const plan = (kind: MoveKind, text: string, action: string | null = null) => ({
-    plan: { key: account.key, kind, text, action },
+  const plan = (
+    kind: MoveKind,
+    text: string,
+    action: string | null = null,
+    opens: string | null = null
+  ) => ({
+    plan: { key: account.key, kind, text, action, opens },
     account,
     matched,
     pending,
@@ -178,7 +196,17 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
       matched.length > 0 &&
       sameRoots(kept, matchedRoots)
     ) {
-      return plan('unrecorded', unrecordedText(account.label, names(matched)), 'Try again');
+      return world.allCurrent
+        ? plan(
+            'unrecorded',
+            `DorkOS now keeps ${account.label} to ${names(matched)}, and every project runs flow 0.52 or newer. Let flow follow DorkOS's rule for ${account.label} instead of its own list?`,
+            'Switch to DorkOS’s rule'
+          )
+        : plan(
+            'unrecorded',
+            `DorkOS now keeps ${account.label} to ${names(matched)}. Let flow note it, so it can finish the move later? ${WAITING_FOR_FLOW_TEXT}`,
+            'Note it'
+          );
     }
     if (kept !== null) {
       return plan(
@@ -194,8 +222,9 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
     const later = world.allCurrent ? '' : ` ${WAITING_FOR_FLOW_TEXT}`;
     return plan(
       'ready',
-      `Move "Only for these repos" into DorkOS? DorkOS will keep ${account.label} to ${names(matched)}.${waiting}${later}`,
-      'Move it'
+      `Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit ${account.label} to ${names(matched)}; flow notices when you come back.${waiting}${later}`,
+      OPEN_RUNTIMES_ACTION,
+      RUNTIMES_SETTINGS_LINK
     );
   }
 
@@ -205,16 +234,16 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
     const added = found.flatMap((repo) => projectsOf(repo, world.projects));
     return plan(
       'add',
-      `${joinNames(found)} ${found.length === 1 ? 'is' : 'are'} on this computer now. Let DorkOS keep ${account.label} to ${names(added)} too?`,
-      'Add it'
+      `${joinNames(found)} ${found.length === 1 ? 'is' : 'are'} on this computer now. To let ${account.label} work in ${names(added)} too, add ${added.length === 1 ? 'it' : 'them'} to its limit in Settings → Runtimes.`,
+      OPEN_RUNTIMES_ACTION,
+      RUNTIMES_SETTINGS_LINK
     );
   }
   return null;
 }
 
-/** Read everything a plan needs, or `null` on a DorkOS without the account rules. */
+/** Read everything a plan needs, or `null` when no account has anything to move. */
 async function worldOf(deps: MigrationDeps, allCurrent: boolean): Promise<World | null> {
-  if ((await deps.hasEligibilityRoutes()) !== true) return null;
   const [fleet, record] = await Promise.all([deps.getFleet(), deps.getRecord()]);
   const claude = fleet.groups.find((group) => group.runtime === 'claude-code');
   const interesting = (claude?.accounts ?? []).some(
@@ -270,7 +299,13 @@ export async function runMove(
 ): Promise<MoveResult> {
   const world = await worldOf(deps, allCurrent);
   const found = world === null ? undefined : situations(world).find((s) => s.plan.key === key);
-  if (world === null || found === undefined || found.plan.action === null) {
+  // A row that opens Settings → Runtimes has nothing for flow to do.
+  if (
+    world === null ||
+    found === undefined ||
+    found.plan.action === null ||
+    found.plan.opens !== null
+  ) {
     return {
       ok: false,
       text: found?.plan.text ?? 'There is nothing to move for this account now.',
@@ -307,40 +342,17 @@ export async function runMove(
     };
   };
 
-  if (plan.kind === 'ready') {
-    const roots = unique(matched.map((project) => project.root));
-    const names = joinNames(unique(matched.map((project) => project.name)));
-    try {
-      await deps.putOnlyProjects(account.id, roots);
-    } catch (failure) {
-      return {
-        ok: false,
-        text: `Couldn't move ${account.label}'s repo limits to DorkOS. Nothing changed.${why(failure)}`,
-      };
-    }
-    if (!allCurrent) {
-      if (!(await store({ movedRoots: roots, pendingRepos: [], at, held: true }))) {
-        return { ok: false, text: unrecordedText(account.label, names) };
-      }
-      return {
-        ok: true,
-        text: `DorkOS now keeps ${account.label} to ${names}, and flow's own repo list stays too. ${WAITING_FOR_FLOW_TEXT}`,
-      };
-    }
-    return flipToRotation(roots, pending, names);
-  }
-
   if (plan.kind === 'unrecorded') {
     const roots = unique(matched.map((project) => project.root));
     const names = joinNames(unique(matched.map((project) => project.name)));
+    // Every project is current: flow follows DorkOS's rule in the same click.
+    if (allCurrent) return flipToRotation(roots, pending, names);
     if (!(await store({ movedRoots: roots, pendingRepos: [], at, held: true }))) {
       return { ok: false, text: unrecordedText(account.label, names) };
     }
     return {
       ok: true,
-      text: allCurrent
-        ? `DorkOS keeps ${account.label} to ${names}. Flow can now switch to DorkOS's rule.`
-        : `DorkOS keeps ${account.label} to ${names}. ${WAITING_FOR_FLOW_TEXT}`,
+      text: `DorkOS keeps ${account.label} to ${names}. ${WAITING_FOR_FLOW_TEXT}`,
     };
   }
 
@@ -350,27 +362,5 @@ export async function runMove(
     return flipToRotation(move?.movedRoots ?? [], pending, names);
   }
 
-  // 'add': only while DorkOS's rule is still exactly the one flow set.
-  const moved = move!;
-  const here = moved.pendingRepos.filter((repo) => projectsOf(repo, world.projects).length > 0);
-  const added = here.flatMap((repo) => projectsOf(repo, world.projects));
-  const roots = unique([...moved.movedRoots, ...added.map((project) => project.root)]);
-  try {
-    await deps.putOnlyProjects(account.id, roots);
-  } catch (failure) {
-    return {
-      ok: false,
-      text: `Couldn't add ${joinNames(here)} to where ${account.label} may work. Nothing changed.${why(failure)}`,
-    };
-  }
-  const noted = await store({
-    movedRoots: roots,
-    pendingRepos: moved.pendingRepos.filter((repo) => !here.includes(repo)),
-    at,
-    held: false,
-  });
-  return {
-    ok: true,
-    text: `Added to DorkOS: ${account.label} may now also work in ${joinNames(unique(added.map((p) => p.name)))}.${noted ? '' : " Flow couldn't note it, so it won't offer the rest of the repos here; add them in Settings → Runtimes."}`,
-  };
+  return { ok: false, text: plan.text };
 }
