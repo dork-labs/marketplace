@@ -66,7 +66,8 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
   A "duplicate" that is live unfinished work reopens.
 - **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
   untouched for `groom.couldExpiryDays` (default 60) or more days. Propose closing it as `canceled` with the comment the
-  failure quotes (`COULD_EXPIRY_COMMENT` in `audit-backlog.ts`). Its evidence is its
+  failure quotes. A Could carrying a `groom.neverExpireLabels` label (security
+  work, by default) is never reported. Its evidence is its
   last-touched date; it needs no ship proof.
 - **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
   one (the current maintenance project when none fits); never leave one project-less.

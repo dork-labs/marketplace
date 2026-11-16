@@ -542,8 +542,15 @@ groom to close it as canceled, with the comment "Closed after N days as a Could.
 Reopen it if it matters." It takes a whole number of days above 0; the default is
 `60`.
 
+`neverExpireLabels` lists the labels that keep a Could open however old it is,
+so security work ranked Could is never closed for being old. A name matches a
+label without regard to case, whole or as a family's leaf (`security` matches
+`Security` and `area/security`). The default is `["security",
+"needs-security-design"]`; each name must be non-empty and listed once, and `[]`
+lets every Could expire.
+
 ```jsonc
-"groom": { "couldExpiryDays": 45 }
+"groom": { "couldExpiryDays": 45, "neverExpireLabels": ["security", "legal"] }
 ```
 
 ## `fleet`: the account setup reminder
