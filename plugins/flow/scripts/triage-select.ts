@@ -2,7 +2,7 @@
  * Which open items the daily triage takes up (DOR-4546). Every item is triaged
  * as it is filed, so the daily run must not touch one again: a second pass
  * would move its last-changed time, and a Could would never reach the groom's
- * 30-day expiry.
+ * expiry (`groom.couldExpiryDays`, 60 days unless set).
  *
  * An item needs triage when it is waiting (a `backlog` or `unstarted` state),
  * has no `agent/*` label and no assignee but the agent, and either:

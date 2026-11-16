@@ -56,7 +56,7 @@ Each firing:
    a released Should or Could waits for the groom.
 
 3. **Triage only what `flow snapshot --json --untriaged` lists;** never touch a
-   Should or Could already in a project, so its 30-day clock runs. Run each through
+   Should or Could already in a project, so its expiry clock runs. Run each through
    Path B of `<flow-root>/skills/triaging-work/SKILL.md`: bucket it and give it a
    project (or list the proposal when this run cannot write them). A Must is readied
    only if it passes the six readiness rules

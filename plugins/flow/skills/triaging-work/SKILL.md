@@ -37,15 +37,20 @@ From an intake source → C; the trigger names an item → B; else A.
 
 The one rubric every flow skill points at. Every item gets one bucket, on the tracker's
 own priority, never a label, and a size on the tracker's own estimate scale. A repo may
-keep its own rubric (its agent instructions name it, with its scale and its default
-project); follow it where it says more.
+keep its own rubric (its agent instructions name it, with its scale, its default
+project and who confirms a Must); follow it where it says more.
 
 | Bucket     | Priority                          | After triage                                                     |
 | ---------- | --------------------------------- | ---------------------------------------------------------------- |
-| **Must**   | `2` high (`1` urgent: broken now) | its project, ready it (`unstarted`) if the six rules pass        |
-| **Should** | `3` medium                        | its project, the backlog; the groom reviews it each cycle        |
-| **Could**  | `4` low                           | its project, the backlog; the groom closes it 30 days untouched  |
+| **Must**   | `2` high (`1` urgent: broken now) | once confirmed: its project, ready it if the six rules pass      |
+| **Should** | `3` medium                        | its project, the backlog; reviewed each of the team's cycles     |
+| **Could**  | `4` low                           | its project, the backlog; closed when untouched past its expiry  |
 | **Won't**  | none                              | `canceled` with a one-line reason (a floor gate: Reject, below)  |
+
+**A Must is confirmed by a person.** A filer may suggest Must; the role the repo's
+rubric names confirms it or lowers it. Until then it counts as a Should: park it with
+one question to that role rather than ready it. With no role named, the triager
+confirms it.
 
 Most items are Should; if more than about one in five is a Must, the bar is too low. In
 doubt, the lower bucket. Urgent is only for something broken now (mainline red, an open

@@ -523,7 +523,7 @@ team ids, so the list belongs in `config.local.json` beside `connection.team`. T
 warning to move them. Last-read marks, the `flow intake` read and how issue text is
 handled: [`../docs/intake.mdx`](../docs/intake.mdx).
 
-## `groom`: bare labels the audit accepts
+## `groom`: bare labels the audit accepts, and when a Could expires
 
 The backlog audit (`flow audit`, invariant GRM-12) fails any label without a
 `family/` prefix, because flow cannot tell what a bare label means. When your team
@@ -535,6 +535,16 @@ keeps one on purpose, say a label mirrored from GitHub, list it:
 
 Only the listed labels pass; every other bare label still fails. Each entry must
 be a bare label: not empty, no `/`, no space at either end. The default is `[]`.
+
+`couldExpiryDays` is how long a waiting Could (priority 4, in a backlog or
+unstarted state, not claimed) may go untouched before the audit (GRM-16) asks the
+groom to close it as canceled, with the comment "Closed after N days as a Could.
+Reopen it if it matters." It takes a whole number of days above 0; the default is
+`60`.
+
+```jsonc
+"groom": { "couldExpiryDays": 45 }
+```
 
 ## `fleet`: the account setup reminder
 

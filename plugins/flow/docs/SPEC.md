@@ -308,7 +308,8 @@ open blocker, no foreign assignee, a live project, and a `stage/*` label on
 every READY item; no dead project holding open work; namespaced labels; a
 single-valued `agent/*` state machine; no live item with an unresolved
 `duplicateOf`; state and labels agreeing; and no Could (priority 4) left
-untouched for 30 days (GRM-16, closed by the groom as canceled).
+untouched for `groom.couldExpiryDays`, 60 days unless set (GRM-16, closed by
+the groom as canceled).
 
 **GRM-15** reports each `STATE-n` breach from `work-state.ts`, the one rule for
 how state and labels fit together: at most one `stage/*` label; none while

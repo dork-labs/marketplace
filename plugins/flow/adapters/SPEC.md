@@ -906,8 +906,8 @@ declaration.
   `updatedAt`, the time of the item's last change. `flow create` now files
   only a triaged item (type, priority 1-4, size, project, proof and done-when
   sections) and checks the open items for a near-duplicate title first; the
-  groom's GRM-16 reads `updatedAt` to close a Could left untouched for 30
-  days. An adapter at 3.0 still loads, but `flow create`, which always sends a
+  groom's GRM-16 reads `updatedAt` to close a Could left untouched past
+  `groom.couldExpiryDays` (60 days unless set). An adapter at 3.0 still loads, but `flow create`, which always sends a
   size, refuses it (exit 3) until it is regenerated, rather than file an
   unsized item; its items carry no `updatedAt` (GRM-16 then falls back to
   `createdAt`).

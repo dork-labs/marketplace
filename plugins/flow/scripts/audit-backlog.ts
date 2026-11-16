@@ -75,6 +75,8 @@ interface AuditOpts {
   unnamespacedLabels?: readonly string[];
   /** The time GRM-16 measures an item's age against, ISO-8601. Default: the wall clock. */
   now?: string;
+  /** Days a waiting Could may go untouched (config `groom.couldExpiryDays`). Default: 60. */
+  couldExpiryDays?: number;
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -98,7 +100,8 @@ Usage:
   node --experimental-strip-types scripts/audit-backlog.ts --help
 
 Fixture: a JSON array of WorkItems, or
-  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."], "now": "<ISO>" } }.
+  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."],
+    "now": "<ISO>", "couldExpiryDays": 60 } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -128,9 +131,9 @@ Invariants ("ready" = carries the literal agent/ready label):
           at most one stage/* label, none on a started item, agent/claimed only
           when started, no agent/ready when started, no agent/completed when open
   GRM-16  no waiting Could (priority 4; backlog or unstarted, not agent/claimed)
-          untouched for 30 or more days (updatedAt,
+          untouched for opts.couldExpiryDays (default 60) or more days (updatedAt,
           else createdAt, against opts.now): close it as canceled with the comment
-          "Closed after 30 days as a Could. Reopen it if it matters."
+          "Closed after <N> days as a Could. Reopen it if it matters."
 `;
 
 /** True for a non-array, non-null object. */
@@ -374,11 +377,18 @@ function checkGrm14(items: readonly unknown[]): string[] {
   return details;
 }
 
-/** How many days a Could (priority 4) item may sit untouched before the groom closes it. */
-const COULD_EXPIRY_DAYS = 30;
+/** The days a Could (priority 4) may sit untouched before the groom closes it, unless configured. */
+const COULD_EXPIRY_DAYS = 60;
 
-/** The comment the groom closes an expired Could with. */
-const COULD_EXPIRY_COMMENT = 'Closed after 30 days as a Could. Reopen it if it matters.';
+/**
+ * The comment the groom closes an expired Could with.
+ *
+ * @param days - The configured expiry, in days.
+ * @returns The comment.
+ */
+function couldExpiryComment(days: number): string {
+  return `Closed after ${days} days as a Could. Reopen it if it matters.`;
+}
 
 /** One day, in milliseconds. */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -395,16 +405,21 @@ interface ExpiredCould {
 
 /**
  * The waiting Could (priority 4) items, in a `backlog` or `unstarted` state and
- * not `agent/claimed`, untouched for {@link COULD_EXPIRY_DAYS} or more days: the ones the groom proposes to close as canceled with
- * {@link COULD_EXPIRY_COMMENT}. "Touched" is the tracker's `updatedAt`, else
+ * not `agent/claimed`, untouched for `days` or more days: the ones the groom
+ * proposes to close as canceled with {@link couldExpiryComment}. "Touched" is the tracker's `updatedAt`, else
  * `createdAt`; an item with neither, or an unreadable date, never expires
  * (missing is neutral). Every other priority is left alone.
  *
  * @param items - The snapshot's normalized WorkItems.
  * @param now - The time to measure against, ISO-8601. Default: the wall clock.
+ * @param days - The expiry, in days. Default: {@link COULD_EXPIRY_DAYS}.
  * @returns The expired items, in snapshot order.
  */
-function expiredCoulds(items: readonly unknown[], now?: string): ExpiredCould[] {
+function expiredCoulds(
+  items: readonly unknown[],
+  now?: string,
+  days: number = COULD_EXPIRY_DAYS
+): ExpiredCould[] {
   const at = now === undefined ? Date.now() : Date.parse(now);
   const expired: ExpiredCould[] = [];
   items.forEach((item, index) => {
@@ -418,22 +433,23 @@ function expiredCoulds(items: readonly unknown[], now?: string): ExpiredCould[] 
     if (touched === undefined) return;
     const since = Date.parse(touched);
     if (!Number.isFinite(since) || !Number.isFinite(at)) return;
-    const days = Math.floor((at - since) / DAY_MS);
-    if (days < COULD_EXPIRY_DAYS) return;
+    const untouched = Math.floor((at - since) / DAY_MS);
+    if (untouched < days) return;
     expired.push({
       identifier: itemLabel(item, index),
       title: typeof item.title === 'string' ? item.title : '',
-      days,
+      days: untouched,
     });
   });
   return expired;
 }
 
-/** GRM-16 - no open Could untouched for 30 or more days. */
+/** GRM-16 - no waiting Could untouched for the configured days or more. */
 function checkGrm16(items: readonly unknown[], opts: AuditOpts): string[] {
-  return expiredCoulds(items, opts.now).map(
+  const days = opts.couldExpiryDays ?? COULD_EXPIRY_DAYS;
+  return expiredCoulds(items, opts.now, days).map(
     (could) =>
-      `${could.identifier} is a Could untouched for ${could.days} days; close it as canceled with the comment "${COULD_EXPIRY_COMMENT}"`
+      `${could.identifier} is a Could untouched for ${could.days} days; close it as canceled with the comment "${couldExpiryComment(days)}"`
   );
 }
 
@@ -472,7 +488,7 @@ const INVARIANTS: readonly Invariant[] = [
     summary: 'state, the agent/* label and the stage/* label agree',
     check: checkGrm15,
   },
-  { id: 'GRM-16', summary: 'no Could item untouched for 30 days', check: checkGrm16 },
+  { id: 'GRM-16', summary: 'no waiting Could untouched past its expiry', check: checkGrm16 },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -591,6 +607,11 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
     if (isPlainObject(parsed.opts) && isNonEmptyString(parsed.opts.now)) {
       opts.now = parsed.opts.now;
     }
+    // The config's rule: a positive whole number of days; anything else keeps the default.
+    const days = isPlainObject(parsed.opts) ? parsed.opts.couldExpiryDays : undefined;
+    if (typeof days === 'number' && Number.isInteger(days) && days > 0) {
+      opts.couldExpiryDays = days;
+    }
     return { items: parsed.items, opts };
   }
   throw new Error(
@@ -675,6 +696,6 @@ export {
   expiredCoulds,
   INVARIANTS,
   COULD_EXPIRY_DAYS,
-  COULD_EXPIRY_COMMENT,
+  couldExpiryComment,
 };
 export type { AuditOpts, ExpiredCould, Failure, Invariant, InvariantResult, Verdict };

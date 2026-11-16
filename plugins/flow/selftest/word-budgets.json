@@ -128,11 +128,11 @@
     "target": 592
   },
   "docs/SPEC.md": {
-    "baseline": 2588,
+    "baseline": 2591,
     "target": 2575
   },
   "docs/the-dials.mdx": {
-    "baseline": 4356,
+    "baseline": 4369,
     "target": 4356
   },
   "docs/turning-on-autonomy.mdx": {
@@ -216,7 +216,7 @@
     "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
-    "baseline": 1259,
+    "baseline": 1264,
     "target": 1156
   },
   "skills/ideating-features/SKILL.md": {
@@ -240,7 +240,7 @@
     "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 1333,
+    "baseline": 1387,
     "target": 1135
   },
   "skills/verifying-work/proof-test.md": {

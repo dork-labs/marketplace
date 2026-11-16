@@ -65,7 +65,7 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
 - **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
-  untouched for 30 or more days. Propose closing it as `canceled` with the comment the
+  untouched for `groom.couldExpiryDays` (default 60) or more days. Propose closing it as `canceled` with the comment the
   failure quotes (`COULD_EXPIRY_COMMENT` in `audit-backlog.ts`). Its evidence is its
   last-touched date; it needs no ship proof.
 - **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
@@ -82,7 +82,7 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
    scoped work → `task`; programme tracker → `meta` (never ready).
 2. A MoSCoW bucket, by _The MoSCoW buckets_ in
    `<flow-root>/skills/triaging-work/SKILL.md` (a Won't is proposed for closing with a
-   reason). Each cycle a Should is promoted, kept or dropped to Could. Only a Must is
+   reason). Each of the team's cycles a Should is promoted, kept or dropped to Could. Only a Must is
    proposed `agent/ready`.
 3. A size, on the tracker's own estimate scale.
 4. `stage/execute` (one component, no new pattern) or `stage/ideate` (multi-layer, new
