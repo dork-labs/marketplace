@@ -16,28 +16,41 @@ const PROJECT = { id: 'proj-1', name: 'Widgets', stateCategory: 'started' as con
 
 describe('needsTriage', () => {
   it.each([3, 4] as const)('leaves a priority-%i item with a project alone', (priority) => {
-    expect(needsTriage({ labels: ['type/task'], priority, project: PROJECT })).toBe(false);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/task'], priority, project: PROJECT })).toBe(false);
   });
 
   it('takes up an item with no priority, priority 0, or no project', () => {
-    expect(needsTriage({ labels: ['type/idea'], project: PROJECT })).toBe(true);
-    expect(needsTriage({ labels: ['type/idea'], priority: 0, project: PROJECT })).toBe(true);
-    expect(needsTriage({ labels: ['type/idea'], priority: 3 })).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/idea'], project: PROJECT })).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/idea'], priority: 0, project: PROJECT })).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/idea'], priority: 3 })).toBe(true);
   });
 
   it('takes up a Must until it is readied or parked', () => {
-    expect(needsTriage({ labels: ['type/task'], priority: 2, project: PROJECT })).toBe(true);
-    expect(needsTriage({ labels: ['type/task'], priority: 1, project: PROJECT })).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/task'], priority: 2, project: PROJECT })).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: ['type/task'], priority: 1, project: PROJECT })).toBe(true);
     for (const label of ['agent/ready', 'agent/needs-input', 'agent/claimed']) {
-      expect(needsTriage({ labels: ['type/task', label], priority: 2, project: PROJECT })).toBe(
+      expect(needsTriage({ stateCategory: 'backlog', labels: ['type/task', label], priority: 2, project: PROJECT })).toBe(
         false
       );
     }
   });
 
+  it('takes up only waiting items: never a started or closed one', () => {
+    for (const stateCategory of ['started', 'completed', 'canceled'] as const) {
+      expect(needsTriage({ stateCategory, labels: ['type/idea'] })).toBe(false);
+    }
+    expect(needsTriage({ stateCategory: 'unstarted', labels: ['type/idea'] })).toBe(true);
+  });
+
+  it('leaves a type/meta Must alone, but not a type/meta item with no bucket', () => {
+    const meta = { stateCategory: 'backlog' as const, labels: ['type/meta'] };
+    expect(needsTriage({ ...meta, priority: 2, project: PROJECT })).toBe(false);
+    expect(needsTriage({ ...meta, project: PROJECT })).toBe(true);
+  });
+
   it("skips a person's item, and counts the agent's own as unassigned", () => {
-    expect(needsTriage({ labels: [], assignee: 'a-person' }, 'flow-bot')).toBe(false);
-    expect(needsTriage({ labels: [], assignee: 'flow-bot' }, 'flow-bot')).toBe(true);
+    expect(needsTriage({ stateCategory: 'backlog', labels: [], assignee: 'a-person' }, 'flow-bot')).toBe(false);
+    expect(needsTriage({ stateCategory: 'backlog', labels: [], assignee: 'flow-bot' }, 'flow-bot')).toBe(true);
   });
 });
 

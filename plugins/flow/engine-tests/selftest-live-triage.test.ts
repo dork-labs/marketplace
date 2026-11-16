@@ -73,7 +73,19 @@ describe('notTriaged', () => {
           labels: ['type/task', 'agent/ready', 'stage/execute'],
         })
       )
-    ).toMatch(/Should but was readied/);
+    ).toMatch(/was readied, but only a Must is \(priority 3\)/);
+  });
+
+  it('fails a readied item with no priority: only a Must is readied', () => {
+    expect(
+      judge(
+        store({
+          project: PROJECT,
+          stateCategory: 'unstarted',
+          labels: ['type/task', 'agent/ready', 'stage/execute'],
+        })
+      )
+    ).toMatch(/only a Must is \(priority none\)/);
   });
 
   it('fails a Should or Could with no project, outside the backlog, or with no priority', () => {

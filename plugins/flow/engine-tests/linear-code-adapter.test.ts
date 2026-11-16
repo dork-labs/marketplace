@@ -1172,7 +1172,7 @@ describe('createItem', () => {
         Promise.resolve()
     );
     expect(error).toBeInstanceOf(PreconditionError);
-    expect((error as Error).message).toMatch(/whole points/);
+    expect((error as Error).message).toMatch(/whole number of points/);
     expect(shirt.calls).toEqual([]);
   });
 

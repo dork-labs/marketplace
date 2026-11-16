@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { checkedLine, keyMarker } from '../../scripts/cli/create.ts';
+import { duplicateLine, keyMarker } from '../../scripts/cli/create.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import { main } from '../../scripts/flow.ts';
 import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
@@ -184,8 +184,11 @@ describe('flow create', () => {
     const t = tracker();
     await flow(CAPTURE, t);
     const description = t.fake.backlog.items[0].description;
-    expect(description.startsWith(BODY)).toBe(true);
-    expect(description.slice(BODY.length)).toMatch(
+    // The body, then the line saying what the duplicate check compared, then the signature.
+    const checked = `${BODY}\n\n${duplicateLine('Export the monthly report as CSV', [])}`;
+    expect(checked).toContain('Duplicate check: open item titles compared on "export monthly report csv".');
+    expect(description.startsWith(checked)).toBe(true);
+    expect(description.slice(checked.length)).toMatch(
       /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"claude-work",.*\} -->$/
     );
   });
@@ -281,7 +284,11 @@ describe('flow create', () => {
     const t = tracker();
     const run = await flow(['create', '--title', 'T', '--description-file', 'idea.md', ...REST], t);
     expect(run.code).toBe(EXIT.ok);
-    expect(t.fake.backlog.items[0].description.startsWith('From a file.\n\n— 🤖 /flow')).toBe(true);
+    expect(
+      t.fake.backlog.items[0].description.startsWith(
+        `From a file.${SECTIONS}\n\n${duplicateLine('T', [])}\n\n— 🤖 /flow`
+      )
+    ).toBe(true);
   });
 
   it('removes a description file under .dork/flow/tmp once filed, and keeps one elsewhere', async () => {
@@ -748,7 +755,10 @@ describe('flow create checks for a duplicate first (DOR-4546)', () => {
     const run = await flow([...CAPTURE, '--not-duplicate-of', 'fake-7, FAKE-8'], t);
     expect(run.code).toBe(EXIT.ok);
     const [item] = added(t, ['FAKE-7', 'FAKE-8']);
-    expect(item.description).toContain(checkedLine(['FAKE-7', 'FAKE-8']));
+    expect(item.description).toContain(
+      'Duplicate check: open item titles compared on "export monthly report csv"; not a duplicate of FAKE-7, FAKE-8.'
+    );
+    expect(item.description).toContain(duplicateLine(CAPTURE[2], ['FAKE-7', 'FAKE-8']));
   });
 
   it('files past an item that only shares a theme, and past a closed near match', async () => {
