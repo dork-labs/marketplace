@@ -528,19 +528,27 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
     ];
     // The default list: a security label, bare or as a family's leaf, keeps it open.
     expect(expiredCoulds(items, NOW).map((c) => c.identifier)).toEqual(['ABC-62', 'ABC-63']);
-    expect(audit(items, { now: NOW }).failures[0].detail).not.toContain('ABC-60');
+    const grm16 = (opts: Parameters<typeof audit>[1]) =>
+      audit(items, opts).failures.find((f) => f.invariant === 'GRM-16')?.detail ?? '';
+    expect(grm16({ now: NOW })).toContain('ABC-62');
+    expect(grm16({ now: NOW })).not.toContain('ABC-60');
     // A custom list replaces the default.
-    expect(
-      expiredCoulds(items, NOW, 60, ['area/legal']).map((c) => c.identifier)
-    ).toEqual(['ABC-60', 'ABC-61', 'ABC-63']);
-    expect(
-      audit(items, { now: NOW, neverExpireLabels: ['legal'] }).failures[0].detail
-    ).not.toContain('ABC-62');
+    expect(expiredCoulds(items, NOW, 60, ['area/legal']).map((c) => c.identifier)).toEqual([
+      'ABC-60',
+      'ABC-61',
+      'ABC-63',
+    ]);
+    expect(grm16({ now: NOW, neverExpireLabels: ['legal'] })).toContain('ABC-60');
+    expect(grm16({ now: NOW, neverExpireLabels: ['legal'] })).not.toContain('ABC-62');
     // Matched without case: Security, SECURITY and area/Security all count.
     const cased = [
       item('ABC-65', { priority: 4, updatedAt: old, labels: ['type/signal', 'Security'] }),
       item('ABC-66', { priority: 4, updatedAt: old, labels: ['type/signal', 'Area/SECURITY'] }),
-      item('ABC-67', { priority: 4, updatedAt: old, labels: ['type/task', 'needs-security-design'] }),
+      item('ABC-67', {
+        priority: 4,
+        updatedAt: old,
+        labels: ['type/task', 'needs-security-design'],
+      }),
     ];
     expect(expiredCoulds(cased, NOW)).toEqual([]);
     expect(expiredCoulds(cased, NOW, 60, ['SECURITY']).map((c) => c.identifier)).toEqual([
@@ -556,9 +564,16 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
   });
 
   it('reads neverExpireLabels from a stdin snapshot', () => {
-    const items = [item('ABC-64', { priority: 4, updatedAt: daysAgo(90), labels: ['type/idea', 'security'] })];
+    const items = [
+      item('ABC-64', { priority: 4, updatedAt: daysAgo(90), labels: ['type/idea', 'security'] }),
+    ];
     const run = (neverExpireLabels: unknown) =>
-      runOracle({ stdin: JSON.stringify({ items, opts: { now: NOW, neverExpireLabels } }) });
+      runOracle({
+        stdin: JSON.stringify({
+          items,
+          opts: { now: NOW, neverExpireLabels, unnamespacedLabels: ['security'] },
+        }),
+      });
     expect(run(undefined).status).toBe(0);
     expect(run([]).status).toBe(1);
     expect(run(['legal']).status).toBe(1);
