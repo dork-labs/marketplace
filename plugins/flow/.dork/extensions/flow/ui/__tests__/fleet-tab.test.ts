@@ -673,7 +673,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
     });
     const onMove = vi.fn();
     const text =
-      'Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit Work to client-app; flow notices when you come back.';
+      'Move "Only for these repos" into DorkOS: limit Work to client-app in Settings → Runtimes. Flow picks it up when you come back.';
     render(
       React.createElement(FleetTab, {
         rules: rules({}),
@@ -685,7 +685,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
                 key: 'claude-code:Work',
                 kind: 'ready' as const,
                 text,
-                action: 'Limit this account in Settings → Runtimes',
+                action: 'Open Settings → Runtimes',
                 opens: '?settings=runtimes',
               },
               result: null,
@@ -699,9 +699,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
     await act(async () => {});
     expect(screen.getByText(text)).toBeTruthy();
     expect(onMove).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' })
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
     expect(onMove).toHaveBeenCalledTimes(1);
   });
 

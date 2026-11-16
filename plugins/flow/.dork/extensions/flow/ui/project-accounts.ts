@@ -39,11 +39,10 @@ const MAIN_ID = 'default';
 export const RUNTIMES_SETTINGS_LINK = '?settings=runtimes';
 
 /** The button that opens it, saying what the person can do there today. */
-export const OPEN_RUNTIMES_LABEL = 'Limit an account to projects in Settings → Runtimes';
+export const OPEN_RUNTIMES_LABEL = 'Limit accounts in Settings → Runtimes';
 
 /** Said under the list: what changes the list, and where. */
-export const CHANGE_IN_RUNTIMES_TEXT =
-  'Only you can change where an account may work. In Settings → Runtimes you can limit an account to certain projects.';
+export const CHANGE_IN_RUNTIMES_TEXT = 'Only you can change where an account may work.';
 
 /** Said when the project keeps its own account list. */
 export const PROJECT_LIST_TEXT =
@@ -84,8 +83,8 @@ export function mayWorkHere(row: AccountEligibilityRow): boolean {
  * @returns The words after the account's name.
  */
 export function rowText(row: AccountEligibilityRow): string {
-  if (!row.allowedByAccount) return `not here: ${onlyForText(row)}`;
-  if (!row.allowedByProject) return "not here: this project's list leaves it out";
+  if (!row.allowedByAccount) return onlyForText(row);
+  if (!row.allowedByProject) return "left out by this project's list";
   return 'may work here';
 }
 

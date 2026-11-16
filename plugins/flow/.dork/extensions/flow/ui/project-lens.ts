@@ -42,11 +42,11 @@ export const TIMER_SORTING_NOTICE =
  * @returns The words.
  */
 export function schedulesWaitingText(name: string): string {
-  return `The pause on ${name} is over, but the schedules it switched off are still off. Switch them back on in Schedules.`;
+  return `The pause on ${name} is over, but the schedules it switched off are still off.`;
 }
 
 /** The button that opens DorkOS's Schedules page (route `/tasks`), where the person does it. */
-export const OPEN_SCHEDULES_LABEL = 'Turn them back on in Schedules';
+export const OPEN_SCHEDULES_LABEL = 'Open Schedules';
 
 /** The button that tells flow the person switched them back on. */
 export const SCHEDULES_ON_LABEL = 'I turned them back on';

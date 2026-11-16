@@ -25,8 +25,8 @@ DorkOS decides which accounts each project may use, and holds every chat, schedu
 
 This replaces flow's older **Only for these repos** list on a kept-out account. In Settings → Flow, that account's row says what to do, and nothing moves until you press a button:
 
-1. **Limit this account in Settings → Runtimes**: there, limit it to the projects the row names. Flow never suggests a wider limit, and leaves alone an account DorkOS already limits.
-2. **Switch to DorkOS's rule** then lets flow use the account in rotation within those limits, and drops flow's own list. While a project runs flow older than 0.52, the row says **Note it** instead, both rules apply, and the switch appears once every project is updated.
+1. **Open Settings → Runtimes**: there, limit it to the projects the row names. Flow never suggests a wider limit, and leaves alone an account DorkOS already limits.
+2. **Switch to DorkOS's rule** then lets flow use the account in rotation within those limits, and drops flow's own list. While a project runs flow older than 0.52, the row says **Keep both for now** instead, both rules apply, and the switch appears once every project is updated.
 
 To undo it, clear the account's project limits in Settings → Runtimes, and put flow's list back with `flow accounts set <id> --role kept-out --repos owner/name,...`.
 

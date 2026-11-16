@@ -314,7 +314,7 @@ async function resumeNow(
     api.notify?.(
       off.length === 0
         ? `Flow is running again in ${who}.`
-        : `Flow is running again in ${who}, but schedules the pause switched off are still off in ${listNames(off.map((project) => project.name))}. Switch them on in Schedules.`,
+        : `Flow is running again in ${who}. Schedules the pause switched off are still off in ${listNames(off.map((project) => project.name))}. Switch them on in Schedules.`,
       { type: 'success' }
     );
   } catch (failure) {

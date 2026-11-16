@@ -79,7 +79,7 @@ function urgentLine(
   const tracker = project.tracker?.label ?? 'the tracker';
   if (project.restoreSchedules.length > 0) {
     // Only a person can switch them back on, in Schedules; say so rather than look fine.
-    return { project, text: 'Schedules still off: switch them on in Schedules', rank: 1.5 };
+    return { project, text: 'Schedules the pause switched off are still off', rank: 1.5 };
   }
   const order: Record<string, number> = {
     'sign-in': 1,

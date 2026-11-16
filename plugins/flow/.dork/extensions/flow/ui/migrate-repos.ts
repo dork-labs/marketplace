@@ -52,7 +52,7 @@ function unrecordedText(label: string, names: string): string {
 }
 
 /** The button that opens Settings → Runtimes, where the person limits the account. */
-export const OPEN_RUNTIMES_ACTION = 'Limit this account in Settings → Runtimes';
+export const OPEN_RUNTIMES_ACTION = 'Open Settings → Runtimes';
 
 /** What the move needs, so tests can stand in for flow and DorkOS. */
 export interface MigrationDeps {
@@ -205,7 +205,7 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
         : plan(
             'unrecorded',
             `DorkOS now keeps ${account.label} to ${names(matched)}. Let flow note it, so it can finish the move later? ${WAITING_FOR_FLOW_TEXT}`,
-            'Note it'
+            'Keep both for now'
           );
     }
     if (kept !== null) {
@@ -222,7 +222,7 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
     const later = world.allCurrent ? '' : ` ${WAITING_FOR_FLOW_TEXT}`;
     return plan(
       'ready',
-      `Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit ${account.label} to ${names(matched)}; flow notices when you come back.${waiting}${later}`,
+      `Move "Only for these repos" into DorkOS: limit ${account.label} to ${names(matched)} in Settings → Runtimes. Flow picks it up when you come back.${waiting}${later}`,
       OPEN_RUNTIMES_ACTION,
       RUNTIMES_SETTINGS_LINK
     );

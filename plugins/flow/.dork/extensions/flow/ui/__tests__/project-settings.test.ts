@@ -292,13 +292,11 @@ describe('Settings → Flow and "Only for these repos"', () => {
     await act(async () => {});
     expect(
       screen.getByText(
-        'Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit Work to client-app',
+        'Move "Only for these repos" into DorkOS: limit Work to client-app in Settings → Runtimes',
         { exact: false }
       )
     ).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' })
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
     await act(async () => {});
     expect(api.navigate).toHaveBeenCalledWith('?settings=runtimes');
     expect(put).not.toHaveBeenCalled();
@@ -328,9 +326,7 @@ describe('Settings → Flow and "Only for these repos"', () => {
     await act(async () => {});
     await act(async () => {});
     await act(async () => {});
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Limit this account in Settings → Runtimes' })
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings → Runtimes' }));
     await act(async () => {});
     expect(screen.getByText('DorkOS has no page at that address.')).toBeTruthy();
   });
@@ -356,7 +352,7 @@ describe('Settings → Flow and "Only for these repos"', () => {
     await act(async () => {});
     await act(async () => {});
     expect(screen.getByText(WAITING_FOR_FLOW_TEXT, { exact: false })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Note it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep both for now' }));
     await act(async () => {});
     await act(async () => {});
     expect(put).toHaveBeenCalledWith({

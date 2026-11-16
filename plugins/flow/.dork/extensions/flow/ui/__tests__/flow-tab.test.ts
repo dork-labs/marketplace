@@ -472,8 +472,8 @@ describe('schedules a finished pause left off', () => {
       flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')]),
       host(null)
     );
-    const line = screen.getByText(/^· Schedules still off/).parentElement?.textContent;
-    expect(line).toBe('dorkos · Schedules still off: switch them on in Schedules');
+    const line = screen.getByText(/^· Schedules the pause switched off/).parentElement?.textContent;
+    expect(line).toBe('dorkos · Schedules the pause switched off are still off');
   });
 });
 

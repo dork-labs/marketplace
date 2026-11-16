@@ -100,7 +100,7 @@ describe('planning a move', () => {
       {
         key: KEY,
         kind: 'ready',
-        text: 'Move "Only for these repos" into DorkOS? In Settings → Runtimes, limit Work to client-app; flow notices when you come back. acme/web isn\'t on this computer yet.',
+        text: 'Move "Only for these repos" into DorkOS: limit Work to client-app in Settings → Runtimes. Flow picks it up when you come back. acme/web isn\'t on this computer yet.',
         action: OPEN_RUNTIMES_ACTION,
         opens: '?settings=runtimes',
       },
@@ -172,7 +172,7 @@ describe('never widening (the reviewer’s scenario)', () => {
     const { deps, state, personLimits } = world({ repos: ['acme/app', 'acme/web'] });
     personLimits('/work/client-app');
     const [plan] = await planMoves(deps, false);
-    expect(plan).toMatchObject({ kind: 'unrecorded', action: 'Note it', opens: null });
+    expect(plan).toMatchObject({ kind: 'unrecorded', action: 'Keep both for now', opens: null });
     expect(await runMove(deps, KEY, false)).toEqual({
       ok: true,
       text: `DorkOS keeps Work to client-app. ${WAITING_FOR_FLOW_TEXT}`,
@@ -272,7 +272,7 @@ describe('running a move', () => {
       text: "DorkOS now keeps Work to client-app, but flow couldn't note the move. Try again so flow can finish it later.",
     });
     const [retry] = await planMoves(deps, false);
-    expect(retry).toMatchObject({ kind: 'unrecorded', action: 'Note it' });
+    expect(retry).toMatchObject({ kind: 'unrecorded', action: 'Keep both for now' });
     expect(await runMove(deps, KEY, false)).toEqual({
       ok: true,
       text: `DorkOS keeps Work to client-app. ${WAITING_FOR_FLOW_TEXT}`,

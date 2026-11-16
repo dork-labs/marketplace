@@ -92,8 +92,8 @@ describe('Accounts this project may use', () => {
       }),
     }));
     await renderList();
-    expect(line('Work').textContent).toBe('Work · not here: only for client-app');
-    expect(line('Acct 2').textContent).toBe("Acct 2 · not here: this project's list leaves it out");
+    expect(line('Work').textContent).toBe('Work · only for client-app');
+    expect(line('Acct 2').textContent).toBe("Acct 2 · left out by this project's list");
     expect(screen.getByText(PROJECT_LIST_TEXT)).toBeTruthy();
   });
 
