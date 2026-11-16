@@ -536,6 +536,16 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
     expect(
       audit(items, { now: NOW, neverExpireLabels: ['legal'] }).failures[0].detail
     ).not.toContain('ABC-62');
+    // Matched without case: Security, SECURITY and area/Security all count.
+    const cased = [
+      item('ABC-65', { priority: 4, updatedAt: old, labels: ['type/signal', 'Security'] }),
+      item('ABC-66', { priority: 4, updatedAt: old, labels: ['type/signal', 'Area/SECURITY'] }),
+      item('ABC-67', { priority: 4, updatedAt: old, labels: ['type/task', 'needs-security-design'] }),
+    ];
+    expect(expiredCoulds(cased, NOW)).toEqual([]);
+    expect(expiredCoulds(cased, NOW, 60, ['SECURITY']).map((c) => c.identifier)).toEqual([
+      'ABC-67',
+    ]);
     // An empty list expires every old Could, as before the setting existed.
     expect(expiredCoulds(items, NOW, 60, []).map((c) => c.identifier)).toEqual([
       'ABC-60',

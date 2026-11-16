@@ -827,7 +827,7 @@ describe('FlowConfigSchema — the groom block', () => {
     expect(FlowConfigSchema.parse({}).groom).toEqual({
       unnamespacedLabels: [],
       couldExpiryDays: 60,
-      neverExpireLabels: ['security'],
+      neverExpireLabels: ['security', 'needs-security-design'],
     });
   });
 
@@ -837,7 +837,7 @@ describe('FlowConfigSchema — the groom block', () => {
     expect(FlowConfigSchema.parse({ groom }).groom).toEqual({
       ...groom,
       couldExpiryDays: 60,
-      neverExpireLabels: ['security'],
+      neverExpireLabels: ['security', 'needs-security-design'],
     });
     expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(true);
   });
@@ -877,8 +877,11 @@ describe('groom.couldExpiryDays (DOR-4546)', () => {
 describe('groom.neverExpireLabels (DOR-4546)', () => {
   // Purpose: a Could carrying one of these labels never expires, so a security
   // finding ranked Could is never closed for being old. "security" unless set.
-  it('defaults to ["security"]', () => {
-    expect(FlowConfigSchema.parse({}).groom.neverExpireLabels).toEqual(['security']);
+  it('defaults to ["security", "needs-security-design"]', () => {
+    expect(FlowConfigSchema.parse({}).groom.neverExpireLabels).toEqual([
+      'security',
+      'needs-security-design',
+    ]);
   });
 
   it('takes a list of label names, and an empty list', () => {
@@ -892,6 +895,7 @@ describe('groom.neverExpireLabels (DOR-4546)', () => {
     ['an empty name', ['']],
     ['a blank name', ['  ']],
     ['a duplicate', ['security', 'security']],
+    ['a duplicate in another case', ['security', 'Security']],
     ['a non-string', [7]],
     ['a string instead of a list', 'security'],
   ])('refuses %s', (_what, value) => {
