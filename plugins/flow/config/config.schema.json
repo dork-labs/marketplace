@@ -19,25 +19,11 @@
           "properties": {
             "key": {
               "default": null,
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "type": ["string", "null"]
             },
             "id": {
               "default": null,
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "type": ["string", "null"]
             }
           },
           "additionalProperties": false
@@ -48,14 +34,7 @@
           "properties": {
             "slug": {
               "default": null,
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "type": ["string", "null"]
             }
           },
           "additionalProperties": false
@@ -162,14 +141,7 @@
         },
         "reviewer": {
           "default": null,
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": ["string", "null"]
         },
         "marker": {
           "default": "— 🤖 /flow",
@@ -1421,14 +1393,7 @@
             },
             "project": {
               "default": null,
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "type": ["string", "null"]
             },
             "labels": {
               "default": [],
