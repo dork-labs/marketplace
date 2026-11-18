@@ -109,15 +109,17 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
  * Whether a later run of this check run succeeded, with no run of it unfinished:
  * every run at a head stays in the rollup, so each label change leaves its old
  * reds behind. A time that can't be read, or a tie, counts as not later, so the
- * red stands.
+ * red stands. Missing or blank check/workflow identity cannot prove replacement.
  */
 function passedLater(check: Record<string, unknown>, rollup: unknown[]): boolean {
   const name = str(check.name);
-  if (name === undefined) return false;
+  const workflow = str(check.workflowName);
+  if (name === undefined || name.trim() === '') return false;
+  if (workflow === undefined || workflow.trim() === '') return false;
   const runs = rollup
     .map(record)
     .filter((run) => run !== undefined)
-    .filter((run) => str(run.name) === name && str(run.workflowName) === str(check.workflowName));
+    .filter((run) => str(run.name) === name && str(run.workflowName) === workflow);
   if (runs.some((run) => str(run.status)?.toUpperCase() !== 'COMPLETED')) return false;
   const started = Date.parse(str(check.startedAt) ?? '');
   return runs.some(

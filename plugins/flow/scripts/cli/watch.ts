@@ -8,7 +8,7 @@
  * prints one line per event, `<identifier or owner/repo#n> <EVENT>`:
  *
  * - `MERGED`, `CLOSED`;
- * - `FAILING: <checks>` when a check on the head fails;
+ * - `FAILING: <checks>` when a current check on the head fails;
  * - `EJECTED (<innocent|suspect|unknown>)` when the PR is neither armed nor
  *   queued and its own merge-group attempt failed in the last 30 minutes,
  *   judged by {@link judgeEjection} against the other recent attempts;
@@ -93,8 +93,9 @@ function runTargets(ctx: VerbContext, identifiers: readonly string[]): Target[] 
 async function eventFor(forge: Forge, pr: number, status: PrStatus): Promise<string | null> {
   if (status.state === 'merged') return 'MERGED';
   if (status.state === 'closed') return 'CLOSED';
-  if (status.failing.length > 0) {
-    return `FAILING: ${status.failing.map((check) => check.name).join(', ')}`;
+  const failing = status.failing.filter((check) => check.superseded !== true);
+  if (failing.length > 0) {
+    return `FAILING: ${failing.map((check) => check.name).join(', ')}`;
   }
   if (status.armed || status.queued) return null;
   const groups = await forge.recentGroupFailures(status.base, [], EJECTION_WINDOW_MINUTES);
