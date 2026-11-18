@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.98.1
+
+**Reinstall Flow to receive this fix.**
+
+- `flow watch` ignores old failed or canceled checks after their replacements pass. Current failures still appear. Ordinary watch keeps waiting past those old failures, and follow mode reports the merge once.
+
 ## 0.98.0
 
 **Every item flow files is now triaged as it is filed, and flow checks for a duplicate first (DOR-4546). Reinstall to get it: until you do, `flow create` still files items with no priority, size or project.**
@@ -442,6 +448,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Unattended bypass needs flow installed globally. A per-agent install, which lives inside the project at `<project>/.dork/plugins/flow`, never gets it. Bypass is never honoured when flow itself, or DorkOS's data folder, is inside the project, because the agent could then edit the code that checks the approval. If you run flow from a checkout inside your project (`--plugin-dir`, as when working on flow itself), unattended runs never get bypass there, and flow's own adapter files must be committed and unchanged before a drain starts. Settings still inside the plugin get a message to run `config-files.ts migrate` before unattended runs.
 - Flow's DorkOS extension needs DorkOS 0.98.0 or later. It adds two tools: **Allow unattended bypass for a project** (a person must approve it) and **Check unattended bypass for a project**.
 - Known limit: this stops an agent steered inside flow's commands. An agent with a full shell as your user can reach anything on your computer, and with DorkOS login off any local program can approve the card (DOR-505). Turn on DorkOS login if this matters to you.
+
 ## 0.58.0
 
 **`/flow:decompose` no longer writes a task list flow then rejects, and `/flow:done` reads the item before it files follow-ups. Reinstall to get it.**
