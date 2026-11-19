@@ -16,7 +16,7 @@
   "dependencies": {
     "js-yaml": "^4.3.2",
     "semver": "^7.8.5",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
@@ -25,6 +25,6 @@
     "prettier": "^3.8.3",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "5.1.1"
   }
 }
