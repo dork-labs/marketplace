@@ -20,6 +20,7 @@
 
 import { z } from 'zod';
 
+import { WARN_MARGIN_PCT } from './config-files.ts';
 import { WORKFLOW_NAME_PATTERN } from './land/validate.ts';
 import { LABEL_ON_VALUES } from './land/label-on.ts';
 
@@ -941,7 +942,11 @@ export const DrainSchema = z
     /** Review verdicts before a run parks. */
     maxReviewRounds: z.number().int().min(1).default(5),
     /** How close to a usage ceiling, in percent, counts as a warning. */
-    warnMarginPct: z.number().min(0).max(50).default(10),
+    warnMarginPct: z
+      .number()
+      .min(WARN_MARGIN_PCT.min)
+      .max(WARN_MARGIN_PCT.max)
+      .default(WARN_MARGIN_PCT.default),
     /**
      * Minutes a lane may go without progress before flow acts (DOR-3263): a
      * session that went away restarts once, a quiet or unreachable one parks,

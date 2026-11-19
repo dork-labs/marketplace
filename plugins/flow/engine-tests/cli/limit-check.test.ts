@@ -6,8 +6,16 @@
  * speaks also proves the hook's whole import graph is zod-free.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,7 +38,7 @@ function put(file: string, value: unknown): void {
 }
 
 /** The run store with one running drain run for session s-1; `null` is the ambient account. */
-function runs(account: string | null = 'claude3'): void {
+function runs(account: string | null = 'claude3', overrides: Record<string, unknown> = {}): void {
   put(path.join(project, '.dork', 'flow', 'flow-state.json'), {
     'i-1': {
       issueId: 'i-1',
@@ -46,19 +54,36 @@ function runs(account: string | null = 'claude3'): void {
       ...(account === null ? {} : { account }),
       host: 'cli',
       runtime: 'claude-code',
+      ...overrides,
     },
   });
 }
 
 /** claude3's ledger: its 5-hour window at `status`, resetting at `resetsAt`. */
-function ledger(status: string, usedPct: number, resetsAt: string): void {
-  const observedAt = new Date().toISOString();
-  put(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'claude3.json'), {
+function ledger(
+  status: string,
+  usedPct: number,
+  resetsAt: string | null,
+  options: {
+    runtime?: string;
+    accountId?: string;
+    observedAt?: string;
+    windows?: Record<string, unknown>;
+    spend?: Record<string, unknown>;
+  } = {}
+): void {
+  const {
+    runtime = 'claude-code',
+    accountId = 'claude3',
+    observedAt = new Date().toISOString(),
+  } = options;
+  put(path.join(dorkHome, 'runtimes', runtime, 'usage', `${accountId}.json`), {
     v: 1,
-    runtime: 'claude-code',
-    accountId: 'claude3',
+    runtime,
+    accountId,
     updatedAt: observedAt,
-    windows: {
+    ...(options.spend === undefined ? {} : { spend: options.spend }),
+    windows: options.windows ?? {
       five_hour: { usedPct, status, resetsAt, observedAt, source: 'statusline' },
       seven_day: {
         usedPct: 10,
@@ -71,19 +96,42 @@ function ledger(status: string, usedPct: number, resetsAt: string): void {
   });
 }
 
+function childArgs(args: readonly string[]): string[] {
+  return ['--experimental-strip-types', '--no-warnings', '--import', loader, FLOW, ...args];
+}
+
+function childEnv(): NodeJS.ProcessEnv {
+  return {
+    PATH: path.dirname(process.execPath) + ':/usr/bin:/bin',
+    HOME: dir,
+    DORK_HOME: dorkHome,
+    XDG_CONFIG_HOME: path.join(dir, 'xdg'),
+    TMPDIR: dir,
+    GIT_CONFIG_NOSYSTEM: '1',
+  };
+}
+
+const CONTEXT_ARGS = ['limit-check', '--context-stdin'];
+const marker = () => path.join(project, '.dork', 'flow', 'drain', 'limit-notified-s-1.json');
+const contextPayload = (runtime = 'codex', accountId = 'codex-a') => ({
+  v: 1,
+  operation: 'evaluate',
+  issueId: 'i-1',
+  expectedSessionId: 's-1',
+  runtime,
+  accountId,
+  cwd: project,
+});
+
 /** Run the hook with a payload; stdout, stderr and the exit code. */
-function hook(payload: unknown, args: string[] = ['limit-check', '--hook']) {
-  const result = spawnSync(
-    process.execPath,
-    ['--experimental-strip-types', '--no-warnings', '--import', loader, FLOW, ...args],
-    {
-      cwd: project,
-      input: typeof payload === 'string' ? payload : JSON.stringify(payload),
-      env: { ...process.env, DORK_HOME: dorkHome, FLOW_SESSION_ID: '' },
-      encoding: 'utf8',
-      timeout: 30_000,
-    }
-  );
+function hook(payload: unknown, args: string[] = ['limit-check', '--hook'], cwd = project) {
+  const result = spawnSync(process.execPath, childArgs(args), {
+    cwd,
+    input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+    env: childEnv(),
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -95,10 +143,12 @@ beforeEach(() => {
   project = path.join(dir, 'project');
   dorkHome = path.join(dir, 'home');
   mkdirSync(project, { recursive: true });
-  execFileSync('git', ['init', '-q', project]);
+  execFileSync('git', ['init', '-q', project], { env: childEnv() });
   put(path.join(dorkHome, 'config.json'), {
     runtimes: {
       claudeCode: { accounts: [{ id: 'claude3', path: path.join(dir, 'c3'), label: 'Claude 3' }] },
+      codex: { accounts: [{ id: 'codex-a', path: path.join(dir, 'cx'), label: 'Codex A' }] },
+      opencode: { accounts: [{ id: 'oc-a', path: path.join(dir, 'oc'), label: 'OpenCode A' }] },
     },
   });
   put(path.join(dorkHome, 'flow', 'fleet.json'), {
@@ -207,6 +257,216 @@ describe('flow limit-check --hook', () => {
     const result = hook('', ['limit-check', 'ACME-1']);
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout).toContain('ACME-1 on Claude 3: warning (5-hour');
+  });
+});
+
+describe('canonical warning evaluator', () => {
+  it('applies committed and local warning margins in manual, hook and context modes', () => {
+    // Purpose: margin 25/80 warns and local 5/91 is healthy, the opposite of
+    // either verdict under the old hardcoded 10. All three modes use the policy.
+    put(path.join(project, '.agents', 'flow', 'config.json'), { drain: { warnMarginPct: 25 } });
+    ledger('allowed', 80, soon(2));
+    expect(hook('', ['limit-check', 'ACME-1']).stdout).toContain('warning');
+
+    const nested = path.join(project, 'nested');
+    mkdirSync(nested);
+    const claude = hook({ ...PAYLOAD(), cwd: nested });
+    expect(claude.code, claude.stderr).toBe(0);
+    expect(claude.stdout).toContain('additionalContext');
+
+    runs('codex-a', { runtime: 'codex' });
+    ledger('allowed', 80, soon(2), { runtime: 'codex', accountId: 'codex-a' });
+    rmSync(marker());
+    const codex = hook(contextPayload(), CONTEXT_ARGS);
+    expect(codex.code, codex.stderr).toBe(0);
+    const output = JSON.parse(codex.stdout);
+    expect(output).toMatchObject({ v: 1, kind: 'warning' });
+    expect(output.hookStdout).toBe(claude.stdout.replaceAll('Claude 3', 'Codex A'));
+
+    put(path.join(project, '.agents', 'flow', 'config.local.json'), {
+      drain: { warnMarginPct: 5 },
+      secrets: { trackerToken: 'fixture-only-never-emitted' },
+    });
+    ledger('allowed', 91, soon(3), { runtime: 'codex', accountId: 'codex-a' });
+    expect(JSON.parse(hook(contextPayload(), CONTEXT_ARGS).stdout)).toEqual({
+      v: 1,
+      kind: 'silent',
+      reason: 'healthy',
+    });
+    runs();
+    ledger('allowed', 91, soon(3));
+    expect(hook('', ['limit-check', 'ACME-1']).stdout).toContain(': ok');
+    expect(hook(PAYLOAD())).toMatchObject({ code: 0, stdout: '', stderr: '' });
+  });
+
+  it('matches exact active run facts and the canonical process checkout', () => {
+    // Purpose: wrong identity, inactive run, malformed DTO, cross-project cwd
+    // and wrong ledger owner must not consume a genuine warning.
+    runs('codex-a', { runtime: 'codex' });
+    const reset = soon(2);
+    const ledgerFile = path.join(dorkHome, 'runtimes', 'codex', 'usage', 'codex-a.json');
+    ledger('rejected', 100, reset, { runtime: 'codex', accountId: 'codex-a' });
+    const p = contextPayload();
+    const another = path.join(dir, 'other');
+    execFileSync('git', ['init', '-q', another], { env: childEnv() });
+    const otherWorktree = path.join(project, 'subdir');
+    mkdirSync(otherWorktree);
+    for (const invalid of [
+      { ...p, issueId: 'wrong' },
+      { ...p, expectedSessionId: 'wrong' },
+      { ...p, runtime: 'opencode' },
+      { ...p, accountId: 'claude3' },
+      { ...p, cwd: otherWorktree },
+      { ...p, executable: '/bin/false' },
+      { ...p, accountId: 'é'.repeat(129) },
+      JSON.stringify(p) + ' '.repeat(8192),
+    ]) {
+      const refused = hook(invalid, CONTEXT_ARGS);
+      expect(refused).toMatchObject({ code: 0, stderr: '' });
+      expect(JSON.parse(refused.stdout)).toMatchObject({ v: 1, kind: 'silent' });
+    }
+    expect(JSON.parse(hook(p, CONTEXT_ARGS, another).stdout)).toMatchObject({ kind: 'silent' });
+    runs('codex-a', { runtime: 'codex', status: 'complete' });
+    expect(JSON.parse(hook(p, CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'silent',
+      reason: 'closed',
+    });
+    runs('codex-a', { runtime: 'codex' });
+    const saved = JSON.parse(readFileSync(ledgerFile, 'utf8'));
+    put(ledgerFile, { ...saved, accountId: 'different' });
+    expect(JSON.parse(hook(p, CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'silent',
+      reason: 'unknown',
+    });
+    expect(existsSync(marker())).toBe(false);
+    put(ledgerFile, saved);
+    expect(JSON.parse(hook(p, CONTEXT_ARGS).stdout)).toMatchObject({ kind: 'warning' });
+  });
+
+  it('uses the named linked worktree and the main checkout store', () => {
+    // Purpose: a managed launcher starts the evaluator at the main checkout,
+    // while the context and the marker belong to the run's linked worktree.
+    execFileSync(
+      'git',
+      [
+        '-C',
+        project,
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@invalid',
+        '-c',
+        'core.hooksPath=/dev/null',
+        'commit',
+        '-qm',
+        'Fixture',
+        '--allow-empty',
+      ],
+      { env: childEnv() }
+    );
+    const linked = path.join(dir, 'linked');
+    execFileSync('git', ['-C', project, 'worktree', 'add', '-q', '--detach', linked], {
+      env: childEnv(),
+    });
+    runs('codex-a', { runtime: 'codex', worktreePath: linked });
+    ledger('allowed', 92, soon(2), { runtime: 'codex', accountId: 'codex-a' });
+    expect(
+      JSON.parse(hook({ ...contextPayload(), cwd: linked }, CONTEXT_ARGS).stdout)
+    ).toMatchObject({
+      v: 1,
+      kind: 'warning',
+    });
+    expect(existsSync(marker())).toBe(false);
+    expect(existsSync(path.join(linked, '.dork', 'flow', 'drain', 'limit-notified-s-1.json'))).toBe(
+      true
+    );
+  });
+
+  it('re-reads selected model readings and leaves stale, reset and cost-only paths silent', () => {
+    // Purpose: only the selected model's attributable current reading may warn.
+    const codex = { runtime: 'codex', accountId: 'codex-a' };
+    runs('codex-a', { runtime: 'codex', drain: { worker: { model: 'target' } } });
+    const check = (payload: unknown = contextPayload()) =>
+      JSON.parse(hook(payload, CONTEXT_ARGS).stdout);
+    expect(check()).toMatchObject({ kind: 'silent', reason: 'unknown' });
+    ledger('rejected', 100, null, { ...codex, observedAt: new Date(0).toISOString() });
+    expect(check()).toMatchObject({ kind: 'silent', reason: 'unknown' });
+    ledger('rejected', 100, soon(-1), codex);
+    expect(check()).toMatchObject({ kind: 'silent' });
+
+    const reading = {
+      usedPct: 100,
+      status: 'rejected',
+      resetsAt: soon(2),
+      observedAt: new Date().toISOString(),
+      source: 'rollout',
+    };
+    ledger('allowed', 10, soon(2), { ...codex, windows: { 'model:other': reading } });
+    expect(check()).toMatchObject({ kind: 'silent', reason: 'unknown' });
+    ledger('allowed', 10, soon(2), { ...codex, windows: { 'model:target': reading } });
+    expect(check()).toMatchObject({ kind: 'warning' });
+
+    runs('oc-a', { runtime: 'opencode' });
+    ledger('allowed', 0, null, {
+      runtime: 'opencode',
+      accountId: 'oc-a',
+      windows: {},
+      spend: { costUsd: 100, limitUsd: null },
+    });
+    const openCode = contextPayload('opencode', 'oc-a');
+    expect(check(openCode)).toMatchObject({ kind: 'silent', reason: 'unknown' });
+    const reset = soon(3);
+    ledger('allowed', 95, reset, { runtime: 'opencode', accountId: 'oc-a' });
+    expect(check(openCode)).toMatchObject({ kind: 'warning' });
+  });
+
+  it('commits one warning across simultaneous subprocesses and suppresses a lost reply', async () => {
+    // Purpose: the real filesystem lock serializes consumers; result loss
+    // after commit does not retry a warning or introduce an acknowledgment.
+    runs('codex-a', { runtime: 'codex' });
+    const options = { runtime: 'codex', accountId: 'codex-a' };
+    const initialReset = soon(2);
+    ledger('allowed', 12, initialReset, options);
+    expect(JSON.parse(hook(contextPayload(), CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'silent',
+      reason: 'healthy',
+    });
+    ledger('rejected', 100, initialReset, options);
+    const spawnContext = (discard: boolean) =>
+      new Promise<string>((resolve, reject) => {
+        const child = spawn(process.execPath, childArgs(CONTEXT_ARGS), {
+          cwd: project,
+          env: childEnv(),
+          stdio: ['pipe', discard ? 'ignore' : 'pipe', 'pipe'],
+        });
+        let output = '';
+        let stderr = '';
+        child.stdout?.setEncoding('utf8').on('data', (data: string) => {
+          output += data;
+        });
+        child.stderr?.setEncoding('utf8').on('data', (data: string) => {
+          stderr += data;
+        });
+        child.once('error', reject);
+        child.once('close', (code) => {
+          if (code !== 0 || stderr !== '') reject(new Error(`evaluator exited ${code}: ${stderr}`));
+          else resolve(output);
+        });
+        child.stdin?.end(JSON.stringify(contextPayload()));
+      });
+    const replies = await Promise.all([spawnContext(false), spawnContext(false)]);
+    expect(replies.map((reply) => JSON.parse(reply).kind).sort()).toEqual(['silent', 'warning']);
+    const nextReset = soon(3);
+    ledger('rejected', 100, nextReset, options);
+    await spawnContext(true);
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toEqual({
+      window: 'five_hour',
+      resetsAt: nextReset,
+    });
+    expect(JSON.parse(hook(contextPayload(), CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'silent',
+      reason: 'closed',
+    });
   });
 });
 
