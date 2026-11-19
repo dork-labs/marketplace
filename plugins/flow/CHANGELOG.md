@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.98.5
+
+**Reinstall Flow to receive this change.**
+
+- Flow's app now lists every place it shows in DorkOS: the settings tab, the right panel, the status bar, its ⌘K commands and its dialogs.
+
 ## 0.98.4
 
 **Reinstall Flow to receive this fix.**
