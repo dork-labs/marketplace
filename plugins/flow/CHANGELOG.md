@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.98.3
+
+**Reinstall Flow to receive this fix.**
+
+- Use the project's `drain.warnMarginPct` setting to decide when to ask Claude Code workers to checkpoint.
+
 ## 0.98.2
 
 **Reinstall Flow to receive this fix.**

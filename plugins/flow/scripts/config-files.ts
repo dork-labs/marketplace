@@ -80,6 +80,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 import { hasZone, invokedDirectly, isPlainObject } from './_shared.ts';
+import { ConfigError } from './errors.ts';
 import { addExcludeLines } from './git-exclude.ts';
 import { gitFreeEnv } from './project-boundary.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
@@ -1219,6 +1220,43 @@ export function journalSettings(
     maxBytes: count(merged.maxBytes, JOURNAL_DEFAULTS.maxBytes, 1),
     keep: count(merged.keep, JOURNAL_DEFAULTS.keep, 1, 20),
   };
+}
+
+/** The range and default shared by the zod schema and the lean limit-check reader. */
+export const WARN_MARGIN_PCT = { min: 0, max: 50, default: 10 } as const;
+
+/**
+ * Read the effective warning margin without loading zod or resolving secrets.
+ * The checkout's local policy takes precedence over committed policy. A shared
+ * legacy config may belong to another project and cannot supply the margin.
+ *
+ * @param roots - The canonical project's config roots.
+ * @returns The configured percentage or the schema default when absent.
+ * @throws {ConfigError} When a selected file or its margin is invalid.
+ */
+export function warnMarginPct(roots: ConfigRoots): number {
+  const files = resolveConfigFiles(roots);
+  if (files.shared) throw new ConfigError('Flow warning policy belongs to an unconfirmed project.');
+  const margin = (file: string | null): unknown => {
+    if (file === null) return undefined;
+    const settings: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (!isPlainObject(settings)) throw new ConfigError('Flow warning settings are invalid.');
+    if (settings.drain === undefined) return undefined;
+    if (!isPlainObject(settings.drain)) throw new ConfigError('Flow drain settings are invalid.');
+    return settings.drain.warnMarginPct;
+  };
+  const value = margin(files.local);
+  const selected = value === undefined ? margin(files.committed) : value;
+  if (selected === undefined) return WARN_MARGIN_PCT.default;
+  if (
+    typeof selected !== 'number' ||
+    !Number.isFinite(selected) ||
+    selected < WARN_MARGIN_PCT.min ||
+    selected > WARN_MARGIN_PCT.max
+  ) {
+    throw new ConfigError('Flow warning margin is invalid.');
+  }
+  return selected;
 }
 
 /** The `fleet` block's defaults; `FleetConfigSchema` must agree (a test holds them together). */

@@ -1029,6 +1029,11 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'boolean',
         description: "Run as the PostToolUse hook: read the hook's JSON on stdin.",
       },
+      {
+        name: 'context-stdin',
+        kind: 'boolean',
+        description: 'Evaluate a bounded, server-derived Flow run context on stdin.',
+      },
     ],
     load: () => import('./cli/limit-check.ts'),
   },
