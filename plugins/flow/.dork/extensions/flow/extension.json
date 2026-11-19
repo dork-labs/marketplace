@@ -9,7 +9,8 @@
     "right-panel": true,
     "status-bar": true,
     "command-palette.items": true,
-    "dialog": true
+    "dialog": true,
+    "pages": true
   },
   "serverCapabilities": {
     "serverEntry": "./server.ts"

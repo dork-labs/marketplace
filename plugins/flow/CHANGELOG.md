@@ -8,7 +8,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **Reinstall Flow to receive this change.**
 
-- Flow's app now lists every place it shows in DorkOS: the settings tab, the right panel, the status bar, its ⌘K commands and its dialogs.
+- Flow's app now lists every place it shows in DorkOS: the settings tab, the right panel, the status bar, its ⌘K commands, its dialogs and its pages.
 
 ## 0.98.4
 
