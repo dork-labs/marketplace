@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.98.4
+
+**Reinstall Flow to receive this fix.**
+
+- Flow reports when its app-facing usage check times out.
+
 ## 0.98.3
 
 **Reinstall Flow to receive this fix.**

@@ -6,7 +6,7 @@
  * speaks also proves the hook's whole import graph is zod-free.
  */
 
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -19,6 +19,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withHeldLock } from '../../scripts/atomic-json.ts';
 
 // Every case spawns node; a loaded machine needs the room.
 vi.setConfig({ testTimeout: 60_000 });
@@ -418,6 +419,58 @@ describe('canonical warning evaluator', () => {
     const reset = soon(3);
     ledger('allowed', 95, reset, { runtime: 'opencode', accountId: 'oc-a' });
     expect(check(openCode)).toMatchObject({ kind: 'warning' });
+  });
+
+  it('returns a structured context timeout while the Claude hook remains silent', async () => {
+    runs('codex-a', { runtime: 'codex' });
+    ledger('allowed', 95, soon(2), { runtime: 'codex', accountId: 'codex-a' });
+    // Leave the actual stdin pipe open so read() cannot finish before the production watchdog.
+    const waitForWatchdog = (args: readonly string[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile(
+          process.execPath,
+          childArgs(args),
+          { cwd: project, env: childEnv(), timeout: 30_000 },
+          (error, stdout, stderr) => {
+            if (error) reject(error);
+            else resolve({ stdout, stderr });
+          }
+        );
+      });
+    const [context, claude] = await Promise.all([
+      waitForWatchdog(CONTEXT_ARGS),
+      waitForWatchdog(['limit-check', '--hook']),
+    ]);
+    expect(context).toEqual({
+      stdout: '{"v":1,"kind":"silent","reason":"timeout"}\n',
+      stderr: '',
+    });
+    expect(claude).toEqual({ stdout: '', stderr: '' });
+    expect(existsSync(marker())).toBe(false);
+    expect(JSON.parse(hook(contextPayload(), CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'warning',
+    });
+  });
+
+  it('reports a held episode lock as busy and warns once it is free', async () => {
+    runs('codex-a', { runtime: 'codex' });
+    const reset = soon(2);
+    ledger('allowed', 95, reset, { runtime: 'codex', accountId: 'codex-a' });
+    const blocked = await withHeldLock(`${marker()}.lock`, async () =>
+      hook(contextPayload(), CONTEXT_ARGS)
+    );
+    expect(blocked).toEqual({
+      held: true,
+      value: { code: 0, stdout: '{"v":1,"kind":"silent","reason":"busy"}\n', stderr: '' },
+    });
+    expect(existsSync(marker())).toBe(false);
+    expect(JSON.parse(hook(contextPayload(), CONTEXT_ARGS).stdout)).toMatchObject({
+      kind: 'warning',
+    });
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toEqual({
+      window: 'five_hour',
+      resetsAt: reset,
+    });
   });
 
   it('commits one warning across simultaneous subprocesses and suppresses a lost reply', async () => {

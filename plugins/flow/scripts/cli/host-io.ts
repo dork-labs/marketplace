@@ -11,6 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { writeSync } from 'node:fs';
 import os from 'node:os';
 import { createInterface } from 'node:readline';
 
@@ -75,8 +76,8 @@ export interface HostIo {
   spawnStream: StreamRunner;
   /** Whether a process id exists. */
   pidAlive(pid: number): boolean;
-  /** End the whole process with exit 0 after `ms`, whatever it is doing. */
-  armWatchdog(ms: number): void;
+  /** End the process with exit 0 after `ms`, optionally emitting a fixed stdout reply first. */
+  armWatchdog(ms: number, timeoutStdout?: string): (() => void) | void;
   /** Wait `ms` milliseconds (`flow watch` between rounds). */
   sleep(ms: number): Promise<void>;
   /** The 1-minute load average and the logical CPU count (`flow drain`'s launch cap). */
@@ -206,8 +207,16 @@ export function realHostIo(): HostIo {
     fetch: (...args) => fetch(...args),
     spawnStream: realSpawnStream,
     pidAlive: pidExists,
-    armWatchdog(ms) {
-      setTimeout(() => process.exit(0), ms).unref();
+    armWatchdog(ms, timeoutStdout) {
+      const timer = setTimeout(() => {
+        try {
+          if (timeoutStdout !== undefined) writeSync(process.stdout.fd, timeoutStdout);
+        } finally {
+          process.exit(0);
+        }
+      }, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     load: () => ({ load1: os.loadavg()[0], cpus: os.availableParallelism() }),
