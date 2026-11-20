@@ -313,7 +313,9 @@ async function evaluateContext(ctx: VerbContext, value: unknown): Promise<Warnin
 }
 
 async function automatic(ctx: VerbContext, hook: boolean): Promise<VerbResult> {
-  ctx.io.armWatchdog(WATCHDOG_MS);
+  const disarmWatchdog = hook
+    ? ctx.io.armWatchdog(WATCHDOG_MS)
+    : ctx.io.armWatchdog(WATCHDOG_MS, `${JSON.stringify(silent('timeout'))}\n`);
   let result: WarningResult;
   try {
     const raw = await ctx.io.stdin.read(hook ? HOOK_INPUT_BYTES : CONTEXT_INPUT_BYTES);
@@ -322,7 +324,10 @@ async function automatic(ctx: VerbContext, hook: boolean): Promise<VerbResult> {
   } catch {
     result = silent('unknown');
   }
-  if (!hook) return { json: result, text: JSON.stringify(result) };
+  if (!hook) {
+    disarmWatchdog?.();
+    return { json: result, text: JSON.stringify(result) };
+  }
   return result.kind === 'warning' ? { json: {}, text: result.hookStdout } : SILENT_HOOK;
 }
 
