@@ -13,7 +13,8 @@
     "command-palette.items": true,
     "dialog": true,
     "pages": true,
-    "inbox": true
+    "inbox": true,
+    "canvas": true
   },
   "serverCapabilities": {
     "serverEntry": "./server.ts"

@@ -56,10 +56,10 @@ export const ANSWERED_IN_FLOW_NOTE =
   'Answers you give here show in Activity as answered in Flow. Shipping, and checks only you can make, are answered in the Inbox so they count as yours.';
 
 /** Shown above asks the Inbox can't take yet, because Flow's Inbox cards aren't allowed. */
-export const ALLOW_INBOX_TEXT = 'Allow Inbox cards for Flow to get these questions in your Inbox.';
+export const ALLOW_INBOX_TEXT = 'Flow can send these questions to your Inbox.';
 
 /** The button beside it: it opens the screen where a person allows them. */
-export const ALLOW_INBOX_BUTTON = 'Allow in Settings → Extensions';
+export const ALLOW_INBOX_BUTTON = 'Allow Inbox cards in Settings → Extensions';
 
 /** Where a person allows an app's places, Inbox cards among them. */
 export const EXTENSIONS_SETTINGS_LINK = '?settings=extensions';
