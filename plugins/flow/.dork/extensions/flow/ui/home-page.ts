@@ -35,7 +35,16 @@ import {
   schedulesWaitingText,
 } from './project-lens.ts';
 import { ProjectFlowSettings } from './project-settings.ts';
-import { ANSWERED_IN_FLOW_NOTE, answeredHere, hasInbox, type AnswerApi } from './answers.ts';
+import {
+  ALLOW_INBOX_BUTTON,
+  ALLOW_INBOX_TEXT,
+  ANSWERED_IN_FLOW_NOTE,
+  EXTENSIONS_SETTINGS_LINK,
+  answeredHere,
+  hasInbox,
+  inboxWaiting,
+  type AnswerApi,
+} from './answers.ts';
 import {
   BAND,
   BAND_ROW,
@@ -459,13 +468,31 @@ function Tabs(props: {
 /**
  * The note above asks answered on flow's pages (§4.2): shown once, only on a
  * DorkOS with the inbox (where such answers are credited to Flow), and only
- * when at least one ask here is answered in place.
+ * when at least one ask here is answered in place. While an ask can't go to
+ * the Inbox because Flow's Inbox cards aren't allowed, it says that instead.
  *
  * @param decisions - The asks shown.
  * @param api - The host API.
  * @returns The note, or `null`.
  */
 function answeredInFlowNote(decisions: readonly FlowDecision[], api: AnswerApi): Node {
+  // Until a person allows Flow's Inbox cards, say so, and where (DorkOS 0.140.0).
+  if (inboxWaiting(decisions, api)) {
+    return h(
+      'p',
+      { key: 'allow-inbox', style: { ...MUTED, margin: '0 0 4px' } },
+      `${ALLOW_INBOX_TEXT} `,
+      h(
+        'button',
+        {
+          type: 'button',
+          style: { ...LINK, fontSize: 'inherit' },
+          onClick: () => void api.navigate(EXTENSIONS_SETTINGS_LINK),
+        },
+        ALLOW_INBOX_BUTTON
+      )
+    );
+  }
   if (!hasInbox(api) || !decisions.some((decision) => answeredHere(decision, api))) return null;
   return h(
     'p',

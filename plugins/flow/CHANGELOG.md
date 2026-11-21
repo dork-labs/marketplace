@@ -9,7 +9,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Reinstall Flow to receive this fix. On DorkOS 0.140.0, then allow Flow's Inbox cards when DorkOS asks.**
 
 - Flow now says it shows cards in the Inbox. DorkOS 0.140.0 refuses Inbox cards from an app that doesn't say so, and Flow's questions that only a person can answer would have failed there.
-- Flow checks the Inbox works by using it, not by seeing that it exists. Until you allow Flow's Inbox cards, its questions stay on Flow's own pages and you answer them there. Once you allow them, they move to the Inbox without a restart.
+- Flow checks the Inbox works by using it, not by seeing that it exists. Until you allow Flow's Inbox cards, its questions stay on Flow's own pages and you answer them there, under a line saying so, with a button to Settings → Extensions. Once you allow them, they move to the Inbox without a restart.
 
 ## 0.99.0
 

@@ -55,6 +55,30 @@ export const START_FAILED_TEXT = "Flow couldn't start that. Try again.";
 export const ANSWERED_IN_FLOW_NOTE =
   'Answers you give here show in Activity as answered in Flow. Shipping, and checks only you can make, are answered in the Inbox so they count as yours.';
 
+/** Shown above asks the Inbox can't take yet, because Flow's Inbox cards aren't allowed. */
+export const ALLOW_INBOX_TEXT = 'Allow Inbox cards for Flow to get these questions in your Inbox.';
+
+/** The button beside it: it opens the screen where a person allows them. */
+export const ALLOW_INBOX_BUTTON = 'Allow in Settings → Extensions';
+
+/** Where a person allows an app's places, Inbox cards among them. */
+export const EXTENSIONS_SETTINGS_LINK = '?settings=extensions';
+
+/**
+ * Whether the page should ask the person to allow Flow's Inbox cards: this
+ * DorkOS has the Inbox, but an ask shown here isn't in it.
+ *
+ * @param decisions - The asks shown.
+ * @param api - The host API.
+ * @returns True when one is waiting on that yes.
+ */
+export function inboxWaiting(
+  decisions: readonly Pick<FlowDecision, 'inInbox'>[],
+  api: Pick<ClientApi, 'listDecisions' | 'answerDecision'>
+): boolean {
+  return hasInbox(api) && decisions.some((decision) => !decision.inInbox);
+}
+
 /**
  * Whether this DorkOS has the inbox, seen from the page.
  *
