@@ -49,6 +49,45 @@ own files. (4) Just for you, and your comments go to me. Change any of these, or
 `get_extension_api` doesn't list `registerPage` or `registerStatusBarItem`; they're in
 `@dorkos/extension-api`. Check `api.isSlotAvailable(slot)` when a slot may be missing.
 
+## Declare every place in `contributions`
+
+`extension.json` lists every place the app shows in, under `contributions`, each set to
+exactly `true`. DorkOS shows the app only in the places it lists, and the person's
+approval card names each one. Declare only the places you register.
+
+| Key | Allows | The card says |
+|---|---|---|
+| `pages` | `registerPage` | a page |
+| `right-panel` | `registerComponent('right-panel', …)` | a panel tab |
+| `dashboard.sections` | `registerComponent('dashboard.sections', …)` | an Activity section |
+| `settings.tabs` | `registerSettingsTab` | a Settings page |
+| `status-bar` | `registerStatusBarItem` | a status bar item |
+| `command-palette.items` | `registerCommand` | ⌘K commands |
+| `dialog` | `registerDialog` | dialogs |
+| `sidebar.footer` | `registerComponent('sidebar.footer', …)` | a sidebar item |
+| `canvas` | `api.openCanvas` | canvas documents |
+| `inbox` | `ctx.inbox` (server code) | Inbox cards |
+
+```json
+"contributions": { "pages": true, "command-palette.items": true }
+```
+
+- **A place you didn't declare is refused.** The registration draws nothing, returns a
+  no-op and logs a console warning, and the app's Settings row lists the place.
+  `test_extension` uses a mock API, so check the manifest against every `register…`
+  call, `openCanvas` and `ctx.inbox` yourself. Any other key is ignored.
+- **An update that only adds places keeps running.** The app keeps its old places and
+  only the new ones wait for the person's OK ("Not now" leaves it running without them).
+  It counts only when the manifest's `contributions` gains places and nothing else
+  changes: every other file byte for byte, and the same `version`. So to fix a refused
+  place, add its key and leave `version` alone. Any other change, a version bump
+  included, asks again for the whole app, as every update does.
+- **Names that pass for DorkOS are refused.** An app named "DorkOS…", or named like a
+  DorkOS page (Settings, Inbox, Activity, Connections, Marketplace, Security, Tasks,
+  Team, Apps, Workspaces, Channels, DorkBot), won't install or start. That includes
+  look-alike letters from other alphabets and mixed scripts. `create_extension`, the
+  marketplace install and DorkOS's own scan all refuse it. Its tools are refused too.
+
 Rules of thumb:
 
 - **One main surface.** Many apps want two: a page plus a narrow panel tab, or a page
@@ -57,11 +96,11 @@ Rules of thumb:
   unless the person asked for everywhere.
 - **The status bar is shared and scarce.** Use `when` so the item only shows when it has
   something to say. Keep `when` and `urgent` pure: read only `ctx`.
-- **Nothing may pass for DorkOS.** DorkOS draws the app's name itself only on inbox
-  cards. Until it does on dialogs and ⌘K rows too, start every ⌘K label with the app's
-  name ("Weather: refresh") and put the name in each dialog's heading. Also:
-  - Pick a name that isn't reserved: nothing starting "DorkOS", and no names of DorkOS
-    surfaces or of agents.
+- **Nothing may pass for DorkOS.** DorkOS draws the app's name itself on its ⌘K rows,
+  dialogs and Inbox cards, so leave the name out of ⌘K labels and dialog titles
+  ("Refresh", not "Weather: refresh"). Also:
+  - Pick a name that isn't reserved ([above](#declare-every-place-in-contributions)),
+    and no names of agents.
   - Keep titles and labels plain text, and never style anything like an approval card or
     use DorkOS's mark.
   - **Never ask for a password, code, key or sign-in inside the app.** A dialog that asks

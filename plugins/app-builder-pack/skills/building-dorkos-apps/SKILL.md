@@ -94,7 +94,11 @@ person an approval is "just a formality".
 3. Edit the files in the `path` it returns. Keep the starter's structure. Set
    `minHostVersion` to the first DorkOS release with every API you use; the starter's
    `0.1.0` is a placeholder.
-4. Read [pitfalls.md](pitfalls.md) before you write any code: the sandboxed frame, the
+4. **Declare every place in `contributions`**, and only those
+   ([placement.md](placement.md#declare-every-place-in-contributions)). A place you
+   register but don't declare draws nothing once installed, whatever `test_extension`
+   counted.
+5. Read [pitfalls.md](pitfalls.md) before you write any code: the sandboxed frame, the
    fill view, layout, data and TSX all have traps that pass your tests.
 
 ## When your own folder is read-only
@@ -142,7 +146,9 @@ Don't claim it was reviewed, safe or approved unless that happened.
 ## Changing an app later
 
 Every version goes back to the person for approval, and to your team's security
-reviewer for a placement check if you have one. Bump `version` in `extension.json`,
+reviewer for a placement check if you have one. (The one exception is a fix that only
+adds places to `contributions`: leave `version` alone and it keeps running while only
+the new places wait; see placement.md.) Otherwise bump `version` in `extension.json`,
 rerun `test_extension`, check `serverStatus` again, redo the screenshots for any surface
 that changed, and repeat the reach list with what changed marked. Until they allow it,
 the new version is held: some or all of it won't run, `list_extensions` shows `waitsForPerson: true`,
