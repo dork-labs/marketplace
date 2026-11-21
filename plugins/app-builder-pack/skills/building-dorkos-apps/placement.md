@@ -1,7 +1,7 @@
 # Placement: where the app shows, and the interview that decides it
 
-Once the person approves an app, nothing limits which surfaces it uses. So where it
-shows is your choice, made with the person, before you build. Placement is a product
+Once approved, an app shows only in the places its manifest declares and the person
+allowed. So where it shows is your choice, made with the person, before you build. Placement is a product
 decision, not a template.
 
 ## The interview
@@ -43,7 +43,7 @@ own files. (4) Just for you, and your comments go to me. Change any of these, or
 | **Settings tab** | "its own tab in Settings" | `registerSettingsTab(id, label, C, { group })` | The app's own settings | None |
 | **⌘K command** | "a command you run from the search bar" | `registerCommand(id, label, fn)` | A one-step action | None |
 | **Dialog** | "a small pop-up" | `registerDialog(id, C)` | A short confirm or form the app opens | Closes it |
-| **Canvas** | "opens beside the chat" | `api.openCanvas(content)` (opens only, no slot) | Showing a result beside the chat | Closes it |
+| **Canvas** | "opens beside the chat" | `api.openCanvas(content)` (opens only, no slot; declare `canvas`) | Showing a result beside the chat | Closes it |
 | **Tools only** | "no screen, just something your agents can use" | `tools` in the manifest, no UI | Something only agents use | Turns the app off |
 
 `get_extension_api` doesn't list `registerPage` or `registerStatusBarItem`; they're in
@@ -72,21 +72,29 @@ approval card names each one. Declare only the places you register.
 "contributions": { "pages": true, "command-palette.items": true }
 ```
 
-- **A place you didn't declare is refused.** The registration draws nothing, returns a
-  no-op and logs a console warning, and the app's Settings row lists the place.
-  `test_extension` uses a mock API, so check the manifest against every `register…`
-  call, `openCanvas` and `ctx.inbox` yourself. Any other key is ignored.
-- **An update that only adds places keeps running.** The app keeps its old places and
-  only the new ones wait for the person's OK ("Not now" leaves it running without them).
-  It counts only when the manifest's `contributions` gains places and nothing else
-  changes: every other file byte for byte, and the same `version`. So to fix a refused
-  place, add its key and leave `version` alone. Any other change, a version bump
-  included, asks again for the whole app, as every update does.
-- **Names that pass for DorkOS are refused.** An app named "DorkOS…", or named like a
-  DorkOS page (Settings, Inbox, Activity, Connections, Marketplace, Security, Tasks,
-  Team, Apps, Workspaces, Channels, DorkBot), won't install or start. That includes
-  look-alike letters from other alphabets and mixed scripts. `create_extension`, the
-  marketplace install and DorkOS's own scan all refuse it. Its tools are refused too.
+- **A place you didn't declare is refused.** A screen registration draws nothing and
+  does nothing, logs a console warning, and the app's Settings row lists the place. In
+  a framed app, `openCanvas` throws instead. On the server, `ctx.inbox` calls reject and
+  `onAction` does nothing. `test_extension` counts an undeclared place as 0 and adds a
+  warning, so read `warnings`. It can't see `ctx.inbox` or a registration made after
+  `activate` returns, so check those yourself. Other keys are ignored, but adding one
+  still counts as a change.
+- **An update that only adds places can keep running.** This works for an app in your
+  own folder that the person approved on a DorkOS release that records places. The app
+  keeps its old places, and only the new ones wait for the person's OK ("Not now" leaves
+  it running without them). It counts only when `contributions` gains known places, each
+  set to `true`, and nothing else changes: the same files, every other file byte for
+  byte, and the same `version`. If you also changed code, bump `version`, and the whole
+  app asks again, as every update does. An app from the personal marketplace always
+  bumps its version, so every change there is a new card.
+- **Names that pass for DorkOS are refused.** An app named "DorkOS…", or exactly a
+  DorkOS page name (Settings, Inbox, Activity, Connections, Marketplace, Security,
+  Tasks, Team, Apps, Workspaces, Channels, DorkBot), won't install or start. Spacing,
+  case, accents and look-alike letters don't get around it. A name that mixes Latin
+  letters with letters from another alphabet is refused too. DorkOS's own scan and the
+  marketplace install check `name` in `extension.json`; `create_extension` checks the
+  name you give it. If the app gives agents tools, its name must use plain letters A to
+  Z, at most 40 characters, with no quotes.
 
 Rules of thumb:
 
@@ -98,7 +106,8 @@ Rules of thumb:
   something to say. Keep `when` and `urgent` pure: read only `ctx`.
 - **Nothing may pass for DorkOS.** DorkOS draws the app's name itself on its ⌘K rows,
   dialogs and Inbox cards, so leave the name out of ⌘K labels and dialog titles
-  ("Refresh", not "Weather: refresh"). Also:
+  ("Refresh the forecast", not "Weather: refresh"). ⌘K search reads only the label, so
+  make it say what the command does. Also:
   - Pick a name that isn't reserved ([above](#declare-every-place-in-contributions)),
     and no names of agents.
   - Keep titles and labels plain text, and never style anything like an approval card or

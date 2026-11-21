@@ -96,8 +96,8 @@ person an approval is "just a formality".
    `0.1.0` is a placeholder.
 4. **Declare every place in `contributions`**, and only those
    ([placement.md](placement.md#declare-every-place-in-contributions)). A place you
-   register but don't declare draws nothing once installed, whatever `test_extension`
-   counted.
+   register but don't declare draws nothing. `test_extension` counts it as 0 and adds
+   a warning, so read `warnings`.
 5. Read [pitfalls.md](pitfalls.md) before you write any code: the sandboxed frame, the
    fill view, layout, data and TSX all have traps that pass your tests.
 
@@ -112,7 +112,8 @@ anyone to copy files in from Terminal.
 ## Test, then check it started
 
 1. `test_extension(id)`. Expect `status: ok` and the contribution counts you meant
-   (for example `dashboard.sections: 1`). A failure names the phase; fix and rerun.
+   (for example `dashboard.sections: 1`), and no `warnings`. A failure names the phase;
+   fix and rerun.
 2. `test_extension` uses a mock API. It doesn't prove the app starts for real. After
    the person approves and it installs, call `list_extensions` and read your app's
    entry:
@@ -146,9 +147,9 @@ Don't claim it was reviewed, safe or approved unless that happened.
 ## Changing an app later
 
 Every version goes back to the person for approval, and to your team's security
-reviewer for a placement check if you have one. (The one exception is a fix that only
-adds places to `contributions`: leave `version` alone and it keeps running while only
-the new places wait; see placement.md.) Otherwise bump `version` in `extension.json`,
+reviewer for a placement check if you have one. (A fix that only adds places to an app
+in your own folder can keep running; see placement.md for when.) Bump `version` in
+`extension.json`,
 rerun `test_extension`, check `serverStatus` again, redo the screenshots for any surface
 that changed, and repeat the reach list with what changed marked. Until they allow it,
 the new version is held: some or all of it won't run, `list_extensions` shows `waitsForPerson: true`,
