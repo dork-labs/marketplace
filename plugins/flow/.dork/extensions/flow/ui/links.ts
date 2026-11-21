@@ -6,11 +6,20 @@
  * `/x/flow/p/<name>/settings`. A project's name is core's, URL-safe as given,
  * so it is only encoded, never rewritten.
  *
+ * A web page (a tracker item, flow's guide) can't open in a new tab from a
+ * screen: on DorkOS client API v2 the frame may not open windows. Its links
+ * keep their address, and {@link openWebPage} shows the page on the canvas.
+ *
  * @module @dorkos/flow/extension/ui/links
  */
 
+import type { ClientApi } from '../lib/host-types.ts';
+
 /** Flow home. */
 export const HOME_PATH = '/x/flow';
+
+/** DorkOS's Schedules page (its route is `/tasks`), where flow's schedules are. */
+export const TASKS_ROUTE = '/tasks';
 
 /** The page paths flow registers, relative to {@link HOME_PATH}. */
 export const PAGE_PATHS = { home: '', project: 'p/:name', settings: 'p/:name/settings' } as const;
@@ -64,4 +73,42 @@ export function webHref(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** The host's canvas and toasts, once `activate` has handed them in. */
+let canvas: Pick<ClientApi, 'openCanvas' | 'notify'> | null = null;
+
+/** The longest canvas title DorkOS takes. */
+const TITLE_MAX = 120;
+
+/** Said when DorkOS would not show the page. */
+export const PAGE_FAILED_TEXT = "DorkOS couldn't show that page. Try again.";
+
+/**
+ * Hand the links the frame's canvas. `activate` calls it in every frame.
+ *
+ * @param api - The frame's `api`, or `null` to forget it (tests).
+ */
+export function setWebOpener(api: Pick<ClientApi, 'openCanvas' | 'notify'> | null): void {
+  canvas = api;
+}
+
+/**
+ * A web link's click: show the page on DorkOS's canvas instead of a new tab,
+ * which the frame can't open. Where the host has no canvas the link opens as
+ * it always did.
+ *
+ * @param event - The click.
+ * @param url - The page, already checked by {@link webHref}.
+ * @param title - The canvas tab's title.
+ */
+export function openWebPage(event: { preventDefault(): void }, url: string, title: string): void {
+  const open = canvas?.openCanvas;
+  if (typeof open !== 'function') return;
+  event.preventDefault();
+  const host = canvas;
+  const shown = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
+  void Promise.resolve()
+    .then(() => open.call(host, { type: 'browser', url, title: shown }))
+    .catch(() => host?.notify?.(PAGE_FAILED_TEXT, { type: 'error' }));
 }

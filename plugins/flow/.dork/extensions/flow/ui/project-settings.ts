@@ -13,7 +13,8 @@
  *   dial, which lives in DorkOS and only a person writes), whether it starts
  *   work on its own and how much at once (the project's git-ignored
  *   `config.local.json`), the pause menu's default, and the accounts the
- *   project may use (DorkOS's rule, written from the browser).
+ *   project may use (DorkOS's rule, shown read-only; a person changes it in
+ *   Settings → Runtimes).
  *
  * Every change saves at once. If flow or DorkOS refuses it, the control goes
  * back to the saved value and says why under it.
@@ -31,7 +32,7 @@ import {
   type SettingField,
 } from '../lib/settings-shape.ts';
 import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from '../shared/config-names.ts';
-import { AccountCheckboxes } from './account-checkboxes.ts';
+import { ProjectAccounts } from './project-accounts.ts';
 import {
   FleetRequestError,
   UNREACHABLE_MESSAGE,
@@ -44,6 +45,7 @@ import { PAUSE_CHOICES } from './pause-menu.ts';
 import { BUTTON, Hint, LINK, MUTED, PILL } from './parts.ts';
 import { h, useEffect, useId, useRef, useState, type Node, type Style } from './react.ts';
 import { RepoChips, type ChipRule } from './repo-chips.ts';
+import { TASKS_ROUTE } from './links.ts';
 import { SegmentedControl } from './segmented.ts';
 import { ALERT, hostColor } from './styles.ts';
 
@@ -69,8 +71,7 @@ export const SAVED_LOCAL_WINS_TEXT = "Saved, but this computer's local setting s
 export const SETTINGS_LOAD_FAILED_TEXT =
   "Couldn't load this project's settings. Try again in a moment.";
 
-/** DorkOS's Schedules page (its route is `/tasks`), where flow's schedules are. */
-export const TASKS_ROUTE = '/tasks';
+export { TASKS_ROUTE };
 
 /** The labels chips' rule: a bare label, no group. */
 const LABEL_RULE: ChipRule = {
@@ -505,7 +506,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
         h(
           'div',
           { key: 'accounts', style: { padding: '8px 0 0' } },
-          h(AccountCheckboxes, {
+          h(ProjectAccounts, {
             root: project.root,
             projectName: project.name,
             navigate: (path: string) => api.navigate(path),

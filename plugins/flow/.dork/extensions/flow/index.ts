@@ -8,12 +8,18 @@
  * settings page; the run chip in the chat's status bar; and the palette
  * commands that pause and resume.
  *
- * One live store (`ui/store.ts`) feeds all of them: it starts here and stops
- * in the cleanup. The status bar's run chip and the tab's dot are added only
- * where the host has them, and skipped cleanly where it does not.
+ * DorkOS client API version 2 (`extension.json` `clientApiVersion`): each
+ * screen runs in a frame of its own, and `activate` runs once to register
+ * (`api.context` is `registration`; that run stays loaded, hidden, and runs
+ * the palette commands and the tab's dot) and once more inside each screen.
+ * Every run registers the same surfaces, so the frame knows what to draw, and
+ * starts one live store (`ui/store.ts`), which stops in the cleanup. Only the
+ * registration run keeps the tab's dot. The status bar's run chip and the
+ * dot are added only where the host has them, and skipped cleanly where it
+ * does not.
  *
- * DorkOS bundles this file with `react`, `react-dom` and
- * `@dorkos/extension-api` as externals and hands `activate` its extension API.
+ * DorkOS builds this file as a classic script with `react`, `react-dom` and
+ * `@dorkos/extension-api` as externals and hands `activate` its frame API.
  * Only the methods used here are typed (`lib/host-types.ts`), so the plugin
  * needs no DorkOS package to build.
  *
@@ -28,6 +34,8 @@ import { registerPages } from './ui/home-page.ts';
 import { PANEL_TAB_ID, followMarker } from './ui/marker.ts';
 import { registerPalette } from './ui/palette.ts';
 import { registerRunChip } from './ui/run-chip.ts';
+import { setFlowRequester } from './ui/api.ts';
+import { setWebOpener } from './ui/links.ts';
 import { createSettingsTab } from './ui/settings-tab.ts';
 import { FlowStore } from './ui/store.ts';
 
@@ -35,13 +43,15 @@ import { FlowStore } from './ui/store.ts';
 export type FlowExtensionApi = ClientApi;
 
 /**
- * Called by DorkOS when the extension is enabled: starts the live store and
- * registers every surface the host can carry.
+ * Called by DorkOS in each of flow's frames: hands the calls the frame's API,
+ * starts the live store and registers every surface the host can carry.
  *
- * @param api - DorkOS's extension API.
- * @returns The cleanup DorkOS runs when the extension is turned off.
+ * @param api - DorkOS's frame API.
+ * @returns The cleanup DorkOS runs when the frame goes away.
  */
 export function activate(api: FlowExtensionApi): () => void {
+  setFlowRequester(api);
+  setWebOpener(api);
   const store = new FlowStore(api);
   store.start();
   const removeTab = api.registerSettingsTab('fleet', 'Flow', createSettingsTab(api, store), {
@@ -53,7 +63,8 @@ export function activate(api: FlowExtensionApi): () => void {
     createFlowTab(api, store),
     { label: 'Flow', icon: FlowIcon }
   );
-  const stopMarker = followMarker(api, store);
+  // The dot is the registration run's alone; a screen's frame would only repeat it.
+  const stopMarker = api.context === 'view' ? () => {} : followMarker(api, store);
   const removePages = registerPages(api, store);
   const removeChip = registerRunChip(api, store);
   const removePalette = registerPalette(api, store);

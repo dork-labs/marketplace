@@ -19,20 +19,16 @@
 import type { ComponentType } from 'react';
 import type { ClientApi } from '../lib/host-types.ts';
 import type { FlowProject } from '../lib/model.ts';
-import { RUNTIMES_SETTINGS_LINK } from './account-checkboxes.ts';
+import { RUNTIMES_SETTINGS_LINK, openPage } from './project-accounts.ts';
 import {
   UNREACHABLE_MESSAGE,
+  getEligibility,
   getFleet,
   getRepoMigration,
+  listCoreProjects,
   putAccount,
   putRepoMigration,
 } from './api.ts';
-import {
-  getEligibility,
-  hasEligibilityRoutes,
-  listCoreProjects,
-  putOnlyProjects,
-} from './core-api.ts';
 import { FleetTab, type CoreRules, type MoveLineProps } from './fleet-tab.ts';
 import {
   RULE_BEHAVIOUR,
@@ -50,11 +46,9 @@ import { FIELD, FOCUS_CSS, HEADING, MUTED, ROOT } from './styles.ts';
 
 /** The real routes the move uses. */
 export const MIGRATION_DEPS: MigrationDeps = {
-  hasEligibilityRoutes,
   getFleet,
   listProjects: listCoreProjects,
   getEligibility: () => getEligibility(),
-  putOnlyProjects,
   putAccount,
   getRecord: getRepoMigration,
   putRecord: putRepoMigration,
@@ -118,7 +112,6 @@ export function createSettingsTab(
         .then(async (next) => {
           if (!live) return;
           setPlans(next);
-          if ((await deps.hasEligibilityRoutes()) !== true) return;
           const answer = await deps.getEligibility().catch(() => null);
           if (!live || answer === null) return;
           const onlyFor = new Map<string, string[]>();
@@ -160,14 +153,21 @@ export function createSettingsTab(
           plan,
           result: results[plan.key] ?? null,
           busy: moving === plan.key,
-          onMove: () => move(plan.key),
+          onMove: () => {
+            const opens = plan.opens;
+            if (opens === null) move(plan.key);
+            else
+              openPage(api.navigate, opens, (text) =>
+                setResults((current) => ({ ...current, [plan.key]: { ok: false, text } }))
+              );
+          },
         },
       ])
     );
     for (const [key, result] of Object.entries(results)) {
       if (!moves.has(key)) {
         moves.set(key, {
-          plan: { key, kind: 'core-has-rule', text: '', action: null },
+          plan: { key, kind: 'core-has-rule', text: '', action: null, opens: null },
           result,
           busy: false,
           onMove: () => {},

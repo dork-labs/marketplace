@@ -1,9 +1,11 @@
 /**
  * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies,
- * stubbed fetches that answer flow's routes, and a stub host API.
+ * a stubbed `api.request` that answers flow's routes the way the frame does,
+ * and a stub host API.
  */
 
 import { vi } from 'vitest';
+import { setFlowRequester } from '../api.ts';
 import type { ReadableState } from '../../lib/host-types.ts';
 import type { FleetAccount, FleetGroup, FleetView } from '../../lib/fleet.ts';
 import type { FlowModel, FlowProject, FlowRunRow } from '../../lib/model.ts';
@@ -69,8 +71,45 @@ export function fleet(groups: FleetGroup[], extra: Partial<FleetView> = {}): Fle
   };
 }
 
-/** A body whose `json()` rejects, as a non-JSON error page does. */
+/** A body that is not JSON, as an error page is: the frame hands it over as text. */
 export const NO_JSON = Symbol('no-json');
+
+/** What `NO_JSON` arrives as. */
+const ERROR_PAGE = '<!doctype html><p>Bad gateway</p>';
+
+/** One request as the frame's `api.request` takes it. */
+type RequestOptions = { method?: string; body?: unknown };
+
+/** The stub installed last, which {@link clientApi}'s `request` answers with too. */
+let installed: ((path: string, options?: RequestOptions) => Promise<unknown>) | null = null;
+
+/** Forget the stub, so no test answers with the one before (run after each test). */
+export function resetRequests(): void {
+  installed = null;
+  setFlowRequester(null);
+}
+
+/**
+ * Hand flow's calls a stub of the frame's `api.request`: a 2xx answer resolves
+ * with its body; anything else rejects with its `status` and `body`, as the
+ * frame does. `answer` throwing is a call DorkOS refused or nothing answered.
+ */
+function installRequest(
+  answer: (method: string, path: string, body: unknown) => StubAnswer | Promise<StubAnswer>
+) {
+  const request = vi.fn(async (path: string, options: RequestOptions = {}) => {
+    const reply = await answer(options.method ?? 'GET', path, options.body);
+    const body = reply.body === NO_JSON ? ERROR_PAGE : reply.body;
+    if (reply.status >= 200 && reply.status < 300) return body;
+    throw Object.assign(new Error(`The app request failed (${reply.status}).`), {
+      status: reply.status,
+      body,
+    });
+  });
+  installed = request;
+  setFlowRequester({ request: request as never });
+  return request;
+}
 
 /** One answer the stub gives. */
 export interface StubAnswer {
@@ -78,7 +117,7 @@ export interface StubAnswer {
   body: unknown;
 }
 
-/** A recorded request. */
+/** A recorded request: its method, its path under `/api/ext/flow`, and its body. */
 export interface StubCall {
   method: string;
   url: string;
@@ -86,34 +125,25 @@ export interface StubCall {
 }
 
 /**
- * Stub `fetch`: `GET` answers `initial`; each `PUT` answers the next of `writes`
- * (or, when none is left, a 200 with `initial`). Resolves each PUT only when
- * `hold` is false or `release()` is called.
+ * Stub `api.request`: `GET` answers `initial`; each `PUT` answers the next of
+ * `writes` (or, when none is left, a 200 with `initial`). Resolves each PUT
+ * only when `hold` is false or `release()` is called.
  */
-export function stubFetch(
+export function stubRequests(
   initial: StubAnswer,
   writes: StubAnswer[] = [],
   opts: { hold?: boolean } = {}
 ) {
   const calls: StubCall[] = [];
   const pending: { resolve: () => void; done: boolean }[] = [];
-  const fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
-    const method = init?.method ?? 'GET';
-    calls.push({ method, url, body: init?.body === undefined ? undefined : JSON.parse(init.body) });
+  installRequest(async (method, url, body) => {
+    calls.push({ method, url, body });
     const answer = method === 'GET' ? initial : (writes.shift() ?? initial);
     if (method !== 'GET' && opts.hold) {
       await new Promise<void>((resolve) => pending.push({ resolve, done: false }));
     }
-    return {
-      ok: answer.status >= 200 && answer.status < 300,
-      status: answer.status,
-      json: async () => {
-        if (answer.body === NO_JSON) throw new SyntaxError('Unexpected token <');
-        return answer.body;
-      },
-    };
+    return answer;
   });
-  vi.stubGlobal('fetch', fetchMock);
   return {
     calls,
     /** The PUTs made so far. */
@@ -193,26 +223,19 @@ export interface RoutedCall {
 }
 
 /**
- * Stub `fetch` by route: `answer(method, url, body)` returns the status and
- * body for each request. Records every call.
+ * Stub `api.request` by route: `answer(method, url, body)` returns the status
+ * and body for each request, with `url` the path under `/api/ext/flow`. Records
+ * every call. An `answer` that throws is a call that never reached flow.
  */
-export function routeFetch(
+export function routeRequests(
   answer: (method: string, url: string, body: unknown) => StubAnswer | Promise<StubAnswer>
 ) {
   const calls: RoutedCall[] = [];
-  const fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
-    const method = init?.method ?? 'GET';
-    const body = init?.body === undefined ? undefined : JSON.parse(init.body);
+  const request = installRequest((method, url, body) => {
     calls.push({ method, url, body });
-    const reply = await answer(method, url, body);
-    return {
-      ok: reply.status >= 200 && reply.status < 300,
-      status: reply.status,
-      json: async () => reply.body,
-    };
+    return answer(method, url, body);
   });
-  vi.stubGlobal('fetch', fetchMock);
-  return { calls, fetchMock };
+  return { calls, request };
 }
 
 /** A `GET /settings/:name` body: every field at its default. */
@@ -248,6 +271,12 @@ export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectS
  */
 export function clientApi(state: ReadableState = { currentCwd: null }) {
   return {
+    // `activate` hands flow this API: it answers with the stub installed last.
+    request: vi.fn(async (path: string, options?: RequestOptions): Promise<never> => {
+      if (installed === null)
+        throw new Error('No request stub: use stubRequests or routeRequests.');
+      return (await installed(path, options)) as never;
+    }),
     navigate: vi.fn(),
     getState: () => state,
     subscribe: vi.fn(() => () => {}),

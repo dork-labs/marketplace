@@ -289,11 +289,15 @@ describe('the person bar', () => {
     // Every GET route, listed: a new one fails here until someone decides it
     // only reads, or puts it behind the bar. GET /model?cwd= only reads:
     // remembering a folder and reporting it to DorkOS's project registry is
-    // POST /folders, behind the bar (DOR-3581).
+    // POST /folders, behind the bar (DOR-3581). GET /accounts/eligibility and
+    // GET /known-projects only read DorkOS's rules and projects for the
+    // screens; DorkOS's own reads of them are open to any caller too.
     expect(served.filter((route) => route.startsWith('GET ')).sort()).toEqual([
+      'GET /accounts/eligibility',
       'GET /capacity',
       'GET /fleet',
       'GET /fleet/migration',
+      'GET /known-projects',
       'GET /model',
       'GET /settings/:name',
     ]);
@@ -337,7 +341,15 @@ describe('the person bar', () => {
     expect(flag(world.main)).toBeNull();
     expect(readFleet(world.dorkHome)).toEqual({ v: 1, handoff: 'auto' });
     // Reading is open to anyone.
-    for (const route of ['/model', '/fleet', '/capacity', '/settings/main', '/fleet/migration']) {
+    for (const route of [
+      '/model',
+      '/fleet',
+      '/capacity',
+      '/settings/main',
+      '/fleet/migration',
+      '/accounts/eligibility',
+      '/known-projects',
+    ]) {
       expect((await send(app, 'GET', route, { agent: true })).status).toBe(200);
     }
     // A trailing slash reaches the same route, and the same bar.

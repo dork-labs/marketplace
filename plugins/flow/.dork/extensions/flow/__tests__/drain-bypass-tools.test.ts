@@ -168,6 +168,8 @@ describe('the declared tools', () => {
     expect(set?.inputSchema.additionalProperties).toBe(false);
     const get = manifest.tools.find((t) => t.name === 'get_drain_bypass');
     expect(get?.tier).toBe('observe');
-    expect(manifest.minHostVersion).toBe('0.116.0');
+    // Declared tools need DorkOS 0.116.0 or newer; flow's floor is above that.
+    const [major, minor] = manifest.minHostVersion.split('.').map(Number);
+    expect(major > 0 || minor >= 116).toBe(true);
   });
 });

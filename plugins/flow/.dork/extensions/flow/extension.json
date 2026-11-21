@@ -1,9 +1,11 @@
 {
   "id": "flow",
   "name": "Flow",
-  "version": "0.60.2",
-  "description": "See what flow is doing in each project and across all of them, pause it for as long as you choose, and choose how much it does on its own and which accounts each project may use.",
-  "minHostVersion": "0.116.0",
+  "version": "0.61.0",
+  "description": "See what flow is doing in each project and across all of them, pause it for as long as you choose, choose how much it does on its own, and see which accounts each project may use.",
+  "minHostVersion": "0.135.12",
+  "clientApiVersion": 2,
+  "capabilities": { "http": true },
   "contributions": {
     "settings.tabs": true,
     "right-panel": true,

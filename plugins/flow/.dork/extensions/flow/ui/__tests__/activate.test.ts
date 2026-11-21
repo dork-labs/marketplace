@@ -16,7 +16,7 @@ import { FlowIcon } from '../flow-icon.ts';
 import { PANEL_TAB_ID } from '../marker.ts';
 import { COMMANDS, NOT_IN_PROJECT_TEXT } from '../palette.ts';
 import { CHIP_LABEL, chipUrgent, chipWhen } from '../run-chip.ts';
-import { clientApi, flowModel, flowProject, routeFetch } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeRequests } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -90,7 +90,7 @@ function fullHost(
 
 describe('activate', () => {
   it('registers the Settings tab, the Flow tab and four palette commands, and removes them all', async () => {
-    routeFetch(() => ({ status: 200, body: flowModel([]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([]) }));
     const { api, removed } = fullHost();
     const cleanup = activate(api);
     // The same tab id, so Settings → Runtimes' link to flow:fleet still lands here.
@@ -131,14 +131,14 @@ describe('activate', () => {
   });
 
   it('skips the palette on a host without commands', () => {
-    routeFetch(() => ({ status: 200, body: flowModel([]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([]) }));
     const bare = clientApi();
     expect(() => activate(bare)()).not.toThrow();
     expect(bare.registerDialog).not.toHaveBeenCalled();
   });
 
   it('opens the pause dialog from the palette, which offers Pause all outside a flow project', async () => {
-    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     const { api, commands, Dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
     const cleanup = activate(api);
     await act(async () => {});
@@ -154,7 +154,7 @@ describe('activate', () => {
 
   /** A host with a model, the chat in dorkos, and both pause dialogs drawn as DorkOS draws them. */
   async function openableHost(model = flowModel([flowProject('dorkos')])) {
-    routeFetch(() => ({ status: 200, body: model }));
+    routeRequests(() => ({ status: 200, body: model }));
     const host = fullHost({
       currentCwd: '/work/dorkos',
       currentProject: { root: '/work/dorkos', name: 'dorkos' },
@@ -194,7 +194,7 @@ describe('activate', () => {
   it('takes focus in every state, keeps Tab inside, and gives focus back (DOR-2533 review)', async () => {
     // Loading: no model yet.
     let answer: (value: unknown) => void = () => {};
-    routeFetch(
+    routeRequests(
       () =>
         new Promise((resolve) => {
           answer = () => resolve({ status: 200, body: flowModel([flowProject('dorkos')]) });
@@ -272,7 +272,7 @@ describe('activate', () => {
       currentCwd: '/x',
       currentProject: null,
     });
-    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     const cleanup = activate(api);
     await act(async () => {});
     render(React.createElement(Dialogs));
@@ -291,7 +291,7 @@ describe('activate', () => {
 
   it('keeps an error inside the dialog clickable, and shows one pause dialog at a time', async () => {
     const { commands, cleanup, opener } = await openableHost();
-    routeFetch((method, url) =>
+    routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? { status: 500, body: { error: 'Flow could not pause it.' } }
         : { status: 200, body: flowModel([flowProject('dorkos')]) }
@@ -319,7 +319,7 @@ describe('activate', () => {
   it('resumes the chat’s project from the palette at once, and says so', async () => {
     const paused = flowModel([flowProject('dorkos', { pause: { since: null, until: null } })]);
     const resumed = flowModel([flowProject('dorkos')]);
-    const fetch = routeFetch((method, url) =>
+    const fetch = routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? { status: 200, body: resumed }
         : { status: 200, body: paused }
@@ -334,7 +334,7 @@ describe('activate', () => {
       commands.get('resume-project')?.();
     });
     expect(fetch.calls.at(-1)).toMatchObject({
-      url: '/api/ext/flow/resume',
+      url: '/resume',
       body: { project: 'dorkos' },
     });
     expect(api.notify).toHaveBeenCalledWith('Flow is running again in dorkos.', {
@@ -353,7 +353,7 @@ describe('activate', () => {
       flowProject('blintz', { pause: { since: null, until: null } }),
       flowProject('quiet'),
     ]);
-    const fetch = routeFetch((method, url) =>
+    const fetch = routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? { status: 200, body: flowModel([flowProject('dorkos'), flowProject('blintz')]) }
         : { status: 200, body: paused }
@@ -364,7 +364,7 @@ describe('activate', () => {
     await act(async () => {
       commands.get('resume-all')?.();
     });
-    expect(fetch.calls.at(-1)).toMatchObject({ url: '/api/ext/flow/resume', body: { all: true } });
+    expect(fetch.calls.at(-1)).toMatchObject({ url: '/resume', body: { all: true } });
     expect(api.notify).toHaveBeenLastCalledWith('Flow is running again in dorkos and blintz.', {
       type: 'success',
     });
@@ -378,7 +378,7 @@ describe('activate', () => {
   it('sends one pause from the dialog however often it is clicked, and follows the store', async () => {
     let answer: (value: unknown) => void = () => {};
     const quiet = flowModel([flowProject('dorkos')]);
-    const fetch = routeFetch((method, url) =>
+    const fetch = routeRequests((method, url) =>
       method === 'POST' && !url.endsWith('/folders')
         ? new Promise((resolve) => {
             answer = () => resolve({ status: 200, body: quiet });
@@ -421,7 +421,7 @@ describe('activate', () => {
       defaultChoice: null,
       decideBy: null,
     };
-    routeFetch(() => ({
+    routeRequests(() => ({
       status: 200,
       body: flowModel([flowProject('dorkos')], { decisions: [decision as never] }),
     }));
@@ -452,8 +452,56 @@ describe('activate', () => {
     );
   });
 
+  it('in a screen’s frame registers the same surfaces, but leaves the tab’s dot to the registration run', async () => {
+    const decision = {
+      key: 'k-1',
+      project: 'dorkos',
+      kind: 'review',
+      title: 'Review DOR-1',
+      why: 'It is built.',
+      defaultChoice: null,
+      decideBy: null,
+    };
+    routeRequests(() => ({
+      status: 200,
+      body: flowModel([flowProject('dorkos')], { decisions: [decision as never] }),
+    }));
+    for (const context of ['registration', 'view'] as const) {
+      const { api } = fullHost();
+      const host = {
+        ...api,
+        context,
+        registerPage: vi.fn(() => () => {}),
+        registerStatusBarItem: vi.fn(() => () => {}),
+        setTabMarker: vi.fn(),
+      };
+      const cleanup = activate(host);
+      await act(async () => {});
+      expect(host.registerSettingsTab).toHaveBeenCalledTimes(1);
+      expect(host.registerComponent).toHaveBeenCalledTimes(1);
+      expect(host.registerPage).toHaveBeenCalledTimes(3);
+      expect(host.setTabMarker).toHaveBeenCalledTimes(context === 'registration' ? 1 : 0);
+      cleanup();
+    }
+  });
+
+  it('hands every call to the frame’s api.request, never fetch', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const { api } = fullHost({ currentCwd: '/work/dorkos' });
+    const request = vi.fn(async () => flowModel([flowProject('dorkos')]));
+    const cleanup = activate({ ...api, request: request as never });
+    await act(async () => {});
+    expect(request).toHaveBeenCalledWith('/folders', {
+      method: 'POST',
+      body: { cwd: '/work/dorkos' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it('skips each optional surface cleanly on a DorkOS without its seam', async () => {
-    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    routeRequests(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     const { api } = fullHost();
     for (const missing of ['registerStatusBarItem', 'setTabMarker'] as const) {
       const host = {

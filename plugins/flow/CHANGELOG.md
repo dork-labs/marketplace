@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.99.0
+
+**Flow's screens in DorkOS now work on DorkOS 0.135.12, which runs each app in a frame of its own. Reinstall flow when you update DorkOS: an older flow shows "This app needs an update" there and its screens don't load.**
+
+- The Flow tab, Flow home, each project's pages, Settings → Flow, the run chip and the palette commands work as before. They now need DorkOS 0.135.12 or newer.
+- Two things now send you to DorkOS instead of happening inside Flow, because only a person can do them and Flow's screens can no longer change DorkOS's own settings:
+  - **Accounts this project may use** shows each account and whether it may work in the project, without checkboxes. **Limit accounts in Settings → Runtimes** takes you there; a project's own list can only be removed there for now, not set. Moving an account's **Only for these repos** list works the same way: **Open Settings → Runtimes**, limit the account to the projects the row names, then come back to Settings → Flow to let flow follow DorkOS's rule.
+  - **Schedules a pause switched off** are no longer switched back on by the Flow tab. Once the pause is over, the project says they're still off, with **Open Schedules** and **I turned them back on** to tell flow you did.
+- Resuming from the palette says when schedules the pause switched off are still off. `/flow resume` in a chat still switches them back on itself.
+- Links to your tracker and to flow's guide open on DorkOS's canvas instead of a new browser tab, which an app's frame can't open.
+- The screens now check for changes every 15 seconds instead of getting them live, so something an agent changed can take up to 15 seconds to show. They don't check while DorkOS's window is hidden. Anything you change on a Flow screen shows at once.
+- For now DorkOS shows its default icons for the Flow tab and Flow home, and no highlight on the run chip when something needs you, since those can't cross into an app's frame. The chip's words still say so.
+
 ## 0.98.5
 
 **Reinstall Flow to receive this change.**
