@@ -76,8 +76,9 @@ approval card names each one. Declare only the places you register.
   does nothing, logs a console warning, and the app's Settings row lists the place. In
   a framed app, `openCanvas` throws instead. On the server, `ctx.inbox` calls reject and
   `onAction` does nothing. `test_extension` counts an undeclared place as 0 and adds a
-  warning, so read `warnings`. It can't see `ctx.inbox` or a registration made after
-  `activate` returns, so check those yourself. Other keys are ignored, but adding one
+  warning, so read `warnings`. It can't see `ctx.inbox`, a registration made after
+  `activate` returns, or one behind `api.context === 'registration'`, so check those
+  yourself. Other keys are ignored, but adding one
   still counts as a change.
 - **An update that only adds places can keep running.** This works for an app in your
   own folder that the person approved on a DorkOS release that records places. The app

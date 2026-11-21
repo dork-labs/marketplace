@@ -148,8 +148,8 @@ Don't claim it was reviewed, safe or approved unless that happened.
 
 Every version goes back to the person for approval, and to your team's security
 reviewer for a placement check if you have one. (A fix that only adds places to an app
-in your own folder can keep running; see placement.md for when.) Bump `version` in
-`extension.json`,
+in your own folder can keep running; see placement.md for when.) Otherwise, bump
+`version` in `extension.json`,
 rerun `test_extension`, check `serverStatus` again, redo the screenshots for any surface
 that changed, and repeat the reach list with what changed marked. Until they allow it,
 the new version is held: some or all of it won't run, `list_extensions` shows `waitsForPerson: true`,
