@@ -385,8 +385,9 @@ export function createFlowExtension(
   app.post('/pause', person, async (c) => c.json(await model.pause(await jsonBody(c))));
   app.post('/resume', person, async (c) => c.json(await model.resume(await jsonBody(c))));
   app.post('/decisions/:key', person, async (c) => {
-    // With the inbox, core's person bar and history are the path (§7.4).
-    if (hostSupportsInbox(ctx)) {
+    // With the inbox open to flow, core's person bar and history are the
+    // path (§7.4). Until it is (not declared, or not allowed yet), this is.
+    if (model.decisions.hasInbox) {
       return c.json({ error: ANSWER_IN_INBOX, refusedBy: 'flow' }, 410);
     }
     return c.json(await model.answerLocal(c.req.param('key'), await jsonBody(c)));

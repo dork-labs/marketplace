@@ -69,6 +69,7 @@ function decision(project: string, extra: Partial<FlowDecision> = {}): FlowDecis
       rejectAsksForNote: true,
     },
     answerIn: 'activity',
+    inInbox: true,
     shown: '',
     why: "It's built, tests pass, and the reviewer agent found nothing.",
     defaultChoice: null,

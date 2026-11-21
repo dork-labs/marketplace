@@ -18,6 +18,7 @@ import {
   ALREADY_SETTLED_TEXT,
   CHANGED_TEXT,
   DecisionAnswers,
+  answeredHere,
   StartButton,
   sendAnswer,
   watchRoute,
@@ -43,6 +44,7 @@ function ask(actions: DecisionActions, extra: Partial<FlowDecision> = {}): FlowD
     raisedAt: '2026-09-28T09:00:00.000Z',
     actions,
     answerIn: 'flow',
+    inInbox: true,
     shown: 'shown-words',
     why: 'Flow has had nothing ready to work on in dorkos for a day.',
     defaultChoice: null,
@@ -131,6 +133,20 @@ describe('sending an answer', () => {
       body: { action: 'word', shown: 'shown-words' },
     });
     expect(apply).toHaveBeenCalledWith(model);
+  });
+
+  it("answers through flow's own route while the Inbox isn't open to flow yet", async () => {
+    const model = flowModel([flowProject('dorkos')]);
+    const fetch = routeRequests(() => ({
+      status: 200,
+      body: { resolved: true, message: null, watch: null, model },
+    }));
+    const pending = ask({ kind: 'word', label: 'x' }, { inInbox: false, answerIn: 'activity' });
+    const host = inboxHost([]);
+    expect(answeredHere(pending, host)).toBe(true);
+    await sendAnswer(host, pending, { action: 'word' });
+    expect(host.listDecisions).not.toHaveBeenCalled();
+    expect(fetch.calls[0]).toMatchObject({ method: 'POST', url: '/decisions/idle:3f2a00000000' });
   });
 });
 

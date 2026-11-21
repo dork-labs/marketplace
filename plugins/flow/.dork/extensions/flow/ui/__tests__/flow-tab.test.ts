@@ -561,6 +561,7 @@ describe('links to flow’s pages', () => {
               rejectAsksForNote: true,
             },
             answerIn: 'activity',
+            inInbox: true,
             shown: '',
             why: 'It is built.',
             defaultChoice: null,

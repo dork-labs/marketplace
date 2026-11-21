@@ -210,12 +210,68 @@ describe('with the inbox', () => {
   });
 
   it('answers 410 on flow’s own answer route: the inbox is the path', async () => {
-    const { app, seen } = setup({ inbox: fakeInbox().inbox });
+    const inbox = fakeInbox();
+    const { app, seen } = setup({ inbox: inbox.inbox });
     await seen;
+    await vi.waitFor(() => expect(inbox.inbox.onAction).toHaveBeenCalled());
     const sent = await send(app, 'POST', `/decisions/${encodeURIComponent('review:x:ACME-7')}`, {
       body: { action: 'approve' },
     });
     expect(sent).toEqual({ status: 410, body: { error: ANSWER_IN_INBOX, refusedBy: 'flow' } });
+  });
+});
+
+describe('with an inbox that refuses flow', () => {
+  // DorkOS 0.140.0: every ctx.inbox call rejects until the manifest declares
+  // `inbox` and a person allows it, though the functions are all there.
+  it('keeps the asks on flow’s pages, then moves them to the Inbox once a call works', async () => {
+    const inbox = fakeInbox();
+    const refusal = new Error('Inbox cards for this app wait for a person to allow them.');
+    let open = false;
+    vi.mocked(inbox.inbox.list).mockImplementation(async () => {
+      if (!open) throw refusal;
+      return [];
+    });
+    const logs: string[] = [];
+    const cli = fakeCli();
+    const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, extra: { inbox: inbox.inbox } });
+    const ext = createFlowExtension(host.ctx, {
+      now: () => NOW,
+      originOf: () => null,
+      log: (line) => logs.push(line),
+      execFile: cli.execFile,
+      pidAlive: () => true,
+    });
+    await send(ext.app, 'POST', '/folders', { body: { cwd: world.worktree } });
+    const poll = () => host.scheduled[0]();
+
+    await poll();
+    await poll();
+    expect(inbox.inbox.raise).not.toHaveBeenCalled();
+    expect(logs.filter((line) => line.includes("Inbox isn't open to flow"))).toHaveLength(1);
+    const before = (await send(ext.app, 'GET', '/model')).body as FlowModel;
+    expect(before.decisions).toEqual([expect.objectContaining({ kind: 'review', inInbox: false })]);
+    const local = await send(
+      ext.app,
+      'POST',
+      `/decisions/${encodeURIComponent(before.decisions[0].key)}`,
+      { body: { action: 'maybe' } }
+    );
+    // Flow's own route takes it (and checks it), instead of sending it to the Inbox.
+    expect(local.status).toBe(400);
+
+    open = true;
+    await poll();
+    expect(inbox.raised.map((r) => r.title)).toEqual(['Ship Faster sidebar?']);
+    const after = (await send(ext.app, 'GET', '/model')).body as FlowModel;
+    expect(after.decisions).toEqual([expect.objectContaining({ kind: 'review', inInbox: true })]);
+    const refused = await send(
+      ext.app,
+      'POST',
+      `/decisions/${encodeURIComponent(after.decisions[0].key)}`,
+      { body: { action: 'approve' } }
+    );
+    expect(refused).toEqual({ status: 410, body: { error: ANSWER_IN_INBOX, refusedBy: 'flow' } });
   });
 });
 

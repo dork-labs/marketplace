@@ -76,7 +76,7 @@ export function answeredHere(
   decision: FlowDecision,
   api: Pick<ClientApi, 'listDecisions' | 'answerDecision'>
 ): boolean {
-  return !hasInbox(api) || decision.answerIn === 'flow';
+  return !hasInbox(api) || !decision.inInbox || decision.answerIn === 'flow';
 }
 
 /** Shown when the ask changed since the page showed it. */
@@ -124,7 +124,8 @@ export async function sendAnswer(
 ): Promise<AnswerOutcome> {
   const list = api.listDecisions;
   const answerDecision = api.answerDecision;
-  if (typeof list === 'function' && typeof answerDecision === 'function') {
+  // An ask that isn't in the Inbox yet is answered through flow's route.
+  if (decision.inInbox && typeof list === 'function' && typeof answerDecision === 'function') {
     const view = (await list()).find((open) => open.key === decision.key);
     if (view === undefined) return { resolved: false, message: ALREADY_SETTLED_TEXT, watch: null };
     // Answer only what the person saw: core's row must still say the same.
