@@ -25,7 +25,7 @@ import {
 import { createFlowTab } from '../flow-tab.ts';
 import { CHOOSE_AUTONOMY_TEXT, NOT_SET_UP_TEXT, SORT_WAITS_TEXT } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
-import { clientApi, flowModel, flowProject, routeFetch } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeRequests } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -118,7 +118,7 @@ describe('sending an answer', () => {
 
   it("answers through flow's own route on a DorkOS without the inbox", async () => {
     const model = flowModel([flowProject('dorkos')]);
-    const fetch = routeFetch(() => ({
+    const fetch = routeRequests(() => ({
       status: 200,
       body: { resolved: true, message: null, watch: null, model },
     }));
@@ -127,7 +127,7 @@ describe('sending an answer', () => {
     await sendAnswer(clientApi(), ask({ kind: 'word', label: 'x' }), { action: 'word' }, store);
     expect(fetch.calls[0]).toMatchObject({
       method: 'POST',
-      url: '/api/ext/flow/decisions/idle%3A3f2a00000000',
+      url: '/decisions/idle:3f2a00000000',
       body: { action: 'word', shown: 'shown-words' },
     });
     expect(apply).toHaveBeenCalledWith(model);
@@ -280,7 +280,7 @@ async function renderTab(
   api: Record<string, unknown>,
   project: ProjectRef | null
 ) {
-  routeFetch(() => ({ status: 200, body: model }));
+  routeRequests(() => ({ status: 200, body: model }));
   const state: ReadableState = { currentCwd: project?.root ?? '/x', currentProject: project };
   const host = { ...clientApi(state), ...api };
   const store = new FlowStore(host);
@@ -326,7 +326,7 @@ describe('the lens', () => {
 
   it("asks before running a project's own adapter, and records the allow", async () => {
     const model = flowModel([flowProject('dorkos', { upNext: 'own-code' })]);
-    const fetch = routeFetch(() => ({ status: 200, body: model }));
+    const fetch = routeRequests(() => ({ status: 200, body: model }));
     const state: ReadableState = { currentCwd: DORKOS.root, currentProject: DORKOS };
     const host = clientApi(state);
     const store = new FlowStore(host);
@@ -346,7 +346,7 @@ describe('the lens', () => {
     });
     expect(fetch.calls.at(-1)).toMatchObject({
       method: 'POST',
-      url: '/api/ext/flow/projects/dorkos/allow-adapter',
+      url: '/projects/dorkos/allow-adapter',
     });
   });
 

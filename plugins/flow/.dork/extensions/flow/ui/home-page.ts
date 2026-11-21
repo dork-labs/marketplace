@@ -483,7 +483,6 @@ function LensPage(props: {
   model: FlowModel;
   api: AnswerApi;
   store: FlowStore;
-  schedulesStuck: boolean;
   /** Shown under the lens: the way to Capacity at one project. */
   footer?: Node;
 }): Node {
@@ -523,7 +522,6 @@ function LensPage(props: {
         model,
         api,
         store: props.store,
-        schedulesStuck: props.schedulesStuck,
         // The page shows the project's asks in its own band above.
         decisionsOnTop: false,
       })
@@ -571,7 +569,6 @@ export function createPages(
         model,
         api,
         store,
-        schedulesStuck: snapshot.schedulesStuck.has(only.name),
         footer: h(
           'p',
           { style: { margin: '14px 0 0' } },
@@ -720,7 +717,6 @@ export function createPages(
       model,
       api,
       store,
-      schedulesStuck: snapshot.schedulesStuck.has(project.name),
     });
   }
 

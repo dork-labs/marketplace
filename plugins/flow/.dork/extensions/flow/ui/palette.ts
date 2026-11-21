@@ -302,8 +302,21 @@ async function resumeNow(
     who = project.name;
   }
   try {
-    store.apply(await resumeFlow(target));
-    api.notify?.(`Flow is running again in ${who}.`, { type: 'success' });
+    const next = await resumeFlow(target);
+    store.apply(next);
+    // Only a person switches DorkOS schedules back on, in Schedules: say so.
+    const resumed = new Set(
+      'project' in target ? [target.project] : model.projects.map((project) => project.name)
+    );
+    const off = next.projects.filter(
+      (project) => resumed.has(project.name) && project.restoreSchedules.length > 0
+    );
+    api.notify?.(
+      off.length === 0
+        ? `Flow is running again in ${who}.`
+        : `Flow is running again in ${who}. Schedules the pause switched off are still off in ${listNames(off.map((project) => project.name))}. Switch them on in Schedules.`,
+      { type: 'success' }
+    );
   } catch (failure) {
     api.notify?.(failure instanceof Error ? failure.message : UNREACHABLE_MESSAGE, {
       type: 'error',

@@ -20,7 +20,7 @@
 import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject, FlowRunRow, RunPill } from '../lib/model.ts';
 import type { ClientApi, StatusBarSlotContext, TrackerItemRef } from '../lib/host-types.ts';
-import { projectPath, webHref } from './links.ts';
+import { openWebPage, projectPath, webHref } from './links.ts';
 import { PILL_TEXT } from './panel-format.ts';
 import { FOCUS_CSS, GROW, LINK, MUTED, PILL, ROW } from './parts.ts';
 import { sessionRoute } from './project-lens.ts';
@@ -446,7 +446,10 @@ export function createRunChip(
               target: '_blank',
               rel: 'noopener noreferrer',
               style: LINK,
-              onClick: () => close(false),
+              onClick: (event: { preventDefault(): void }) => {
+                openWebPage(event, url, item.run?.identifier ?? tracker);
+                close(false);
+              },
             },
             `Open in ${tracker} ↗`
           )
