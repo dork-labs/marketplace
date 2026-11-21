@@ -32,7 +32,13 @@ import {
   registerPages,
   unknownProjectText,
 } from '../home-page.ts';
-import { ANSWERED_IN_FLOW_NOTE, type AnswerApi } from '../answers.ts';
+import {
+  ALLOW_INBOX_BUTTON,
+  ALLOW_INBOX_TEXT,
+  ANSWERED_IN_FLOW_NOTE,
+  EXTENSIONS_SETTINGS_LINK,
+  type AnswerApi,
+} from '../answers.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { SHARED_FILE, SHARED_NOTE } from '../project-settings.ts';
 import { FlowStore } from '../store.ts';
@@ -69,6 +75,7 @@ function decision(project: string, extra: Partial<FlowDecision> = {}): FlowDecis
       rejectAsksForNote: true,
     },
     answerIn: 'activity',
+    inInbox: true,
     shown: '',
     why: "It's built, tests pass, and the reviewer agent found nothing.",
     defaultChoice: null,
@@ -287,6 +294,20 @@ describe('Flow home', () => {
       })
     );
     expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/dorkos');
+  });
+
+  it('asks the person to allow Inbox cards while the asks are not in the Inbox, and opens where to', async () => {
+    const model = threeProjects();
+    model.decisions = model.decisions.map((d) => ({ ...d, inInbox: false }));
+    serve(model);
+    const { api } = await renderPage('home', model, { api: inboxApi(model) });
+    const needs = screen.getByRole('region', { name: 'Needs you' });
+    expect(within(needs).getByText(ALLOW_INBOX_TEXT, { exact: false })).toBeTruthy();
+    expect(within(needs).queryByText(ANSWERED_IN_FLOW_NOTE)).toBeNull();
+    // Every ask is answered here meanwhile, the review gate too.
+    expect(within(needs).queryByRole('button', { name: 'Answer in Inbox →' })).toBeNull();
+    fireEvent.click(within(needs).getByRole('button', { name: ALLOW_INBOX_BUTTON }));
+    expect(api.navigate).toHaveBeenLastCalledWith(EXTENSIONS_SETTINGS_LINK);
   });
 
   it('opens the Inbox plain when core no longer lists the ask, or cannot be asked', async () => {

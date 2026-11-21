@@ -1,7 +1,7 @@
 {
   "id": "flow",
   "name": "Flow",
-  "version": "0.61.0",
+  "version": "0.61.1",
   "description": "See what flow is doing in each project and across all of them, pause it for as long as you choose, choose how much it does on its own, and see which accounts each project may use.",
   "minHostVersion": "0.135.12",
   "clientApiVersion": 2,
@@ -12,7 +12,9 @@
     "status-bar": true,
     "command-palette.items": true,
     "dialog": true,
-    "pages": true
+    "pages": true,
+    "inbox": true,
+    "canvas": true
   },
   "serverCapabilities": {
     "serverEntry": "./server.ts"

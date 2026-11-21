@@ -464,7 +464,7 @@ function kindOfKey(key: string): Ask['kind'] {
 }
 
 /** An ask as the model shows it. */
-function toFlowDecision(ask: Ask, raisedAt: string): FlowDecision {
+function toFlowDecision(ask: Ask, raisedAt: string, inInbox: boolean): FlowDecision {
   const actions = ask.input.actions;
   return {
     key: ask.key,
@@ -477,6 +477,7 @@ function toFlowDecision(ask: Ask, raisedAt: string): FlowDecision {
     raisedAt,
     actions,
     answerIn: ask.answerIn,
+    inInbox,
     shown: JSON.stringify(ask.input),
     defaultChoice: actions.kind === 'choice' ? (actions.defaultChoice ?? null) : null,
     decideBy: actions.kind === 'choice' ? (actions.decideBy ?? null) : null,
@@ -491,6 +492,8 @@ export class DecisionCoordinator {
   private readonly loggedLimits = new Set<string>();
   private stopHandler: () => void = () => {};
   private started = false;
+  /** Whether core's inbox answered flow's last call to it. */
+  private inboxWorks = false;
   /** Asks whose answer is still being sent: held open until it finishes. */
   private readonly inFlight = new Set<string>();
   /** The asks in {@link inFlight} because their deadline is taking the agent's pick. */
@@ -506,9 +509,12 @@ export class DecisionCoordinator {
    */
   constructor(private readonly deps: DecisionDeps) {}
 
-  /** Whether DorkOS has an inbox flow raises in. */
+  /**
+   * Whether flow's asks are in DorkOS's Inbox right now: core's inbox answered
+   * flow's last call to it, not just that it has the functions.
+   */
   get hasInbox(): boolean {
-    return this.deps.inbox !== undefined;
+    return this.inboxWorks;
   }
 
   /** Whether DorkOS can start work in a new chat. */
@@ -525,22 +531,7 @@ export class DecisionCoordinator {
     this.started = true;
     const inbox = this.deps.inbox;
     if (inbox === undefined) return;
-    try {
-      const open = await inbox.list();
-      await this.deps.storage.update(RAISED_KEY, (current) => {
-        const raised = obj(current) as Record<string, RaisedMeta>;
-        for (const decision of open) {
-          raised[decision.key] ??= {
-            fp: '',
-            root: decision.project?.root ?? '',
-            kind: kindOfKey(decision.key),
-          };
-        }
-        return raised;
-      });
-    } catch (error) {
-      this.deps.log(`[flow] could not read flow's open asks from DorkOS: ${String(error)}`);
-    }
+    await this.workingInbox();
     // Answers wait for the first pass: before it flow knows no ask, and would
     // wrongly call a person's answer (or an overdue deadline) settled.
     await this.firstPass;
@@ -566,7 +557,9 @@ export class DecisionCoordinator {
    * @returns Every ask flow has now, oldest first.
    */
   decisions(): FlowDecision[] {
-    return this.asks.map((ask) => toFlowDecision(ask, this.firstSeen.get(ask.key) ?? ''));
+    return this.asks.map((ask) =>
+      toFlowDecision(ask, this.firstSeen.get(ask.key) ?? '', this.inboxWorks)
+    );
   }
 
   /**
@@ -627,13 +620,56 @@ export class DecisionCoordinator {
     this.asks = planned;
     const wanted = new Set(planned.map((ask) => ask.key));
     for (const key of [...this.firstSeen.keys()]) if (!wanted.has(key)) this.firstSeen.delete(key);
-    if (this.deps.inbox !== undefined) {
-      await this.raiseAll(this.deps.inbox, planned);
-      await this.settleGone(this.deps.inbox, wanted, plans);
-      await this.recordAway(this.deps.inbox, plans);
+    const inbox = await this.workingInbox();
+    if (inbox !== undefined) {
+      await this.raiseAll(inbox, planned);
+      await this.settleGone(inbox, wanted, plans);
+      await this.recordAway(inbox, plans);
     }
     if (JSON.stringify(planned.map((ask) => ask.input)) !== before) this.deps.onChange();
     this.markReady();
+  }
+
+  /**
+   * Core's inbox, when a call to it works. DorkOS 0.140.0 gives an app Inbox
+   * cards only once its manifest declares `inbox` and a person has allowed
+   * them; until then every call rejects, though the functions are there. So
+   * flow lists its open rows, and keeps its asks on its own pages while that
+   * fails. When it starts working, rows open from before are taken over.
+   *
+   * @returns The inbox, or `undefined` while it can't be used.
+   */
+  private async workingInbox(): Promise<InboxApi | undefined> {
+    const inbox = this.deps.inbox;
+    if (inbox === undefined) return undefined;
+    let open: Awaited<ReturnType<InboxApi['list']>>;
+    try {
+      open = await inbox.list();
+    } catch (error) {
+      if (this.inboxWorks) this.loggedLimits.delete('inbox-down');
+      this.inboxWorks = false;
+      this.logOnce(
+        'inbox-down',
+        `[flow] DorkOS's Inbox isn't open to flow (${String(error)}); its asks stay on flow's pages`
+      );
+      return undefined;
+    }
+    if (!this.inboxWorks) {
+      this.inboxWorks = true;
+      this.loggedLimits.delete('inbox-down');
+      await this.deps.storage.update(RAISED_KEY, (current) => {
+        const raised = obj(current) as Record<string, RaisedMeta>;
+        for (const decision of open) {
+          raised[decision.key] ??= {
+            fp: '',
+            root: decision.project?.root ?? '',
+            kind: kindOfKey(decision.key),
+          };
+        }
+        return raised;
+      });
+    }
+    return inbox;
   }
 
   /** Log a message once per key. */

@@ -55,6 +55,30 @@ export const START_FAILED_TEXT = "Flow couldn't start that. Try again.";
 export const ANSWERED_IN_FLOW_NOTE =
   'Answers you give here show in Activity as answered in Flow. Shipping, and checks only you can make, are answered in the Inbox so they count as yours.';
 
+/** Shown above asks the Inbox can't take yet, because Flow's Inbox cards aren't allowed. */
+export const ALLOW_INBOX_TEXT = 'Flow can send these questions to your Inbox.';
+
+/** The button beside it: it opens the screen where a person allows them. */
+export const ALLOW_INBOX_BUTTON = 'Allow Inbox cards in Settings → Extensions';
+
+/** Where a person allows an app's places, Inbox cards among them. */
+export const EXTENSIONS_SETTINGS_LINK = '?settings=extensions';
+
+/**
+ * Whether the page should ask the person to allow Flow's Inbox cards: this
+ * DorkOS has the Inbox, but an ask shown here isn't in it.
+ *
+ * @param decisions - The asks shown.
+ * @param api - The host API.
+ * @returns True when one is waiting on that yes.
+ */
+export function inboxWaiting(
+  decisions: readonly Pick<FlowDecision, 'inInbox'>[],
+  api: Pick<ClientApi, 'listDecisions' | 'answerDecision'>
+): boolean {
+  return hasInbox(api) && decisions.some((decision) => !decision.inInbox);
+}
+
 /**
  * Whether this DorkOS has the inbox, seen from the page.
  *
@@ -76,7 +100,7 @@ export function answeredHere(
   decision: FlowDecision,
   api: Pick<ClientApi, 'listDecisions' | 'answerDecision'>
 ): boolean {
-  return !hasInbox(api) || decision.answerIn === 'flow';
+  return !hasInbox(api) || !decision.inInbox || decision.answerIn === 'flow';
 }
 
 /** Shown when the ask changed since the page showed it. */
@@ -124,7 +148,8 @@ export async function sendAnswer(
 ): Promise<AnswerOutcome> {
   const list = api.listDecisions;
   const answerDecision = api.answerDecision;
-  if (typeof list === 'function' && typeof answerDecision === 'function') {
+  // An ask that isn't in the Inbox yet is answered through flow's route.
+  if (decision.inInbox && typeof list === 'function' && typeof answerDecision === 'function') {
     const view = (await list()).find((open) => open.key === decision.key);
     if (view === undefined) return { resolved: false, message: ALREADY_SETTLED_TEXT, watch: null };
     // Answer only what the person saw: core's row must still say the same.

@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.99.1
+
+**Reinstall Flow to receive this fix. On DorkOS 0.140.0, then allow Flow's Inbox cards when DorkOS asks.**
+
+- Flow now says it shows cards in the Inbox. DorkOS 0.140.0 refuses Inbox cards from an app that doesn't say so, and Flow's questions that only a person can answer would have failed there.
+- Flow checks the Inbox works by using it, not by seeing that it exists. Until you allow Flow's Inbox cards, its questions stay on Flow's own pages and you answer them there, under a line saying so, with a button to Settings → Extensions.
+- Flow also says it opens pages on the canvas. Without that, DorkOS 0.140.0 drops Flow's web links without a word, so a click on one did nothing. Once you allow them, they move to the Inbox without a restart.
+
 ## 0.99.0
 
 **Flow's screens in DorkOS now work on DorkOS 0.135.12, which runs each app in a frame of its own. Reinstall flow when you update DorkOS: an older flow shows "This app needs an update" there and its screens don't load.**

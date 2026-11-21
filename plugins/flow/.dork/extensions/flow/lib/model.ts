@@ -162,6 +162,11 @@ export interface FlowDecision {
    */
   answerIn: 'activity' | 'flow';
   /**
+   * Whether it is in DorkOS's Inbox now. False while the Inbox isn't open to
+   * flow (not declared, or not allowed yet): then flow's pages answer it.
+   */
+  inInbox: boolean;
+  /**
    * The ask's words as flow's pages show them. An answer from a page sends it
    * back, and flow refuses it if the ask changed since (§7.4).
    */
