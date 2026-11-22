@@ -191,10 +191,14 @@ export async function runFlow(
   const stdout = sink();
   const stderr = sink();
   const deps: MainDeps = {
-    env: options.env ?? {
-      FLOW_SESSION_ID: 'session-abc',
-      CLAUDECODE: '1',
-      CLAUDE_CONFIG_DIR: '/home/someone/.claude-work',
+    env: {
+      // An empty DorkOS home, so a signature never reads this machine's real install id.
+      DORK_HOME: `${project.dir}-no-dork-home`,
+      ...(options.env ?? {
+        FLOW_SESSION_ID: 'session-abc',
+        CLAUDECODE: '1',
+        CLAUDE_CONFIG_DIR: '/home/someone/.claude-work',
+      }),
     },
     cwd: project.dir,
     now: () => new Date('2026-09-26T12:00:00.000Z'),

@@ -15,7 +15,6 @@
  */
 
 import { readFileSync } from 'node:fs';
-import os from 'node:os';
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig, type LoadedConfig } from '../config-load.ts';
@@ -34,7 +33,7 @@ import {
 } from '../work-state.ts';
 import type { VerbContext } from './context.ts';
 import { verbLoadOptions } from './load-options.ts';
-import { buildProvenance } from './provenance.ts';
+import { buildProvenance, readInstallId } from './provenance.ts';
 
 /** Everything a write verb runs on. */
 export interface WriteSetup {
@@ -223,7 +222,7 @@ export function sessionProvenance(ctx: VerbContext, launcher?: string): FlowRunP
     env: ctx.env,
     sessionId: ctx.sessionId,
     launcher,
-    hostname: os.hostname(),
+    installId: readInstallId(ctx.env, ctx.io.osHome),
   });
 }
 

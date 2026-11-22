@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.99.2
+
+**Reinstall Flow to receive this fix.**
+
+- Flow's hidden signature on comments and items no longer carries your computer's name. A Mac's name often holds its owner's name, and it showed up in tracker comments.
+- Where a signature names the computer, it now uses a code made from your DorkOS install's id, and only when DorkOS is installed. People outside DorkOS can't trace the code back to that id. Pull request bodies never carry it.
+- Older signatures that still hold a computer's name are read as before.
+
 ## 0.99.1
 
 **Reinstall Flow to receive this fix. On DorkOS 0.140.0, then allow Flow's Inbox cards when DorkOS asks.**

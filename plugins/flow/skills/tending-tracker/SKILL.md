@@ -76,9 +76,9 @@ thread.
 
 | Newest not-your-own signature says                             | Where it goes                                                                                                                                                               |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(a)** Same `host` and `harness`, session **still resumable** | **Deliver the follow-up INTO that session:** `bare-cli` → `--resume <sessionId>`; `dorkos` with an `instanceId` matching this install → `POST /api/sessions/<id>/messages`. |
+| **(a)** Same `host` and `harness`, session **still resumable** | **Deliver the follow-up INTO that session:** `bare-cli` → `--resume <sessionId>`; `dorkos` with a `host` matching this install → `POST /api/sessions/<id>/messages`.          |
 | **(b)** Same `host`, session **gone**                          | **Start a fresh session seeded with the thread** (item, comments, provenance).                                                                                              |
-| **(c)** A different `host`, or a different DorkOS `instanceId` | **Handle it in the current session, and say so** in the reply: cross-machine routing is a recorded future step, not something to fake.                                      |
+| **(c)** A different `host`                                     | **Handle it in the current session, and say so** in the reply: cross-machine routing is a recorded future step, not something to fake.                                      |
 | No signature (unsigned, human, or all your own)                | As (b). Never claim you resumed a session.                                                                                                                                  |
 
 **Anything that does not clearly match (a) is (b).** (b) is always safe.
@@ -91,12 +91,12 @@ Derive it, never assume; if the probe itself fails, that is (b), not (a).
   `CLAUDE_CONFIG_DIR`); `claude --resume <sessionId>` is the authoritative probe.
 - **codex**, **opencode:** that harness's thread store and its sidecar session store,
   located the way the harness locates them.
-- **`dorkos`:** resumable when the `instanceId` matches and the server answers for the id.
+- **`dorkos`:** resumable when the `host` matches and the server answers for the id.
 
 A truncated `sessionId` is prefix-matched against that local store; exactly one match
 is the session, else (b). Never match against ids you have only seen in tracker threads.
-This install's own `instanceId` comes from the DorkOS install itself, not from anything
-in the thread; for a reader that cannot determine its own `instanceId`, a `dorkos` signature
+This install's own `host` comes from the DorkOS install itself, not from anything
+in the thread; for a reader that cannot determine its own `host`, a `dorkos` signature
 falls to (c).
 
 **Silence about which path you took is not allowed.** The tick report **names the

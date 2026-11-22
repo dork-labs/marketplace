@@ -198,9 +198,20 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/contains an `@`, omit `account` entirely/);
   });
 
-  it('warns that `host` can carry a real name, and says to consider omitting it', () => {
+  it('`host` is never a hostname: the install reference, and omitted in public (DOR-5047)', () => {
     expect(specFlat).toMatch(/Firstname-Lastname-MacBook-Pro\.local/);
-    expect(specFlat).toMatch(/consider omitting `host`/i);
+    expect(specFlat).toMatch(/\*\*`host` is never the machine's hostname\*\*/);
+    expect(specFlat).toContain(
+      '`"dork:host:" + hex(sha256("dork:host:v1:" + lowercase(install id)))[0:32]`'
+    );
+    expect(specFlat).toMatch(/Nor the raw install id/);
+    expect(specFlat).toMatch(/\*\*`host`\*\* — \*\*omit it\.\*\*/);
+    // The example line carries no hostname-shaped host.
+    const example = spec.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
+    expect(example).toMatch(/"host":"dork:host:[0-9a-f]{32}"/);
+    // Agents copy the example: it must not invite the raw install id back in.
+    expect(example).not.toContain('instanceId');
+    expect(specFlat).not.toMatch(/consider omitting `host`/i);
   });
 
   it('in a public repo: truncate sessionId AND omit resumeUrl', () => {
@@ -334,11 +345,12 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     expect(verifyingFlat).toMatch(/do not redefine it here/i);
   });
 
-  it('VERIFY scopes `instanceId`/`resumeUrl` to DorkOS but NOT `surface`', () => {
+  it('VERIFY scopes `resumeUrl` to DorkOS but NOT `surface`, and never signs `host` or `instanceId`', () => {
     // `surface` selects the resume mechanism; the bare-cli branch needs it too.
-    expect(verifyingFlat).toMatch(
-      /`account`, `host`, `surface`, and — under DorkOS only — `instanceId` and `resumeUrl`/
-    );
+    expect(verifyingFlat).toMatch(/`account`, `surface`, and \(DorkOS only\) `resumeUrl`/);
+    // A PR body is public, and an old run record may hold a hostname (DOR-5047);
+    // `instanceId` would be the anonymous usage id.
+    expect(verifyingFlat).toMatch(/never `host` or `instanceId`/);
   });
 
   it('the PR template emits `agent:provenance` with `v`, and no local-only field', () => {
@@ -346,6 +358,8 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     const emitted = prTemplate.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
     expect(emitted).not.toContain('worktree');
     expect(emitted).not.toContain('agentId');
+    // A PR body is public: no `host`, and never a hostname placeholder (DOR-5047).
+    expect(emitted).not.toContain('"host"');
     expect(emitted).not.toContain('branch');
     // And its guidance must not send an emitter to put them on the wire.
     expect(prTemplateFlat).toMatch(/stay in flow-state\.json/);
@@ -376,7 +390,8 @@ describe('agent provenance — EXECUTE stamps it through flow claim', () => {
   });
 
   it('adds only what flow claim cannot derive, and never fabricates', () => {
-    expect(executingFlat).toMatch(/`instanceId` and `resumeUrl`/);
+    expect(executingFlat).toMatch(/Add `resumeUrl` when you have it/);
+    expect(executingFlat).not.toMatch(/`instanceId`/);
     expect(executingFlat).toMatch(/never fabricate/i);
   });
 });
@@ -416,7 +431,7 @@ describe('agent provenance — the reader routes on it', () => {
     const rowA = tableRow(tending, /\*\*\(a\)\*\*/);
     expect(rowA).toContain('--resume <sessionId>');
     expect(rowA).toContain('POST /api/sessions/<id>/messages');
-    expect(rowA).toMatch(/`instanceId` matching this install/);
+    expect(rowA).toMatch(/a `host` matching this install/);
     expect(flat(rowA)).toMatch(/Deliver the follow-up INTO that session/);
   });
 
@@ -450,10 +465,13 @@ describe('agent provenance — the reader routes on it', () => {
     expect(tendingFlat).toMatch(/if the probe itself fails, that is \(b\), not \(a\)/);
   });
 
-  it('says where a reader gets its OWN instanceId, and what happens without one', () => {
+  it('says where a reader gets its OWN host, and what happens without one', () => {
     expect(tendingFlat).toMatch(/comes from the DorkOS install itself/);
     expect(tendingFlat).toMatch(/not from anything in the thread/);
-    expect(tendingFlat).toMatch(/cannot determine its own `instanceId`.{0,120}falls to \(c\)/);
+    expect(tendingFlat).toMatch(/cannot determine its own `host`.{0,120}falls to \(c\)/);
+    // New signatures never carry `instanceId` (it would be the usage id), so
+    // routing never depends on it (DOR-5047).
+    expect(tending).not.toMatch(/`instanceId`/);
   });
 
   it('forbids silence about which path was taken — the tick report names it', () => {
@@ -505,7 +523,7 @@ describe('agent provenance — the prose field set matches the on-disk schema', 
         harness: 'claude-code',
         sessionId: 'session-1',
         account: 'example-account',
-        host: 'example-host',
+        host: 'dork:host:0123456789abcdef0123456789abcdef',
         surface: 'dorkos',
         instanceId: '2f9c1e6a-0000-4000-8000-abcdefabcdef',
         resumeUrl: 'https://example.invalid/session/session-1',

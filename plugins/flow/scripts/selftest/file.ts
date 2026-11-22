@@ -31,7 +31,7 @@
 
 import os from 'node:os';
 
-import { buildProvenance, signBody, unsignedBody } from '../cli/provenance.ts';
+import { buildProvenance, readInstallId, signBody, unsignedBody } from '../cli/provenance.ts';
 import { findConfigRoots } from '../config-files.ts';
 import { redact } from '../journal.ts';
 import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
@@ -545,6 +545,8 @@ export interface FilingSetupInput {
   env: Readonly<Record<string, string | undefined>>;
   /** The session id to sign with, when known. */
   sessionId?: string;
+  /** The OS home folder, for the DorkOS install id under `~/.dork`. Default `os.homedir()`. */
+  osHome?: string;
   /** Builds the project's tracker adapter. */
   adapter: () => Promise<CodeAdapter>;
 }
@@ -574,7 +576,7 @@ export async function filingSetup(input: FilingSetupInput): Promise<{
   const provenance = buildProvenance({
     env: input.env,
     sessionId: input.sessionId,
-    hostname: os.hostname(),
+    installId: readInstallId(input.env, input.osHome ?? os.homedir()),
   });
   return {
     retro: config.selfImprovement.retro,

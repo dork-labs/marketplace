@@ -128,7 +128,13 @@ async function flow(argv: string[], t: ReturnType<typeof tracker>, json = true) 
   let out = '';
   let err = '';
   const code = await main(json ? [...argv, '--json'] : argv, {
-    env: { FLOW_SESSION_ID: 'session-abc', CLAUDECODE: '1', CLAUDE_CONFIG_DIR: '/h/.claude-work' },
+    env: {
+      FLOW_SESSION_ID: 'session-abc',
+      CLAUDECODE: '1',
+      CLAUDE_CONFIG_DIR: '/h/.claude-work',
+      // An empty DorkOS home, so the signature never reads this machine's install id.
+      DORK_HOME: `${project}-no-dork-home`,
+    },
     cwd: project,
     now: () => NOW,
     stdout: { write: (text: string) => ((out += text), true) },
@@ -191,7 +197,7 @@ describe('flow create', () => {
     );
     expect(description.startsWith(checked)).toBe(true);
     expect(description.slice(checked.length)).toMatch(
-      /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"claude-work",.*\} -->$/
+      /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"claude-work"\} -->$/
     );
   });
 
