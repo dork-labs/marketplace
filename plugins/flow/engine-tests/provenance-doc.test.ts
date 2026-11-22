@@ -209,6 +209,8 @@ describe('agent provenance — privacy rules', () => {
     // The example line carries no hostname-shaped host.
     const example = spec.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
     expect(example).toMatch(/"host":"dork:host:[0-9a-f]{32}"/);
+    // Agents copy the example: it must not invite the raw install id back in.
+    expect(example).not.toContain('instanceId');
     expect(specFlat).not.toMatch(/consider omitting `host`/i);
   });
 
@@ -429,7 +431,7 @@ describe('agent provenance — the reader routes on it', () => {
     const rowA = tableRow(tending, /\*\*\(a\)\*\*/);
     expect(rowA).toContain('--resume <sessionId>');
     expect(rowA).toContain('POST /api/sessions/<id>/messages');
-    expect(rowA).toMatch(/`instanceId` matching this install/);
+    expect(rowA).toMatch(/a `host` matching this install/);
     expect(flat(rowA)).toMatch(/Deliver the follow-up INTO that session/);
   });
 
@@ -463,10 +465,13 @@ describe('agent provenance — the reader routes on it', () => {
     expect(tendingFlat).toMatch(/if the probe itself fails, that is \(b\), not \(a\)/);
   });
 
-  it('says where a reader gets its OWN instanceId, and what happens without one', () => {
+  it('says where a reader gets its OWN host, and what happens without one', () => {
     expect(tendingFlat).toMatch(/comes from the DorkOS install itself/);
     expect(tendingFlat).toMatch(/not from anything in the thread/);
-    expect(tendingFlat).toMatch(/cannot determine its own `instanceId`.{0,120}falls to \(c\)/);
+    expect(tendingFlat).toMatch(/cannot determine its own `host`.{0,120}falls to \(c\)/);
+    // New signatures never carry `instanceId` (it would be the usage id), so
+    // routing never depends on it (DOR-5047).
+    expect(tending).not.toMatch(/`instanceId`/);
   });
 
   it('forbids silence about which path was taken — the tick report names it', () => {

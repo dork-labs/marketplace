@@ -26,7 +26,7 @@ knowing `/flow` exists. That is why the marker is named `agent:`, not `flow:`.
 Append **one line, as the LAST line** of any body the agent writes outward:
 
 ```
-<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"dork:host:3c594f448c55cbfade7fd79a1915dab8","surface":"dorkos","instanceId":"…","resumeUrl":"…"} -->
+<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"dork:host:3c594f448c55cbfade7fd79a1915dab8","surface":"dorkos","resumeUrl":"…"} -->
 ```
 
 It is an HTML comment, so a human reading the thread never sees it while a machine

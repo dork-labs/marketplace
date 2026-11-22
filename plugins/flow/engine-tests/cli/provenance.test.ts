@@ -168,6 +168,7 @@ describe('provenanceLine', () => {
     // A raw install id is the usage id: never on the wire, even under the prefix.
     expect(provenanceLine({ v: 1, host: INSTALL_ID })).toBeUndefined();
     expect(provenanceLine({ v: 1, host: `dork:host:${INSTALL_ID}` })).toBeUndefined();
+    expect(provenanceLine({ v: 1, instanceId: INSTALL_ID })).toBeUndefined();
     expect(provenanceLine({ v: 1, host: HOST_REF })).toBe(
       `<!-- agent:provenance {"v":1,"host":"${HOST_REF}"} -->`
     );

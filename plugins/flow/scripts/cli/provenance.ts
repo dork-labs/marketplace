@@ -203,7 +203,8 @@ export function buildProvenance(input: ProvenanceInput): FlowRunProvenance {
 /**
  * The hidden signature line for a provenance block: the wire fields only (the
  * local-only worktree, branch and worker id never go out), as valid JSON. A
- * `host` that is not an install reference ({@link isHostRef}) is left out.
+ * `host` that is not an install reference ({@link isHostRef}) is left out, and
+ * so is `instanceId`.
  *
  * @param provenance - The block to sign with.
  * @returns The line, or `undefined` when nothing but the version is known
@@ -214,6 +215,8 @@ export function provenanceLine(provenance: FlowRunProvenance): string | undefine
   for (const field of WIRE_FIELDS) {
     const value = provenance[field];
     if (field === 'host' && !isHostRef(provenance.host)) continue;
+    // The only install UUID DorkOS has is its anonymous usage id (DOR-5047).
+    if (field === 'instanceId') continue;
     if (value !== undefined && value !== '') wire[field] = value;
   }
   if (Object.keys(wire).every((key) => key === 'v')) return undefined;
