@@ -198,9 +198,16 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/contains an `@`, omit `account` entirely/);
   });
 
-  it('warns that `host` can carry a real name, and says to consider omitting it', () => {
+  it('`host` is never a hostname: the install reference, and omitted in public (DOR-5047)', () => {
     expect(specFlat).toMatch(/Firstname-Lastname-MacBook-Pro\.local/);
-    expect(specFlat).toMatch(/consider omitting `host`/i);
+    expect(specFlat).toMatch(/\*\*`host` is never the machine's hostname\*\*/);
+    expect(specFlat).toMatch(/`dork:host:<hash>`/);
+    expect(specFlat).toMatch(/Nor the raw install id/);
+    expect(specFlat).toMatch(/\*\*`host`\*\* — \*\*omit it\.\*\*/);
+    // The example line carries no hostname-shaped host.
+    const example = spec.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
+    expect(example).toMatch(/"host":"dork:host:[0-9a-f]{32}"/);
+    expect(specFlat).not.toMatch(/consider omitting `host`/i);
   });
 
   it('in a public repo: truncate sessionId AND omit resumeUrl', () => {
@@ -346,6 +353,8 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     const emitted = prTemplate.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
     expect(emitted).not.toContain('worktree');
     expect(emitted).not.toContain('agentId');
+    // A PR body is public: no `host`, and never a hostname placeholder (DOR-5047).
+    expect(emitted).not.toContain('"host"');
     expect(emitted).not.toContain('branch');
     // And its guidance must not send an emitter to put them on the wire.
     expect(prTemplateFlat).toMatch(/stay in flow-state\.json/);
@@ -505,7 +514,7 @@ describe('agent provenance — the prose field set matches the on-disk schema', 
         harness: 'claude-code',
         sessionId: 'session-1',
         account: 'example-account',
-        host: 'example-host',
+        host: 'dork:host:0123456789abcdef0123456789abcdef',
         surface: 'dorkos',
         instanceId: '2f9c1e6a-0000-4000-8000-abcdefabcdef',
         resumeUrl: 'https://example.invalid/session/session-1',

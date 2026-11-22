@@ -373,6 +373,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         flowRoot: ctx.flowRoot,
         env: ctx.env,
         sessionId: ctx.sessionId,
+        osHome: ctx.io.osHome,
         adapter: () => ctx.adapter(),
       });
       report.filing = await fileFindings(

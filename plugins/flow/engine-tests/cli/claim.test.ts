@@ -7,7 +7,6 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -68,7 +67,6 @@ describe('flow claim writes the claim projection and records the run', () => {
           harness: 'claude-code',
           sessionId: 'session-abc',
           account: 'claude-work',
-          host: os.hostname(),
           surface: 'dorkos',
           worktree: project.dir,
           branch: 'work',

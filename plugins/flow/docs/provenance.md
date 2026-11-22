@@ -26,7 +26,7 @@ knowing `/flow` exists. That is why the marker is named `agent:`, not `flow:`.
 Append **one line, as the LAST line** of any body the agent writes outward:
 
 ```
-<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"build-box.local","surface":"dorkos","instanceId":"…","resumeUrl":"…"} -->
+<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"dork:host:3c594f448c55cbfade7fd79a1915dab8","surface":"dorkos","instanceId":"…","resumeUrl":"…"} -->
 ```
 
 It is an HTML comment, so a human reading the thread never sees it while a machine
@@ -58,7 +58,7 @@ comment unsigned.
 | `harness`    | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                                              |
 | `sessionId`  | The harness's own session id — the handle a later reader resumes with. Derive it (some harnesses expose it; on others the transcript path encodes it); never guess.                                                                      |
 | `account`    | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". **NEVER an email address** (section 7).                                        |
-| `host`       | This machine's hostname. Load-bearing: a retained transcript is only reachable from the machine holding it, so a host mismatch is what rules local resume out.                                                                           |
+| `host`       | The DorkOS install holding the session, as `dork:host:<hash>`, a salted SHA-256 of the install id. Omitted outside DorkOS and in public. A mismatch rules local resume out.                                                     |
 | `surface`    | Where the run was driven from: `dorkos` \| `bare-cli` \| `ci`. **Always emitted when determinable**, on every surface — it is what selects the resume _mechanism_, and the `bare-cli` path needs it exactly as much as the `dorkos` one. |
 | `instanceId` | The DorkOS install's UUID, when the run is under DorkOS. **Omit it outside DorkOS** — it is what tells a reader "this session lives in the install I am talking to" rather than an identically-named one elsewhere.                      |
 | `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead. Omitted in public repositories (section 8).               |
@@ -114,15 +114,13 @@ stable short handle (`claude`, `work`, `alt`) does the whole job. **If the value
 you derived contains an `@`, omit `account` entirely** rather than trying to clean
 it up — a truncated address is still an address.
 
-The same restraint applies to the rest of the block. Nothing here carries a real
-name, an email, or a token **by design** — but `host` is the field that can betray
-that by accident: a stock macOS hostname is `Firstname-Lastname-MacBook-Pro.local`.
-In a public repository, **consider omitting `host`** too; routing degrades to "not
-this machine", which is the same answer a mismatched host would have given.
+**`host` is never the machine's hostname**: a stock macOS hostname is
+`Firstname-Lastname-MacBook-Pro.local`. Nor the raw install id, which anonymous
+usage data carries. Signers drop either.
 
 ## 8. Public repositories
 
-A public repository makes every signed body world-readable and permanent, so two
+A public repository makes every signed body world-readable and permanent, so three
 fields change:
 
 - **`sessionId`** — an emitter MAY ship only its **first 8 characters** instead of
@@ -133,6 +131,9 @@ fields change:
   resume URL that contains the same id is not privacy, it is theatre. The URL is
   reconstructible locally by anyone who can actually resume the session, which is
   the only person it helps.
+- **`host`** — **omit it.** It is for private trackers.
+
+A public repository's issues count as public too.
 
 **Decide it, do not assume it.** Read the repository's visibility rather than
 guessing — `gh repo view --json visibility` is the one-command answer on GitHub,
@@ -181,7 +182,7 @@ Scan the body for **either** accepted marker name and parse the JSON. A blob tha
 fails to parse is treated as absent, never as partially trusted: half a parsed
 line is how a reader ends up resuming the wrong session.
 
-Three reader rules:
+Four reader rules:
 
 - **Newest wins, excluding your own.** In a thread with several signed comments,
   the newest signature is the one to route on — but a loop that signs its own
@@ -190,6 +191,8 @@ Three reader rules:
 - **A local run record outranks a thread signature.** When the reader holds a
   durable run record for the item (`flow-state.json`), that record's `sessionId` is
   authoritative and the thread signature is the fallback for items with no record.
+- **An older `host` may be a hostname.** Match it against this machine's hostname;
+  never copy it.
 - **Absence is normal, not evidence.** An unsigned thread, a human-authored
   comment, or a signature a person removed while editing in a rich-text editor all
   read the same way: no signature (rich-text editors strip HTML comments). A missing

@@ -146,9 +146,14 @@ export interface FlowRunProvenance {
   /** The delegated worker/agent id or name the harness assigned, when it assigns one. */
   agentId?: string;
   /**
-   * The machine the run happened on. Load-bearing for the resume ladder: a
-   * retained transcript is only reachable from the machine that holds it, so a
-   * host mismatch is what rules rung 1 out.
+   * The DorkOS install the run happened on, as the reference
+   * `dork:host:<hash>` (a one-way hash of the install id, `hostRefFor` in
+   * `cli/provenance.ts`); absent outside DorkOS. **Never a hostname**
+   * (DOR-5047): a stock macOS hostname carries a person's name. Load-bearing
+   * for the resume ladder: a retained transcript is only reachable from the
+   * install that holds it, so a host mismatch is what rules rung 1 out. A run
+   * record written before 0.99.2 may still hold a hostname here; the signer
+   * drops it rather than sending it.
    */
   host?: string;
   /**
