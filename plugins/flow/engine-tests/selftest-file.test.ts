@@ -153,7 +153,8 @@ describe('filing redacts what it copies into the tracker', () => {
       detail: `${home} grew; the log said ${token}`,
     };
     const fake = new FakeTracker({ items: [] }, { now: () => NOW });
-    const sign = (body: string) => signBody(body, '— 🤖 /flow', { v: 1, host: 'test-host' });
+    const sign = (body: string) =>
+      signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' });
     const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
 
     const first = await fileFailures([check], META, deps);
@@ -221,7 +222,7 @@ describe('planFindings under a cap', () => {
 
 describe('fileFailures against the fake tracker', () => {
   const check = failing('scenarios/lifecycle/codex');
-  const sign = (body: string) => signBody(body, '— 🤖 /flow', { v: 1, host: 'test-host' });
+  const sign = (body: string) => signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' });
 
   function tracker(backlog: FakeBacklog, now = () => NOW): FakeTracker {
     return new FakeTracker(backlog, { now });
@@ -478,7 +479,7 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
     );
     let stdout = '';
     const code = await main(['--tier', 'scenarios', '--file', '--json', '--no-save'], {
-      env: { VITEST: 'true' },
+      env: { VITEST: 'true', DORK_HOME: `${project}-no-dork-home` },
       cwd: project,
       now: () => NOW,
       stdout: (t) => {
@@ -526,7 +527,7 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
     );
     let stdout = '';
     const code = await main(['--tier', 'scenarios', '--file', '--json', '--no-save'], {
-      env: { VITEST: 'true' },
+      env: { VITEST: 'true', DORK_HOME: `${project}-no-dork-home` },
       cwd: project,
       now: () => NOW,
       stdout: (t) => {
@@ -556,7 +557,7 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
   it('reports a tracker it cannot reach in the report, and still exits 1', async () => {
     let stdout = '';
     const code = await main(['--tier', 'scenarios', '--file', '--json', '--no-save'], {
-      env: { VITEST: 'true' },
+      env: { VITEST: 'true', DORK_HOME: `${project}-no-dork-home` },
       cwd: project,
       now: () => NOW,
       stdout: (t) => {
@@ -586,7 +587,7 @@ describe('the flow selftest verb', { timeout: SCENARIOS_TIMEOUT }, () => {
     let out = '';
     const sink = { write: (t: string) => ((out += t), true) };
     const code = await flowMain(argv, {
-      env: { VITEST: 'true' },
+      env: { VITEST: 'true', DORK_HOME: `${project}-no-dork-home` },
       cwd: project,
       now: () => NOW,
       stdout: sink,

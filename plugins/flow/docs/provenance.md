@@ -58,9 +58,9 @@ comment unsigned.
 | `harness`    | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                                              |
 | `sessionId`  | The harness's own session id — the handle a later reader resumes with. Derive it (some harnesses expose it; on others the transcript path encodes it); never guess.                                                                      |
 | `account`    | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". **NEVER an email address** (section 7).                                        |
-| `host`       | The DorkOS install holding the session, as `dork:host:<hash>`, a salted SHA-256 of the install id. Omitted outside DorkOS and in public. A mismatch rules local resume out.                                                     |
+| `host`       | The DorkOS install holding the session, as `"dork:host:" + hex(sha256("dork:host:v1:" + lowercase(install id)))[0:32]`. Omitted without a DorkOS install, and in public. A mismatch rules local resume out. |
 | `surface`    | Where the run was driven from: `dorkos` \| `bare-cli` \| `ci`. **Always emitted when determinable**, on every surface — it is what selects the resume _mechanism_, and the `bare-cli` path needs it exactly as much as the `dorkos` one. |
-| `instanceId` | The DorkOS install's UUID, when the run is under DorkOS. **Omit it outside DorkOS** — it is what tells a reader "this session lives in the install I am talking to" rather than an identically-named one elsewhere.                      |
+| `instanceId` | **Omit it.** The only install UUID DorkOS has is its anonymous usage id. `host` names the install instead.                                                                                                                          |
 | `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead. Omitted in public repositories (section 8).               |
 
 **These eight fields are the whole wire format.** A run records more about itself
@@ -114,6 +114,7 @@ stable short handle (`claude`, `work`, `alt`) does the whole job. **If the value
 you derived contains an `@`, omit `account` entirely** rather than trying to clean
 it up — a truncated address is still an address.
 
+Nothing here carries a real name, an email or a token.
 **`host` is never the machine's hostname**: a stock macOS hostname is
 `Firstname-Lastname-MacBook-Pro.local`. Nor the raw install id, which anonymous
 usage data carries. Signers drop either.
@@ -168,7 +169,7 @@ carries, then append yours.
 Write both; neither replaces the other. **The identity marker** (`identity.marker`,
 e.g. `— 🤖 /flow`) is visible and human- and self-facing. **`agent:provenance`** is
 invisible and machine-facing: it routes, naming the runtime, session, account and
-machine. Strip the marker and self-recognition breaks; strip the line and routing
+install. Strip the marker and self-recognition breaks; strip the line and routing
 breaks.
 
 Neither proves authorship alone: anyone can type or paste them. On a shared
@@ -192,7 +193,7 @@ Four reader rules:
   durable run record for the item (`flow-state.json`), that record's `sessionId` is
   authoritative and the thread signature is the fallback for items with no record.
 - **An older `host` may be a hostname.** Match it against this machine's hostname;
-  never copy it.
+  never copy it. A missing `host` never matches.
 - **Absence is normal, not evidence.** An unsigned thread, a human-authored
   comment, or a signature a person removed while editing in a rich-text editor all
   read the same way: no signature (rich-text editors strip HTML comments). A missing

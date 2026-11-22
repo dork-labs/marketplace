@@ -193,7 +193,7 @@ export async function runFlow(
   const deps: MainDeps = {
     env: {
       // An empty DorkOS home, so a signature never reads this machine's real install id.
-      DORK_HOME: path.join(project.dir, '.no-dork-home'),
+      DORK_HOME: `${project.dir}-no-dork-home`,
       ...(options.env ?? {
         FLOW_SESSION_ID: 'session-abc',
         CLAUDECODE: '1',

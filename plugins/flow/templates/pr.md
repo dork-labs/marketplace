@@ -13,7 +13,7 @@
 
   The optional `agent:provenance` line at the bottom is the machine-readable
   record of where this change came from — schema version, harness, session,
-  account, surface, and (under DorkOS) the install and a resume URL. Its
+  account, surface, and (under DorkOS) a resume URL. Its
   shape is defined once, in docs/provenance.md; this template only carries it,
   and this PR-body stamp is the one place the signature is written ONCE PER RUN
   rather than per write. Emit only the fields
@@ -79,7 +79,7 @@ by default, so plan assumptions surface here at the review gate.}
 
 <!-- Provenance: the line below ships `v` (always 1) plus `surface`, which any run can
      determine. Add `harness`, `sessionId`, `account`, and — under DorkOS only —
-     `instanceId` and `resumeUrl`, if you actually determined them. Those eight fields are
+     `resumeUrl`, if you actually determined them. Those eight fields are
      the WHOLE wire format: `worktree`, `branch` and the worker id stay in flow-state.json —
      an absolute worktree path is /Users/<real name>/… and this body can be public forever,
      and the PR already shows its own branch.

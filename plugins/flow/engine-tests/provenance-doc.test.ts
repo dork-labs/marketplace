@@ -201,7 +201,9 @@ describe('agent provenance — privacy rules', () => {
   it('`host` is never a hostname: the install reference, and omitted in public (DOR-5047)', () => {
     expect(specFlat).toMatch(/Firstname-Lastname-MacBook-Pro\.local/);
     expect(specFlat).toMatch(/\*\*`host` is never the machine's hostname\*\*/);
-    expect(specFlat).toMatch(/`dork:host:<hash>`/);
+    expect(specFlat).toContain(
+      '`"dork:host:" + hex(sha256("dork:host:v1:" + lowercase(install id)))[0:32]`'
+    );
     expect(specFlat).toMatch(/Nor the raw install id/);
     expect(specFlat).toMatch(/\*\*`host`\*\* — \*\*omit it\.\*\*/);
     // The example line carries no hostname-shaped host.
@@ -341,11 +343,12 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     expect(verifyingFlat).toMatch(/do not redefine it here/i);
   });
 
-  it('VERIFY scopes `instanceId`/`resumeUrl` to DorkOS but NOT `surface`', () => {
+  it('VERIFY scopes `resumeUrl` to DorkOS but NOT `surface`, and never signs `host` or `instanceId`', () => {
     // `surface` selects the resume mechanism; the bare-cli branch needs it too.
-    expect(verifyingFlat).toMatch(
-      /`account`, `host`, `surface`, and — under DorkOS only — `instanceId` and `resumeUrl`/
-    );
+    expect(verifyingFlat).toMatch(/`account`, `surface`, and \(DorkOS only\) `resumeUrl`/);
+    // A PR body is public, and an old run record may hold a hostname (DOR-5047);
+    // `instanceId` would be the anonymous usage id.
+    expect(verifyingFlat).toMatch(/never `host` or `instanceId`/);
   });
 
   it('the PR template emits `agent:provenance` with `v`, and no local-only field', () => {
@@ -385,7 +388,8 @@ describe('agent provenance — EXECUTE stamps it through flow claim', () => {
   });
 
   it('adds only what flow claim cannot derive, and never fabricates', () => {
-    expect(executingFlat).toMatch(/`instanceId` and `resumeUrl`/);
+    expect(executingFlat).toMatch(/Add `resumeUrl` when you have it/);
+    expect(executingFlat).not.toMatch(/`instanceId`/);
     expect(executingFlat).toMatch(/never fabricate/i);
   });
 });

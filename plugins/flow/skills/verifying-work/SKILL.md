@@ -105,9 +105,9 @@ A `"none"` capture has nothing to attach; say so.
 ### Provenance
 
 The signature is defined in [`<flow-root>/docs/provenance.md`](../../docs/provenance.md);
-do not redefine it here. It carries `harness`, `sessionId`, `account`, `host`,
-`surface`, and — under DorkOS only — `instanceId` and `resumeUrl`, from the run's
-`flow-state.json` record. Emit `agent:provenance`; `flow:provenance` is the legacy name
+do not redefine it here. It carries `harness`, `sessionId`, `account`, `surface`,
+and (DorkOS only) `resumeUrl`, from the run's `flow-state.json` record;
+never `host` or `instanceId`. Emit `agent:provenance`; `flow:provenance` is the legacy name
 readers still accept.
 
 **The signature itself is per-write: every body written outward carries it, every

@@ -47,7 +47,7 @@ The policy never blocks work:
 When work continues (a failed task, a fix, a later session), continue the worker that
 already reasoned before starting one that must re-derive it:
 
-1. **Continue the originating worker**, when you are on the same machine
+1. **Continue the originating worker**, when you are on the same install
    (`provenance.host` in `.dork/flow/flow-state.json`) and the harness retained and can
    continue it.
 2. **A fresh worker seeded from the artifacts**: the worktree (ground truth; the diff
@@ -77,8 +77,8 @@ or a loud stop, never a silent 2; `"never"` starts at 2. With `context.perIssue`
 6. **Claim** an item this session has not claimed (`--manual` when a person drives):
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <this session's id> --worktree <path> --branch <branch> --json`.
    It records the run and its provenance (`<flow-root>/docs/provenance.md`). Exit 5
-   names the blocker; exit 7 means paused. Add `instanceId` and `resumeUrl` when you
-   have them; never fabricate a field.
+   names the blocker; exit 7 means paused. Add `resumeUrl` when you have it; never
+   fabricate a field.
 
 ## Phase 1: Setup
 

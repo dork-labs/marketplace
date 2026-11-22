@@ -474,7 +474,7 @@ export interface FlowRun {
   account?: string;
   /**
    * The launcher the current session runs under: `cli`, `dorkos` or `cmux`
-   * today. Not the machine (that is `provenance.host`). A bare string, like
+   * today. Not the install (that is `provenance.host`). A bare string, like
    * `provenance.harness`: the vocabulary is pinned here in prose, so a record
    * written by a future launcher never fails the all-or-nothing reader.
    */

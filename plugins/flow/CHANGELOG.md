@@ -9,7 +9,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Reinstall Flow to receive this fix.**
 
 - Flow's hidden signature on comments and items no longer carries your computer's name. A Mac's name often holds its owner's name, and it showed up in tracker comments.
-- Where a signature names the computer, it now uses a code made from your DorkOS install's id, and only when DorkOS is installed. The code can't be traced back to that id, so it can't be matched with DorkOS's anonymous usage data. Pull request bodies never carry it.
+- Where a signature names the computer, it now uses a code made from your DorkOS install's id, and only when DorkOS is installed. People outside DorkOS can't trace the code back to that id. Pull request bodies never carry it.
 - Older signatures that still hold a computer's name are read as before.
 
 ## 0.99.1
