@@ -6,7 +6,7 @@
  * verdict + exit code, exactly like `validate-adapter.test.ts`.
  *
  * The keystone property here is **every check can fail**: for each of the
- * seventeen GRM invariants there is a seeded mutation of the good fixture that
+ * eighteen GRM invariants there is a seeded mutation of the good fixture that
  * must turn the verdict red, naming exactly that invariant. This ports the
  * "prove the check can fail" self-test from the 2026-08-03 tracker
  * reorganization into committed tests - a groom verification that cannot go
@@ -50,6 +50,8 @@ interface Snapshot {
     now?: string;
     couldExpiryDays?: number;
     pinSetters?: string[];
+    projects?: Array<Record<string, unknown>>;
+    startedCap?: number;
   };
 }
 
@@ -221,6 +223,26 @@ describe('audit-backlog', () => {
           (s.items[1].labels as string[]).push('pin');
           s.items[1].pin = { reason: 'ships first', actor: 'someone-else' };
           s.opts = { ...s.opts, unnamespacedLabels: ['pin'], pinSetters: ['the-lead'] };
+        },
+      },
+      {
+        // A Started project with no priority (DOR-5067).
+        invariant: 'GRM-18',
+        seed: (s) => {
+          s.opts = {
+            ...s.opts,
+            projects: [
+              {
+                id: 'proj-x',
+                name: 'Example',
+                slugId: 'example',
+                statusType: 'started',
+                targetDate: '2026-12-31',
+                labels: [],
+                blockedBy: [],
+              },
+            ],
+          };
         },
       },
       {
@@ -426,6 +448,7 @@ describe('audit-backlog', () => {
       expect(stdout).toContain('GRM-15');
       expect(stdout).toContain('GRM-16');
       expect(stdout).toContain('GRM-17');
+      expect(stdout).toContain('GRM-18');
       expect(stdout).toContain('--fixture');
     });
   });
@@ -641,5 +664,74 @@ describe('pins (GRM-17, DOR-5063)', () => {
     expect(
       grm17(pinned({ reason: 'ships first', actor: 'the-lead' }), { pinSetters: ['the-lead'] })
     ).toBeUndefined();
+  });
+});
+
+describe('project flags (GRM-18, DOR-5067)', () => {
+  const project = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: id.toUpperCase(),
+    slugId: id,
+    statusType: 'started',
+    priority: 2,
+    targetDate: '2026-12-31',
+    labels: [],
+    blockedBy: [],
+    ...extra,
+  });
+  const grm18 = (projects: unknown[] | undefined, startedCap?: number) =>
+    audit([], {
+      ...(projects === undefined ? {} : { projects }),
+      ...(startedCap === undefined ? {} : { startedCap }),
+    }).failures.find((f) => f.invariant === 'GRM-18')?.detail;
+
+  it('passes when no project info was read, or every Started project is in order', () => {
+    expect(grm18(undefined)).toBeUndefined();
+    expect(grm18([project('a'), project('b')])).toBeUndefined();
+  });
+
+  it('reports a Started project with no priority, no target date, or waiting on another', () => {
+    expect(
+      grm18([
+        project('a', { priority: undefined }),
+        project('b', { targetDate: undefined }),
+        project('c', { blockedBy: ['d'] }),
+        project('d', { statusType: 'planned' }),
+      ])
+    ).toBe(
+      "Started project C: can't start: waits on D; Started project B: needs a target date; Started project A: needs a priority"
+    );
+  });
+
+  it("leaves Planned, Paused and Dorian's projects out of the report", () => {
+    expect(
+      grm18([
+        project('a', { statusType: 'planned', priority: undefined }),
+        project('b', { statusType: 'paused', targetDate: undefined }),
+        project('c', { labels: ['owner/dorian'], priority: undefined }),
+      ])
+    ).toBeUndefined();
+  });
+
+  it('reports the Started cap, default 6, naming the lowest projects', () => {
+    const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id, i) =>
+      project(id, { targetDate: `2026-12-0${i + 1}` })
+    );
+    expect(grm18(seven)).toBe('over cap: 7 Started, cap 6; lowest: G');
+    expect(grm18(seven.slice(0, 3), 2)).toBe('over cap: 3 Started, cap 2; lowest: C');
+  });
+
+  it('reads projects and startedCap from the snapshot opts on stdin', () => {
+    const snapshot = goodSnapshot();
+    snapshot.opts = {
+      ...snapshot.opts,
+      projects: [project('a'), project('b')],
+      startedCap: 1,
+    };
+    const { status, stdout } = runOracle({ stdin: JSON.stringify(snapshot) });
+    expect(status).toBe(1);
+    expect((JSON.parse(stdout) as Verdict).failures).toEqual([
+      { invariant: 'GRM-18', detail: 'over cap: 2 Started, cap 1; lowest: B' },
+    ]);
   });
 });
