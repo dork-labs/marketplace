@@ -88,6 +88,12 @@ const PROJECT_CHUNK = 100;
  * under Linear's complexity cap of 10 000.
  */
 export const PROJECT_INFO_PAGE_SIZE = 25;
+
+/** How many relations each way one project read asks for. A full page may not be all of them. */
+const PROJECT_RELATION_PAGE = 10;
+
+/** How many labels one project read asks for. A full page may not be all of them. */
+const PROJECT_LABEL_PAGE = 20;
 /** How many history events and comments the pin read looks through. */
 const PIN_READ_DEPTH = 50;
 /** A backstop against a cursor that never ends. */
@@ -187,9 +193,9 @@ export const PROJECT_INFO_QUERY = `query FlowProjectInfo($teamId: String!, $firs
       pageInfo { hasNextPage endCursor }
       nodes {
         id name slugId priority targetDate createdAt sortOrder status { type }
-        labels(first: 20) { nodes { name parent { name } } }
-        relations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
-        inverseRelations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        labels(first: ${PROJECT_LABEL_PAGE}) { nodes { name parent { name } } }
+        relations(first: ${PROJECT_RELATION_PAGE}) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: ${PROJECT_RELATION_PAGE}) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
       }
     }
   }
@@ -1382,6 +1388,16 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   /** Every open project of the team, with the work order's fields. */
   async function projectInfoOf(teamId: string): Promise<ProjectInfo[]> {
     const out: ProjectInfo[] = [];
+    /** Projects whose relations or labels filled their page: some may be missing. */
+    const truncated: string[] = [];
+    const done = (): ProjectInfo[] => {
+      if (truncated.length > 0) {
+        warn(
+          `Linear gave a full page of relations or labels for ${truncated.sort().join(', ')}; flow read only the first ${PROJECT_RELATION_PAGE} relations each way and ${PROJECT_LABEL_PAGE} labels, so a project dependency or label may be missing`
+        );
+      }
+      return out;
+    };
     let after: string | null = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const data: { team?: { projects?: RawPage<RawProjectInfo> | null } | null } = await graphql(
@@ -1394,9 +1410,17 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       }
       for (const node of connection.nodes ?? []) {
         const project = normalizeProjectInfo(node);
-        if (project !== null) out.push(project);
+        if (project === null) continue;
+        out.push(project);
+        if (
+          (node.relations?.nodes?.length ?? 0) >= PROJECT_RELATION_PAGE ||
+          (node.inverseRelations?.nodes?.length ?? 0) >= PROJECT_RELATION_PAGE ||
+          (node.labels?.nodes?.length ?? 0) >= PROJECT_LABEL_PAGE
+        ) {
+          truncated.push(project.name || project.id);
+        }
       }
-      if (connection.pageInfo?.hasNextPage !== true) return out;
+      if (connection.pageInfo?.hasNextPage !== true) return done();
       after = connection.pageInfo.endCursor ?? null;
       if (after === null)
         throw new TrackerError('Linear said there was another page but gave no cursor');

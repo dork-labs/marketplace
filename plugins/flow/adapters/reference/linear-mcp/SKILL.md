@@ -176,6 +176,9 @@ still loads, and the work order treats the field as unset.
     `relations` and `inverseRelations`: a `dependency` edge whose blocking end
     is the other project (anchor `end` to `start`). Sorted, no repeats, never
     itself.
+  - Each project read asks for at most 10 relations each way and 20 labels.
+    When any of those pages comes back full, some may be missing: warn once
+    per snapshot, naming the projects, rather than guessing.
   - The sum of open estimates is **not** read here: flow adds up the items'
     `size` itself.
 

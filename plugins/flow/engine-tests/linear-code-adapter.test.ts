@@ -1728,6 +1728,37 @@ describe('the work order reads (contract 3.2.0)', () => {
     ]);
   });
 
+  it("warns once when a project's relations or labels fill their page, since some may be missing", async () => {
+    const full = structuredClone(PROJECT_INFO_PAGE);
+    const [first, second] = full.team.projects.nodes as {
+      relations: { nodes: unknown[] };
+      inverseRelations: { nodes: unknown[] };
+      labels: { nodes: unknown[] };
+    }[];
+    first.relations.nodes = Array.from({ length: 10 }, (_, i) => ({
+      type: 'related',
+      anchorType: 'end',
+      relatedAnchorType: 'start',
+      project: { id: 'proj-1' },
+      relatedProject: { id: `proj-x${i}` },
+    }));
+    second.labels.nodes = Array.from({ length: 20 }, (_, i) => ({ name: `l${i}`, parent: null }));
+    const { adapter, warnings } = build((call) =>
+      call.operation === 'FlowProjectInfo' ? okEnvelope(full) : snapshotRoute(call)
+    );
+    await adapter.getBacklogSnapshot();
+    const lines = warnings.filter((w) => /read only the first/.test(w));
+    expect(lines).toEqual([
+      'Linear gave a full page of relations or labels for Another project, Example project; flow read only the first 10 relations each way and 20 labels, so a project dependency or label may be missing',
+    ]);
+  });
+
+  it('does not warn when no project fills a page', async () => {
+    const { adapter, warnings } = build(snapshotRoute);
+    await adapter.getBacklogSnapshot();
+    expect(warnings.filter((w) => /read only the first/.test(w))).toEqual([]);
+  });
+
   it('reads who pinned an item only for items with the pin label', async () => {
     const pinnedCore = structuredClone(CORE_PAGE_1) as typeof CORE_PAGE_1;
     (pinnedCore.team.issues.nodes[0].labels as { nodes: unknown[] }).nodes.push({
