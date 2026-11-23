@@ -19,7 +19,10 @@
  * 4. Dependencies: a project waiting on an open project is flagged
  *    `can't start: waits on <P>` (its issues do not rank), and the project in
  *    the way takes the better of its own keys and those of every Started or
- *    Planned project waiting on it, through any depth, cycle-safe.
+ *    Planned project waiting on it, through any depth, cycle-safe, and always
+ *    sorts ahead of the projects in its list that wait on it. Dorian's
+ *    projects still lift the projects in their way, though they are not
+ *    listed themselves.
  * 5. Remaining work: the estimates of its open issues added up, smaller
  *    first. An unsized issue counts as the largest bucket, so a project
  *    nobody has sized does not look small.
@@ -28,8 +31,10 @@
  * ## The cap
  *
  * Over `projects.startedCap`, the ranking flags the lowest-ranked Started
- * projects and reports `over cap: N Started, cap M; lowest: P1, P2`. It never
- * changes a project's status: a person pauses or finishes one. Projects on
+ * projects and reports `over cap: N Started, cap M; lowest: P1, P2`, naming
+ * Started projects that can't start (they wait on another) before those that
+ * can run. It never changes a project's status: a person pauses or finishes
+ * one. Projects on
  * Dorian's list do not count toward the cap.
  *
  * Pure and deterministic, like `work-order.ts`: same input, same output, and
@@ -110,12 +115,6 @@ interface Ranked {
   effective: number[];
   /** The project whose keys it inherited, when it did. */
   inheritsFrom?: ProjectInfo;
-  /**
-   * How many steps it stands in front of {@link inheritsFrom} (0 when it did
-   * not inherit): on equal keys the deeper one goes first, so a project in the
-   * way always sorts ahead of the projects waiting on it.
-   */
-  depth: number;
   /** Its remaining work in points, and how many unsized issues it counts. */
   remaining: Remaining;
 }
@@ -285,6 +284,42 @@ function reasonsOf(
 }
 
 /**
+ * Reorder one ranked list so a project in the way always comes before every
+ * project in the list waiting on it, directly or through other projects
+ * (listed elsewhere or not): each project, in rank order, first places the
+ * projects it waits on (best-ranked first), then itself. Inheritance already
+ * lifts a project in the way to the place of the best project waiting on it;
+ * this settles the ties and the shapes (a diamond) where the keys alone would
+ * leave it behind. A cycle is placed once, from its best-ranked project.
+ *
+ * @param list - One list, in rank order.
+ * @param order - Every project's index in the global rank order.
+ * @param open - The open projects by id.
+ * @returns The same entries, blockers first.
+ */
+function blockersFirst(
+  list: readonly Ranked[],
+  order: ReadonlyMap<string, number>,
+  open: ReadonlyMap<string, ProjectInfo>
+): Ranked[] {
+  const inList = new Map(list.map((entry) => [entry.project.id, entry]));
+  const out: Ranked[] = [];
+  const seen = new Set<string>();
+  const place = (id: string): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const blockers = openBlockers(open.get(id) as ProjectInfo, open).sort(
+      (a, b) => (order.get(a) as number) - (order.get(b) as number)
+    );
+    for (const blocker of blockers) place(blocker);
+    const entry = inList.get(id);
+    if (entry !== undefined) out.push(entry);
+  };
+  for (const entry of list) place(entry.project.id);
+  return out;
+}
+
+/**
  * Rank the open projects into "now", "next" and "later", and give each a rank
  * for the issue order's project key.
  *
@@ -316,7 +351,7 @@ export function rankProjects(
       remaining.points,
       dateKey(project.createdAt),
     ];
-    ranked.set(project.id, { project, own, effective: own, remaining, depth: 0 });
+    ranked.set(project.id, { project, own, effective: own, remaining });
   }
 
   // Dependencies: each Started or Planned project waiting on another hands its
@@ -334,45 +369,52 @@ export function rankProjects(
     }
     if (!LIFTING_STATUSES.has(source.project.statusType)) continue;
     const seen = new Set<string>([source.project.id]);
-    const stack: [string, number][] = blockers.map((id) => [id, 1]);
+    const stack = [...blockers];
     while (stack.length > 0) {
-      const [id, depth] = stack.pop() as [string, number];
+      const id = stack.pop() as string;
       if (seen.has(id)) continue;
       seen.add(id);
       const target = ranked.get(id) as Ranked;
       if (compareTuples(source.own, target.effective) < 0) {
         target.effective = source.own;
         target.inheritsFrom = source.project;
-        target.depth = depth;
       }
-      stack.push(
-        ...openBlockers(target.project, open).map((next): [string, number] => [next, depth + 1])
-      );
+      stack.push(...openBlockers(target.project, open));
     }
   }
 
   const compare = (a: Ranked, b: Ranked): number =>
     compareTuples(a.effective, b.effective) ||
-    compareKey(b.depth, a.depth) ||
     compareTuples(a.own, b.own) ||
     compareText(a.project.slugId, b.project.slugId) ||
     compareText(a.project.id, b.project.id);
 
   const lists = { now: [] as Ranked[], next: [] as Ranked[], later: [] as Ranked[] };
   const dorian: ProjectRanking['dorian'] = [];
-  for (const entry of [...ranked.values()].sort(compare)) {
+  const sorted = [...ranked.values()].sort(compare);
+  for (const entry of sorted) {
     if (hasLabel(entry.project, OWNER_DORIAN_LABEL)) {
       dorian.push({ id: entry.project.id, name: entry.project.name });
       continue;
     }
     lists[LIST_OF.get(entry.project.statusType) as 'now' | 'next' | 'later'].push(entry);
   }
+  const order = new Map(sorted.map((entry, i) => [entry.project.id, i]));
+  lists.now = blockersFirst(lists.now, order, open);
+  lists.next = blockersFirst(lists.next, order, open);
+  lists.later = blockersFirst(lists.later, order, open);
 
+  // Over the cap, name first the Started projects that can't start (they wait
+  // on an unfinished project), then the lowest-ranked ones that can run.
   const cap = config?.startedCap;
-  const overCap =
-    typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 && lists.now.length > cap
-      ? new Set(lists.now.slice(cap).map((entry) => entry.project.id))
-      : new Set<string>();
+  const overCap = new Set<string>();
+  if (typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 && lists.now.length > cap) {
+    const stuck = lists.now.filter((entry) => waitsOn.has(entry.project.id));
+    const runnable = lists.now.filter((entry) => !waitsOn.has(entry.project.id)).reverse();
+    for (const entry of [...stuck, ...runnable].slice(0, lists.now.length - cap)) {
+      overCap.add(entry.project.id);
+    }
+  }
 
   const rankOf = new Map<string, number>();
   let rank = 0;
@@ -407,7 +449,10 @@ export function rankProjects(
 
   const flags: string[] = [];
   if (overCap.size > 0) {
-    const lowest = nowList.filter((entry) => overCap.has(entry.id)).map((entry) => entry.name);
+    const lowest = [
+      ...nowList.filter((entry) => overCap.has(entry.id) && waitsOn.has(entry.id)),
+      ...nowList.filter((entry) => overCap.has(entry.id) && !waitsOn.has(entry.id)),
+    ].map((entry) => entry.name);
     flags.push(`over cap: ${nowList.length} Started, cap ${cap}; lowest: ${lowest.join(', ')}`);
   }
   return { now: nowList, next, later, dorian, flags, rankOf, waitsOn };

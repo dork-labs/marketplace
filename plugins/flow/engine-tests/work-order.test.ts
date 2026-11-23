@@ -45,8 +45,9 @@ interface ShortProject {
   id: string;
   name: string;
   status: ProjectInfo['statusType'];
-  priority?: number;
+  priority?: number | null;
   target?: string | null;
+  slug?: string;
   labels?: string[];
   blockedBy?: string[];
   created?: string;
@@ -73,6 +74,7 @@ interface CaseFile {
     startedCap?: number;
     patch?: Record<string, Partial<ShortItem>>;
     projectPatch?: Record<string, Partial<ShortProject>>;
+    addProjects?: ShortProject[];
     expected: {
       projects?: ExpectedProjects;
       issues: string[];
@@ -97,11 +99,11 @@ function project(short: ShortProject): ProjectInfo {
   return {
     id: short.id,
     name: short.name,
-    slugId: `slug-${short.id}`,
+    slugId: short.slug ?? `slug-${short.id}`,
     statusType: short.status,
     labels: short.labels ?? [],
     blockedBy: short.blockedBy ?? [],
-    ...(short.priority === undefined ? {} : { priority: short.priority as 1 }),
+    ...(typeof short.priority === 'number' ? { priority: short.priority as 1 } : {}),
     ...(typeof short.target === 'string' ? { targetDate: short.target } : {}),
     ...(short.created === undefined ? {} : { createdAt: short.created }),
   };
@@ -150,9 +152,10 @@ function input(
   patch: Record<string, Partial<ShortItem>> = {},
   orderKeys?: OrderConfig['orderKeys'],
   projectPatch: Record<string, Partial<ShortProject>> = {},
-  startedCap?: number
+  startedCap?: number,
+  addProjects: readonly ShortProject[] = []
 ): WorkOrderInput {
-  const shortProjects = file.base.projects.map((short) => ({
+  const shortProjects = [...file.base.projects, ...addProjects].map((short) => ({
     ...short,
     ...(projectPatch[short.id] ?? {}),
   }));
@@ -188,7 +191,8 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
         testCase.patch,
         testCase.orderKeys,
         testCase.projectPatch,
-        testCase.startedCap
+        testCase.startedCap,
+        testCase.addProjects
       );
       const order = computeWorkOrder(given);
       const { expected } = testCase;
