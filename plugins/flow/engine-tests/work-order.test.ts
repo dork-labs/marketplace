@@ -286,7 +286,10 @@ describe('the base order, in words', () => {
 });
 
 describe('degrades on bad adapter data instead of throwing', () => {
-  const fields = Object.keys(input().items[0]) as (keyof WorkItem)[];
+  // Every field the fixture's first item has, plus the optional ones it lacks.
+  const fields = [
+    ...new Set([...Object.keys(input().items[0]), 'dueDate', 'pin', 'triage', 'createdAt']),
+  ] as (keyof WorkItem)[];
   for (const field of fields) {
     for (const bad of [undefined, null, 42, 'x', {}]) {
       it(`${String(field)} = ${JSON.stringify(bad)}`, () => {
@@ -298,6 +301,23 @@ describe('degrades on bad adapter data instead of throwing', () => {
       });
     }
   }
+
+  it('never prints an object as text: a non-string pin field reads as missing', () => {
+    const order = computeWorkOrder(
+      input({ 'ABC-16': { pin: { reason: {}, actor: 42, at: [] } as unknown as WorkItem['pin'] } })
+    );
+    const text = order.issues[0].why[0].text;
+    expect(text).toBe('pinned: no pin: comment');
+    expect(JSON.stringify(order)).not.toContain('[object Object]');
+  });
+
+  it('a duplicate project id resolves the same way whatever the input order', () => {
+    const given = input();
+    const twin = { ...given.projects[0], name: 'Billing (copy)', priority: 4 as const };
+    const one = computeWorkOrder({ ...given, projects: [...given.projects, twin] });
+    const two = computeWorkOrder({ ...given, projects: [twin, ...given.projects] });
+    expect(two).toEqual(one);
+  });
 
   it('survives a missing project list and junk entries', () => {
     const given = input();

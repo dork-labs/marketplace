@@ -302,8 +302,14 @@ function issueNumber(identifier: string): number {
   return match === null ? NEUTRAL : Number(match[1]);
 }
 
-/** Order identifiers by issue number, then as text. */
-function compareIdentifiers(a: string, b: string): number {
+/**
+ * Order identifiers by issue number, then as text (`ABC-99` before `ABC-100`).
+ *
+ * @param a - One identifier.
+ * @param b - The other.
+ * @returns Negative when `a` goes first.
+ */
+export function compareIdentifiers(a: string, b: string): number {
   return compareKey(issueNumber(a), issueNumber(b)) || (a < b ? -1 : a > b ? 1 : 0);
 }
 
@@ -353,6 +359,9 @@ function bandOf(item: WorkItem): Band | null {
   if (priority === 1) return 'urgent';
   if (has(item, RELEASE_GATE_LABEL)) return 'releaseGate';
   if (priority === 2) {
+    // A Security High with a due date is a confirmed Must by that date,
+    // whatever its state (Security's review of the method, DOR-5063).
+    if (isSecurityMust(item)) return 'must';
     return item.stateCategory === 'unstarted' && item.triage !== true ? 'must' : 'should';
   }
   if (priority === 3) return 'should';
@@ -360,16 +369,27 @@ function bandOf(item: WorkItem): Band | null {
   return null;
 }
 
+/** A Security-labelled High with a real due date: a confirmed Must in any state. */
+function isSecurityMust(item: WorkItem): boolean {
+  return priorityOf(item) === 2 && isSecurity(item) && dateKey(item.dueDate) !== NEUTRAL;
+}
+
+/** A string field, or `undefined` for anything else, so an object never prints as text. */
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 /** The band's reason in plain words. */
 function bandReason(item: WorkItem, band: Band, now: string): OrderReason {
   switch (band) {
     case 'pin': {
-      const pin = item.pin;
-      const by = pin?.actorName ?? pin?.actor;
-      const meta = [by ? `by ${by}` : null, pin?.at ? plainDate(pin.at, now) : null].filter(
+      const pin = item.pin !== null && typeof item.pin === 'object' ? item.pin : undefined;
+      const by = text(pin?.actorName) ?? text(pin?.actor);
+      const at = text(pin?.at);
+      const meta = [by ? `by ${by}` : null, at ? plainDate(at, now) : null].filter(
         (part): part is string => part !== null
       );
-      const reason = pin?.reason ? pin.reason : 'no pin: comment';
+      const reason = text(pin?.reason) ?? 'no pin: comment';
       return {
         key: 'pin',
         text: `pinned: ${reason}${meta.length > 0 ? ` (${meta.join(', ')})` : ''}`,
@@ -380,7 +400,10 @@ function bandReason(item: WorkItem, band: Band, now: string): OrderReason {
     case 'releaseGate':
       return { key: 'band', text: 'release gate' };
     case 'must':
-      return { key: 'band', text: 'Must (High, Todo)' };
+      return {
+        key: 'band',
+        text: isSecurityMust(item) ? 'Must (Security, High, due date)' : 'Must (High, Todo)',
+      };
     case 'should':
       return {
         key: 'band',
@@ -496,11 +519,11 @@ function cleanProjects(projects: readonly ProjectInfo[]): ProjectInfo[] {
   const byId = new Map<string, ProjectInfo>();
   for (const project of Array.isArray(projects) ? projects : []) {
     if (project === null || typeof project !== 'object' || typeof project.id !== 'string') continue;
-    if (!byId.has(project.id)) {
-      byId.set(project.id, {
-        ...project,
-        labels: Array.isArray(project.labels) ? project.labels : [],
-      });
+    const clean = { ...project, labels: Array.isArray(project.labels) ? project.labels : [] };
+    // A repeated id keeps the copy whose JSON sorts first, so input order never decides.
+    const seen = byId.get(project.id);
+    if (seen === undefined || JSON.stringify(clean) < JSON.stringify(seen)) {
+      byId.set(project.id, clean);
     }
   }
   return [...byId.values()];
@@ -539,6 +562,8 @@ function buildOrder(input: WorkOrderInput): Built {
   const candidates = new Map<string, Entry>();
   /** Blocked items that would rank but for their blocker: they pass their place on. */
   const blocked = new Map<string, { item: WorkItem; tuple: number[]; band: Band }>();
+  /** Items held only because their project is not Started: they rank if they inherit a place. */
+  const waiting = new Map<string, { item: WorkItem; band: Band }>();
 
   for (const item of open.values()) {
     const projectId = item.project?.id;
@@ -570,10 +595,19 @@ function buildOrder(input: WorkOrderInput): Built {
         continue;
       }
       if (typeof projectId === 'string' && !ANY_PROJECT_BANDS.has(band)) {
-        const started = project
-          ? project.statusType === 'started'
-          : item.project?.stateCategory === 'started';
-        if (!started) {
+        const status = project ? project.statusType : item.project?.stateCategory;
+        if (status === 'completed' || status === 'canceled') {
+          needsTriage.push({
+            identifier: item.identifier,
+            title: item.title,
+            missing: ['project is closed'],
+          });
+          continue;
+        }
+        if (status !== 'started' && openBlockers(item, open).length === 0) {
+          waiting.set(item.identifier, { item, band });
+        }
+        if (status !== 'started') {
           held.push({
             identifier: item.identifier,
             title: item.title,
@@ -609,7 +643,10 @@ function buildOrder(input: WorkOrderInput): Built {
   }
 
   // Inheritance: each blocked item hands its place to every candidate in its
-  // way, through any depth of blocked items, visiting each item once.
+  // way, through any depth of blocked items, visiting each item once. An item
+  // held only because its project is not Started still ranks when it is in the
+  // way of one that would: it takes that item's place.
+  const promoted = new Set<string>();
   for (const [source, { tuple, band }] of blocked) {
     const seen = new Set<string>([source]);
     const stack = [...openBlockers(blocked.get(source)!.item, open)];
@@ -617,6 +654,20 @@ function buildOrder(input: WorkOrderInput): Built {
       const id = stack.pop() as string;
       if (seen.has(id)) continue;
       seen.add(id);
+      const wait = waiting.get(id);
+      if (wait !== undefined && !candidates.has(id)) {
+        const own = tupleOf(wait.item, wait.band);
+        candidates.set(id, {
+          item: wait.item,
+          band: wait.band,
+          own,
+          effective: tuple,
+          effectiveBand: band,
+          inheritsFrom: source,
+        });
+        promoted.add(id);
+        continue;
+      }
       const candidate = candidates.get(id);
       if (candidate !== undefined) {
         if (compareTuples(tuple, candidate.effective) < 0) {
@@ -629,6 +680,16 @@ function buildOrder(input: WorkOrderInput): Built {
       const through = blocked.get(id);
       if (through !== undefined) stack.push(...openBlockers(through.item, open));
     }
+  }
+
+  // A promoted item ranks now, so it is no longer held; a blocking cycle is
+  // named instead of left as two items each "held by" the other.
+  for (let i = held.length - 1; i >= 0; i -= 1) {
+    if (promoted.has(held[i].identifier)) held.splice(i, 1);
+  }
+  for (const entry of held) {
+    const cycle = blockingCycle(entry.identifier, blocked, open);
+    if (cycle !== null) entry.reason = `blocking cycle: ${cycle.join(' → ')}`;
   }
 
   const entries = [...candidates.values()].sort(
@@ -659,9 +720,9 @@ function buildOrder(input: WorkOrderInput): Built {
   });
 
   const banners: string[] = [];
-  if (entries.some((entry) => entry.band === 'pin')) {
+  if (entries.some((entry) => entry.effectiveBand === 'pin')) {
     const urgent = entries
-      .filter((entry) => entry.band === 'urgent')
+      .filter((entry) => entry.band === 'urgent' && entry.effectiveBand !== 'pin')
       .map((entry) => `${entry.item.identifier}${isSecurity(entry.item) ? ' (security)' : ''}`);
     if (urgent.length > 0) banners.push(`Urgent below pins: ${urgent.join(', ')}`);
   }
@@ -688,6 +749,34 @@ function buildOrder(input: WorkOrderInput): Built {
     rankOf: ranking.rankOf,
     config,
   };
+}
+
+/**
+ * The shortest blocking cycle through an item, as identifiers from it back to
+ * it (`A → B → A` reads "A is held by B, which is held by A"), or `null` when
+ * it is in none. Walks only blocked items, breadth first, in identifier order.
+ */
+function blockingCycle(
+  start: string,
+  blocked: ReadonlyMap<string, { item: WorkItem }>,
+  open: ReadonlyMap<string, WorkItem>
+): string[] | null {
+  const first = blocked.get(start);
+  if (first === undefined) return null;
+  const queue: string[][] = openBlockers(first.item, open).map((id) => [start, id]);
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const path = queue.shift() as string[];
+    const last = path[path.length - 1];
+    if (last === start) return path;
+    if (seen.has(last)) continue;
+    seen.add(last);
+    const next = blocked.get(last);
+    if (next !== undefined) {
+      for (const id of openBlockers(next.item, open)) queue.push([...path, id]);
+    }
+  }
+  return null;
 }
 
 /** The open items that block an item, by identifier, in identifier order. */

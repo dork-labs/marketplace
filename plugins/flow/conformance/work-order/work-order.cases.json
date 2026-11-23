@@ -18,13 +18,24 @@
         "priority": 2,
         "target": "2026-12-15"
       },
-      { "id": "p-mobile", "name": "Mobile", "status": "planned", "priority": 2 },
+      {
+        "id": "p-mobile",
+        "name": "Mobile",
+        "status": "planned",
+        "priority": 2
+      },
       {
         "id": "p-ops",
         "name": "Ops",
         "status": "started",
         "priority": 3,
         "labels": ["owner/dorian"]
+      },
+      {
+        "id": "p-done",
+        "name": "Shipped",
+        "status": "completed",
+        "priority": 2
       }
     ],
     "items": [
@@ -97,7 +108,13 @@
         "created": "2026-11-01T00:00:00Z",
         "blocks": ["ABC-8"]
       },
-      { "id": "ABC-10", "p": 2, "state": "started", "project": "p-billing", "size": 1 },
+      {
+        "id": "ABC-10",
+        "p": 2,
+        "state": "started",
+        "project": "p-billing",
+        "size": 1
+      },
       {
         "id": "ABC-11",
         "p": 2,
@@ -106,7 +123,12 @@
         "project": "p-billing",
         "size": 1
       },
-      { "id": "ABC-12", "p": 3, "project": "p-billing", "created": "2026-11-01T00:00:00Z" },
+      {
+        "id": "ABC-12",
+        "p": 3,
+        "project": "p-billing",
+        "created": "2026-11-01T00:00:00Z"
+      },
       {
         "id": "ABC-13",
         "p": 2,
@@ -114,8 +136,19 @@
         "size": 1,
         "created": "2026-11-01T00:00:00Z"
       },
-      { "id": "ABC-14", "p": 2, "project": "p-billing", "size": 1, "labels": ["owner/dorian"] },
-      { "id": "ABC-15", "p": 3, "project": "p-ops", "size": 1 },
+      {
+        "id": "ABC-14",
+        "p": 2,
+        "project": "p-billing",
+        "size": 1,
+        "labels": ["owner/dorian"]
+      },
+      {
+        "id": "ABC-15",
+        "p": 3,
+        "project": "p-ops",
+        "size": 1
+      },
       {
         "id": "ABC-16",
         "p": 3,
@@ -171,18 +204,33 @@
           "ABC-99",
           "ABC-100"
         ],
-        "held": { "ABC-8": "held by ABC-9", "ABC-13": "waits for project Mobile" },
-        "needsTriage": { "ABC-11": ["triage state"], "ABC-12": ["estimate"] },
+        "held": {
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile"
+        },
+        "needsTriage": {
+          "ABC-11": ["triage state"],
+          "ABC-12": ["estimate"]
+        },
         "inFlight": ["ABC-10"],
         "dorian": ["ABC-14", "ABC-15"],
-        "inherits": { "ABC-9": "ABC-8" },
+        "inherits": {
+          "ABC-9": "ABC-8"
+        },
         "banners": ["Urgent below pins: ABC-3 (security)"]
       }
     },
     {
       "name": "type as a key: a Bug goes before a Feature in the same band and project",
       "orderKeys": ["type", "size"],
-      "patch": { "ABC-4": { "labels": ["Feature"] }, "ABC-7": { "labels": ["Bug"] } },
+      "patch": {
+        "ABC-4": {
+          "labels": ["Feature"]
+        },
+        "ABC-7": {
+          "labels": ["Bug"]
+        }
+      },
       "expected": {
         "issues": [
           "ABC-16",
@@ -202,7 +250,12 @@
     },
     {
       "name": "no pins, no banner",
-      "patch": { "ABC-16": { "labels": [], "pin": null } },
+      "patch": {
+        "ABC-16": {
+          "labels": [],
+          "pin": null
+        }
+      },
       "expected": {
         "issues": [
           "ABC-3",
@@ -222,11 +275,18 @@
       }
     },
     {
-      "name": "inheritance through two levels, and a cycle does not hang",
+      "name": "inheritance through two levels, and a blocking cycle is named, not hidden",
       "patch": {
-        "ABC-9": { "blockedBy": ["ABC-5"] },
-        "ABC-5": { "blocks": ["ABC-9"], "blockedBy": ["ABC-100"] },
-        "ABC-100": { "blockedBy": ["ABC-5"] }
+        "ABC-9": {
+          "blockedBy": ["ABC-5"]
+        },
+        "ABC-5": {
+          "blocks": ["ABC-9"],
+          "blockedBy": ["ABC-100"]
+        },
+        "ABC-100": {
+          "blockedBy": ["ABC-5"]
+        }
       },
       "expected": {
         "issues": [
@@ -243,15 +303,22 @@
         "held": {
           "ABC-8": "held by ABC-9",
           "ABC-9": "held by ABC-5",
-          "ABC-5": "held by ABC-100",
-          "ABC-100": "held by ABC-5",
+          "ABC-5": "blocking cycle: ABC-5 → ABC-100 → ABC-5",
+          "ABC-100": "blocking cycle: ABC-100 → ABC-5 → ABC-100",
           "ABC-13": "waits for project Mobile"
         }
       }
     },
     {
       "name": "a three-deep chain: the item at the bottom takes the top item's place",
-      "patch": { "ABC-9": { "blockedBy": ["ABC-99"] }, "ABC-99": { "blocks": ["ABC-9"] } },
+      "patch": {
+        "ABC-9": {
+          "blockedBy": ["ABC-99"]
+        },
+        "ABC-99": {
+          "blocks": ["ABC-9"]
+        }
+      },
       "expected": {
         "issues": [
           "ABC-16",
@@ -266,7 +333,126 @@
           "ABC-5",
           "ABC-100"
         ],
-        "inherits": { "ABC-99": "ABC-8" }
+        "inherits": {
+          "ABC-99": "ABC-8"
+        }
+      }
+    },
+    {
+      "name": "a blocker waiting for its project takes the place of the ranked item it blocks",
+      "patch": {
+        "ABC-13": {
+          "blocks": ["ABC-1"]
+        },
+        "ABC-1": {
+          "blockedBy": ["ABC-13"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-13",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "held": {
+          "ABC-1": "held by ABC-13",
+          "ABC-8": "held by ABC-9"
+        },
+        "inherits": {
+          "ABC-13": "ABC-1"
+        }
+      }
+    },
+    {
+      "name": "a Security High with a due date is a confirmed Must in any state; without a due date it is not",
+      "patch": {
+        "ABC-7": {
+          "labels": ["security"],
+          "due": "2026-12-20"
+        },
+        "ABC-4": {
+          "labels": ["security"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-7",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ]
+      }
+    },
+    {
+      "name": "two Urgents: the one in the worse-ranked project goes first on size, because Urgent skips the project key",
+      "patch": {
+        "ABC-5": {
+          "p": 1,
+          "size": 8
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-5",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-99",
+          "ABC-100"
+        ]
+      }
+    },
+    {
+      "name": "a blocker that inherits a pin's place above an Urgent still opens with the banner",
+      "patch": {
+        "ABC-16": {
+          "blockedBy": ["ABC-4"]
+        },
+        "ABC-4": {
+          "blocks": ["ABC-16"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-4",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "inherits": {
+          "ABC-4": "ABC-16"
+        },
+        "banners": ["Urgent below pins: ABC-3 (security)"]
       }
     }
   ],
@@ -274,110 +460,154 @@
     {
       "name": "a due date puts a Must first in its band",
       "item": "ABC-1",
-      "set": { "due": "2026-11-25" },
+      "set": {
+        "due": "2026-11-25"
+      },
       "expected": "4"
     },
     {
       "name": "Urgent jumps every band but pins, and skips the project key",
       "item": "ABC-5",
-      "set": { "p": 1 },
+      "set": {
+        "p": 1
+      },
       "expected": "2"
     },
     {
       "name": "a pin goes above Urgent",
       "item": "ABC-4",
-      "set": { "labels": ["pin"] },
+      "set": {
+        "labels": ["pin"]
+      },
       "expected": "1"
     },
     {
       "name": "the release-gate label lifts a Should into band 2",
       "item": "ABC-4",
-      "set": { "labels": ["release-gate"] },
+      "set": {
+        "labels": ["release-gate"]
+      },
       "expected": "3"
     },
     {
       "name": "moving a High from Backlog to Todo confirms the Must",
       "item": "ABC-7",
-      "set": { "state": "unstarted" },
+      "set": {
+        "state": "unstarted"
+      },
       "expected": "5"
     },
     {
       "name": "a project with a better rank moves the item up",
       "item": "ABC-1",
-      "set": { "project": "p-billing" },
+      "set": {
+        "project": "p-billing"
+      },
       "expected": "5"
     },
     {
       "name": "unblocking an open item moves it up inside its band and project",
       "item": "ABC-7",
-      "set": { "blocks": ["ABC-10"] },
+      "set": {
+        "blocks": ["ABC-10"]
+      },
       "expected": "8"
     },
     {
       "name": "a smaller size moves it up",
       "item": "ABC-1",
-      "set": { "size": 1 },
+      "set": {
+        "size": 1
+      },
       "expected": "6"
     },
     {
       "name": "an older filing date moves it up",
       "item": "ABC-100",
-      "set": { "created": "2026-10-01T00:00:00Z" },
+      "set": {
+        "created": "2026-10-01T00:00:00Z"
+      },
       "expected": "10"
     },
     {
       "name": "removing the blocker relation lets the item rank itself",
       "item": "ABC-8",
-      "set": { "blockedBy": [] },
+      "set": {
+        "blockedBy": []
+      },
       "expected": "6"
     },
     {
       "name": "an estimate takes an item out of triage",
       "item": "ABC-12",
-      "set": { "size": 1 },
+      "set": {
+        "size": 1
+      },
       "expected": "9"
     },
     {
       "name": "leaving the triage state ranks it",
       "item": "ABC-11",
-      "set": { "triage": false },
+      "set": {
+        "triage": false
+      },
       "expected": "9"
     },
     {
       "name": "no priority sends it to triage",
       "item": "ABC-2",
-      "set": { "p": 0 },
+      "set": {
+        "p": 0
+      },
       "expected": "unranked: needs triage (priority)"
     },
     {
       "name": "no project sends a Must to triage",
       "item": "ABC-2",
-      "set": { "project": null },
+      "set": {
+        "project": null
+      },
       "expected": "unranked: needs triage (project)"
     },
     {
       "name": "a project that is not Started holds a Must",
       "item": "ABC-2",
-      "set": { "project": "p-mobile" },
+      "set": {
+        "project": "p-mobile"
+      },
       "expected": "unranked: waits for project Mobile"
     },
     {
       "name": "owner/dorian takes it out of the agent order",
       "item": "ABC-2",
-      "set": { "labels": ["owner/dorian"] },
+      "set": {
+        "labels": ["owner/dorian"]
+      },
       "expected": "unranked: on Dorian's list (owner/dorian)"
     },
     {
       "name": "starting it moves it to in flight",
       "item": "ABC-2",
-      "set": { "state": "started" },
+      "set": {
+        "state": "started"
+      },
       "expected": "unranked: in flight (In Progress)"
     },
     {
       "name": "a lower priority drops it a band, where its due date still leads",
       "item": "ABC-6",
-      "set": { "p": 3 },
+      "set": {
+        "p": 3
+      },
       "expected": "7"
+    },
+    {
+      "name": "a closed project sends it to triage, not to wait forever",
+      "item": "ABC-2",
+      "set": {
+        "project": "p-done"
+      },
+      "expected": "unranked: needs triage (project is closed)"
     }
   ]
 }
