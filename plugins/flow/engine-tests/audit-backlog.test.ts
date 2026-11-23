@@ -200,7 +200,7 @@ describe('audit-backlog', () => {
       {
         invariant: 'GRM-12',
         seed: (s) => {
-          (s.items[1].labels as string[]).push('Bug');
+          (s.items[1].labels as string[]).push('Frontend');
         },
       },
       {
@@ -277,7 +277,7 @@ describe('audit-backlog', () => {
       const pass = runOracle({ stdin: JSON.stringify(allowed) });
       expect(pass.status).toBe(0);
 
-      (snapshot.items[1].labels as string[]).push('Bug');
+      (snapshot.items[1].labels as string[]).push('Frontend');
       const mixed = {
         ...snapshot,
         opts: { ...snapshot.opts, unnamespacedLabels: ['cloud-contract'] },
@@ -286,8 +286,53 @@ describe('audit-backlog', () => {
       expect(fail.status).toBe(1);
       const verdict = JSON.parse(fail.stdout) as Verdict;
       expect(verdict.failures.map((f) => f.invariant)).toEqual(['GRM-12']);
-      expect(verdict.failures[0].detail).toContain('Bug');
+      expect(verdict.failures[0].detail).toContain('Frontend');
       expect(verdict.failures[0].detail).not.toContain('cloud-contract');
+    });
+
+    it('passes the bare Bug, Improvement and Feature type labels the work order reads (GRM-12, DOR-5069)', () => {
+      // Purpose: flow create writes one of them beside type/*, and the work
+      // order's type key reads them, so they are not invisible tracker defaults.
+      for (const type of ['Bug', 'Improvement', 'Feature']) {
+        const snapshot = goodSnapshot();
+        (snapshot.items[1].labels as string[]).push(type);
+        const run = runOracle({ stdin: JSON.stringify(snapshot) });
+        expect(run.status, `${type}: ${run.stdout}`).toBe(0);
+      }
+      // Case matters: the tracker's own names, nothing that only looks like them.
+      const snapshot = goodSnapshot();
+      (snapshot.items[1].labels as string[]).push('bug');
+      expect(runOracle({ stdin: JSON.stringify(snapshot) }).status).toBe(1);
+    });
+
+    it.each([
+      ['## Done when', 'Fix the widget.\n\n## Done when\n\n- It renders.'],
+      ['## Validation criteria', 'Fix the widget.\n\n## Validation criteria\n\n- It renders.'],
+    ])('accepts %s as the validation-criteria section (GRM-5, DOR-5069)', (_what, body) => {
+      const snapshot = goodSnapshot();
+      snapshot.items[0].description = `${body}\n\n## On Completion\n\n- Nothing further.`;
+      const run = runOracle({ stdin: JSON.stringify(snapshot) });
+      expect(run.status, run.stdout).toBe(0);
+    });
+
+    it('fails GRM-5 on a done-when heading with nothing under it, as readiness does', () => {
+      const snapshot = goodSnapshot();
+      snapshot.items[0].description =
+        'Fix the widget.\n\n## Done when\n\n## On Completion\n\n- Nothing further.';
+      const run = runOracle({ stdin: JSON.stringify(snapshot) });
+      expect((JSON.parse(run.stdout) as Verdict).failures.map((f) => f.invariant)).toEqual([
+        'GRM-5',
+      ]);
+      // The message names every heading the reader accepts, so a filer knows each one.
+      const detail = (JSON.parse(run.stdout) as Verdict).failures[0].detail;
+      for (const heading of [
+        '## Done when',
+        '## Validation criteria',
+        '## Acceptance criteria',
+        '## Definition of done',
+      ]) {
+        expect(detail).toContain(heading);
+      }
     });
 
     it('never exempts a malformed label passed on stdin (GRM-12)', () => {

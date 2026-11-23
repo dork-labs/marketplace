@@ -21,9 +21,17 @@
  *
  * - Started items (In Progress, In Review) are {@link WorkOrder.inFlight}:
  *   shown, never re-ranked.
- * - Items in triage, or with no priority, no project or no estimate, are
+ * - Items in triage, or with no priority or no project, are
  *   {@link WorkOrder.needsTriage}, with the missing fields named. Urgent items
- *   and release gates rank without a project.
+ *   and release gates rank without a project. An item with no estimate ranks
+ *   (last on the size key) and is not ready: `needs a size` (DOR-5069).
+ *
+ * ## Readiness is an output
+ *
+ * Every ranked item carries {@link OrderedIssue.readiness} from `readiness.ts`
+ * (`needs a size`, `needs a done-when`, `needs a decision (DOR-x)`, `blocked by
+ * DOR-y`). It never moves an item: the drain reads it to make the top item
+ * ready first, and `agent/ready` stays the claim gate.
  * - An item blocked by an open item is {@link WorkOrder.held} ("held by
  *   DOR-x"); its blocker inherits the better of its own place and the blocked
  *   item's, through any depth.
@@ -112,7 +120,7 @@ export interface NeedsTriage {
   identifier: string;
   /** Title. */
   title: string;
-  /** What is missing: `priority`, `project`, `estimate`, `triage state`. */
+  /** What is missing: `priority`, `project`, `triage state`. A missing estimate is a readiness reason instead. */
   missing: string[];
 }
 
@@ -591,7 +599,6 @@ function buildOrder(input: WorkOrderInput): Built {
       if (typeof projectId !== 'string' && !(band !== null && ANY_PROJECT_BANDS.has(band))) {
         missing.push('project');
       }
-      if (sizeOrdinal(item.size) === undefined) missing.push('estimate');
       if (missing.length > 0 || band === null) {
         needsTriage.push({ identifier: item.identifier, title: item.title, missing });
         continue;

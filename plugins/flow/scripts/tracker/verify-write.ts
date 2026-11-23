@@ -11,7 +11,12 @@
  */
 
 import { TrackerError } from '../errors.ts';
-import { AGENT_LABEL_PREFIX, STAGE_LABEL_PREFIX, type WorkStateChange } from '../work-state.ts';
+import {
+  AGENT_LABEL_PREFIX,
+  STAGE_LABEL_PREFIX,
+  TYPE_LABEL_PREFIX,
+  type WorkStateChange,
+} from '../work-state.ts';
 import type { CodeAdapter, ItemWithComments, WorkItem } from './types.ts';
 
 /**
@@ -26,8 +31,9 @@ function family(labels: readonly string[], prefix: string): string[] {
 }
 
 /**
- * Every way an item disagrees with a change: a wrong state category, or an
- * `agent/*` or `stage/*` family that is not exactly what the change set.
+ * Every way an item disagrees with a change: a wrong state category, an
+ * `agent/*`, `stage/*` or `type/*` family that is not exactly what the change
+ * set, or a label the change dropped that is still there.
  *
  * @param item - The item as re-read after the write.
  * @param change - The change that was written.
@@ -42,6 +48,7 @@ export function writeDisagreements(item: WorkItem, change: WorkStateChange): str
   const families: [string, string, string | null | undefined][] = [
     ['agent/*', AGENT_LABEL_PREFIX, change.agentLabel],
     ['stage/*', STAGE_LABEL_PREFIX, change.stageLabel],
+    ['type/*', TYPE_LABEL_PREFIX, change.typeLabel],
   ];
   for (const [name, prefix, wanted] of families) {
     if (wanted === undefined) continue;
@@ -52,6 +59,10 @@ export function writeDisagreements(item: WorkItem, change: WorkStateChange): str
         `its ${name} labels are ${actual.length === 0 ? 'none' : actual.join(', ')}, not ${expected.length === 0 ? 'none' : expected.join(', ')}`
       );
     }
+  }
+  // An optional label is never asked for: the team may not have it.
+  for (const label of change.dropLabels ?? []) {
+    if (labels.includes(label)) problems.push(`it still carries ${label}`);
   }
   return problems;
 }

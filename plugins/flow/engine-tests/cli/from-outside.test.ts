@@ -71,7 +71,13 @@ describe('agent/from-outside', () => {
   });
 
   it('once a person clears it in the tracker, flow may ready the item as usual', async () => {
-    const cleared = { ...captured(), labels: ['type/idea'] };
+    // Re-stated in the team's words: sized, with a done-when (DOR-5069).
+    const cleared = {
+      ...captured(),
+      labels: ['type/idea'],
+      size: 2,
+      description: 'Export the report.\n\n## Done when\n\n- It downloads as CSV.',
+    };
     const result = await runFlow(project, { items: [cleared] }, [
       'triage',
       'FAKE-1',

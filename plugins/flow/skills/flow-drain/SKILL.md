@@ -63,8 +63,9 @@ Schedules remain off until approved.
 3a. **Sweep.** `flow sweep --json`; report each unarmed PR's `detail`.
 3b. **Land first.** `flow next --json`'s `land`: rebase, re-gate, answer review, push;
    skip it while it waits on a person.
-4. **Dispatch.** A scheduled firing with `drain.parallel` at 1 or more runs
-   `flow drain --tick` and stops. Otherwise take `flow next --json`:
+4. **Dispatch.** Take `flow next --json`. A non-null `makeReady` comes first:
+   `<flow-root>/skills/flow-drain/unready-top.md`. Then a scheduled firing with
+   `drain.parallel` at 1 or more runs `flow drain --tick` and stops. Otherwise:
    - Empty `picked`: at `atPrCap` or `atWipCap`, offer no triage; at `atPrCap` name
      `prCap.holding` (or its `error`). `starved`: report "Queue starved:
      0 ready, <M> shapeable: run a triage pass?" and offer `/flow:triage` or stop. Else

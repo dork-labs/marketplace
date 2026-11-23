@@ -69,7 +69,7 @@ import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '3.2.0';
+export const CONTRACT_VERSION = '3.3.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -1717,7 +1717,6 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       }
       const current = new Map<string, string>();
       for (const label of issueLabels) current.set(namespacedLabel(label), label.id);
-      const next = labelsAfterChange([...current.keys()], change);
 
       const teamLabels = new Map<string, string>();
       for (const label of teamLabelNodes) {
@@ -1725,6 +1724,11 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         if (!teamLabels.has(namespacedLabel(label)))
           teamLabels.set(namespacedLabel(label), label.id);
       }
+      // An optional label the team lacks is skipped, never refused.
+      const optional = new Set(change.optionalLabels ?? []);
+      const next = labelsAfterChange([...current.keys()], change).filter(
+        (name) => !optional.has(name) || current.has(name) || teamLabels.has(name)
+      );
       const labelIds = next.map((name) => {
         const id = current.get(name) ?? teamLabels.get(name);
         if (id === undefined) {
@@ -1821,7 +1825,12 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         if (!teamLabels.has(namespacedLabel(label))) teamLabels.set(namespacedLabel(label), label);
       }
       const groups = new Map<string, string>();
-      const labelIds = [...new Set(spec.labels)].map((name) => {
+      // An optional label (the bare type label `type/task` implies) is written
+      // only when the team has it; any other unknown label is refused.
+      const optional = (spec.optionalLabels ?? []).filter(
+        (name) => teamLabels.has(name) && !spec.labels.includes(name)
+      );
+      const labelIds = [...new Set([...spec.labels, ...optional])].map((name) => {
         const label = teamLabels.get(name);
         if (label === undefined) {
           throw new TrackerError(

@@ -38,6 +38,7 @@ interface ShortItem {
   created?: string;
   triage?: boolean;
   pin?: WorkItem['pin'] | null;
+  body?: string;
 }
 
 /** A project as the case file writes it. */
@@ -84,6 +85,7 @@ interface CaseFile {
       personal?: string[];
       inherits?: Record<string, string>;
       banners?: string[];
+      unready?: Record<string, string[]>;
     };
   }[];
   flips: { name: string; item: string; set: Partial<ShortItem>; expected: string }[];
@@ -117,7 +119,7 @@ function item(short: ShortItem, projects: readonly ShortProject[]): WorkItem {
     id: `id-${short.id}`,
     identifier: short.id,
     title: `Title of ${short.id}`,
-    description: '',
+    description: short.body ?? 'Do it.\n\n## Done when\n\n- It works.',
     type: 'task',
     stateCategory: state,
     stateName: state === 'started' ? 'In Progress' : state === 'unstarted' ? 'Todo' : 'Backlog',
@@ -245,6 +247,14 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
         }
       });
 
+      it('says which ranked items are not ready, and why, without moving them', () => {
+        // No `unready` means every ranked item is ready.
+        const unready = order.issues.filter((issue) => !issue.readiness.ready);
+        expect(Object.fromEntries(unready.map((i) => [i.identifier, i.readiness.reasons]))).toEqual(
+          expected.unready ?? {}
+        );
+      });
+
       it('names inherited places', () => {
         for (const [heir, from] of Object.entries(expected.inherits ?? {})) {
           const issue = order.issues.find((i) => i.identifier === heir);
@@ -322,8 +332,19 @@ describe('the base order, in words', () => {
     const unsizedPin = computeWorkOrder(input({ 'ABC-16': { size: undefined } }));
     expect(unsizedPin.issues[0]).toMatchObject({
       identifier: 'ABC-16',
-      readiness: { ready: false, reasons: ['needs a size'] },
+      readiness: { ready: false, reasons: ['needs a size', 'needs a done-when'] },
     });
+  });
+
+  it('ranks an item with no estimate, last on size in its band, and marks it unready', () => {
+    // The lead's call on DOR-5069: a missing estimate is a readiness gap, not a
+    // triage gap, so the item keeps its place in the order.
+    const ids = order.issues.map((i) => i.identifier);
+    expect(ids.indexOf('ABC-12')).toBe(ids.indexOf('ABC-7') + 1);
+    expect(order.needsTriage.some((n) => n.identifier === 'ABC-12')).toBe(false);
+    expect(order.issues.find((i) => i.identifier === 'ABC-12')?.readiness.reasons).toEqual([
+      'needs a size',
+    ]);
   });
 
   it('stamps the time it was given, never the clock', () => {
