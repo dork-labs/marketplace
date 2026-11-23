@@ -421,6 +421,27 @@ describe('projects rank without dates (Nov 24: no steering by dates)', () => {
   });
 });
 
+describe('a very deep chain of projects', () => {
+  it('ranks without running out of stack, the last one in the way first', () => {
+    // Paused projects lift nothing, so only the blockers-first pass walks the chain.
+    const depth = 20_000;
+    const chain: ProjectInfo[] = Array.from({ length: depth }, (_, i) => ({
+      id: `p-${String(i).padStart(5, '0')}`,
+      name: `P${i}`,
+      slugId: `s-${String(i).padStart(5, '0')}`,
+      statusType: 'paused',
+      priority: 3,
+      targetDate: '2026-12-31',
+      labels: [],
+      blockedBy: i + 1 < depth ? [`p-${String(i + 1).padStart(5, '0')}`] : [],
+    }));
+    const order = computeWorkOrder({ items: [], projects: chain, config: CONFIG, now: file.now });
+    expect(order.projects.later).toHaveLength(depth);
+    expect(order.projects.later[0].id).toBe(`p-${String(depth - 1).padStart(5, '0')}`);
+    expect(order.projects.later[depth - 1].id).toBe('p-00000');
+  });
+});
+
 describe('degrades on bad adapter data instead of throwing', () => {
   // Every field the fixture's first item has, plus the optional ones it lacks.
   const fields = [

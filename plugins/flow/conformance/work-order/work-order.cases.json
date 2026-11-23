@@ -1121,6 +1121,67 @@
           "next": ["p-mobile", "p-docs", "p-quince", "p-pear", "p-sage", "p-rye"]
         }
       }
+    },
+    {
+      "name": "over the cap with several stuck projects, the lowest stuck one is named first",
+      "startedCap": 4,
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-10",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-gamma",
+          "name": "Gamma",
+          "status": "started",
+          "priority": 3,
+          "target": "2026-12-20",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-zed",
+          "name": "Zed",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-31"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-alpha", "p-billing", "p-beta", "p-search", "p-gamma"],
+          "flags": ["over cap: 5 Started, cap 4; lowest: Gamma"],
+          "projectFlags": {
+            "p-alpha": ["can't start: waits on Zed"],
+            "p-gamma": ["over cap", "can't start: waits on Zed"]
+          }
+        }
+      }
     }
   ],
   "flips": [

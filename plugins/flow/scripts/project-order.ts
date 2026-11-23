@@ -290,7 +290,9 @@ function reasonsOf(
  * projects it waits on (best-ranked first), then itself. Inheritance already
  * lifts a project in the way to the place of the best project waiting on it;
  * this settles the ties and the shapes (a diamond) where the keys alone would
- * leave it behind. A cycle is placed once, from its best-ranked project.
+ * leave it behind. A cycle is placed once: walking from the best-ranked
+ * project in it, the others come out first and that project last. The walk
+ * keeps its own stack, so a chain of any depth cannot overflow the call stack.
  *
  * @param list - One list, in rank order.
  * @param order - Every project's index in the global rank order.
@@ -305,17 +307,31 @@ function blockersFirst(
   const inList = new Map(list.map((entry) => [entry.project.id, entry]));
   const out: Ranked[] = [];
   const seen = new Set<string>();
-  const place = (id: string): void => {
-    if (seen.has(id)) return;
-    seen.add(id);
-    const blockers = openBlockers(open.get(id) as ProjectInfo, open).sort(
+  const blockersOf = (id: string): string[] =>
+    openBlockers(open.get(id) as ProjectInfo, open).sort(
       (a, b) => (order.get(a) as number) - (order.get(b) as number)
     );
-    for (const blocker of blockers) place(blocker);
-    const entry = inList.get(id);
-    if (entry !== undefined) out.push(entry);
-  };
-  for (const entry of list) place(entry.project.id);
+  for (const start of list) {
+    if (seen.has(start.project.id)) continue;
+    seen.add(start.project.id);
+    // Depth-first, each project after the projects it waits on.
+    const stack = [{ id: start.project.id, blockers: blockersOf(start.project.id), next: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (frame.next < frame.blockers.length) {
+        const blocker = frame.blockers[frame.next];
+        frame.next += 1;
+        if (!seen.has(blocker)) {
+          seen.add(blocker);
+          stack.push({ id: blocker, blockers: blockersOf(blocker), next: 0 });
+        }
+        continue;
+      }
+      stack.pop();
+      const entry = inList.get(frame.id);
+      if (entry !== undefined) out.push(entry);
+    }
+  }
   return out;
 }
 
@@ -405,11 +421,12 @@ export function rankProjects(
   lists.later = blockersFirst(lists.later, order, open);
 
   // Over the cap, name first the Started projects that can't start (they wait
-  // on an unfinished project), then the lowest-ranked ones that can run.
+  // on an unfinished project), then the ones that can run; lowest-ranked first
+  // inside each.
   const cap = config?.startedCap;
   const overCap = new Set<string>();
   if (typeof cap === 'number' && Number.isInteger(cap) && cap >= 0 && lists.now.length > cap) {
-    const stuck = lists.now.filter((entry) => waitsOn.has(entry.project.id));
+    const stuck = lists.now.filter((entry) => waitsOn.has(entry.project.id)).reverse();
     const runnable = lists.now.filter((entry) => !waitsOn.has(entry.project.id)).reverse();
     for (const entry of [...stuck, ...runnable].slice(0, lists.now.length - cap)) {
       overCap.add(entry.project.id);
