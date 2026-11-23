@@ -1,7 +1,7 @@
 /*
  * audit-backlog.ts - the /flow backlog-groom invariant oracle.
  *
- * Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
+ * Asserts the seventeen groom invariants (GRM-1 .. GRM-17) against a snapshot of
  * NORMALIZED WorkItems - the whole live backlog as the adapter's
  * `getBacklogSnapshot()` verb emits it. Where validate-adapter.ts asks "did the
  * adapter normalize each item correctly?", this oracle asks "is the backlog
@@ -53,7 +53,7 @@ const AGENT_READY_LABEL = 'agent/ready';
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`GRM-1` .. `GRM-16`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`GRM-1` .. `GRM-17`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -79,6 +79,8 @@ interface AuditOpts {
   couldExpiryDays?: number;
   /** Labels that keep a Could from expiring (config `groom.neverExpireLabels`). Default: `["security", "needs-security-design"]`. */
   neverExpireLabels?: readonly string[];
+  /** Accounts allowed to add the `pin` label (config `order.pinSetters`). Default: none, which flags no pin on who added it. */
+  pinSetters?: readonly string[];
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -91,7 +93,7 @@ interface HarnessArgs {
 
 const HELP = `audit-backlog - the /flow backlog-groom invariant oracle.
 
-Asserts the sixteen groom invariants (GRM-1 .. GRM-16) against a snapshot of
+Asserts the seventeen groom invariants (GRM-1 .. GRM-17) against a snapshot of
 NORMALIZED WorkItems - the whole live backlog, as the adapter's
 getBacklogSnapshot() verb emits it. Run by the grooming-backlog skill before
 and after a groom; runnable standalone for a read-only health check.
@@ -104,7 +106,8 @@ Usage:
 Fixture: a JSON array of WorkItems, or
   { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."],
     "now": "<ISO>", "couldExpiryDays": 60,
-    "neverExpireLabels": ["security", "needs-security-design"] } }.
+    "neverExpireLabels": ["security", "needs-security-design"],
+    "pinSetters": ["<account id>"] } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -140,6 +143,9 @@ Invariants ("ready" = carries the literal agent/ready label):
           carrying a label in opts.neverExpireLabels (default ["security",
           "needs-security-design"], matched without case, whole or as a
           family's leaf) never expires.
+  GRM-17  every open item with the pin label has a reason (a comment starting
+          "pin:", read into pin.reason), and, when opts.pinSetters is set, was
+          pinned by one of those accounts (pin.actor)
 `;
 
 /** True for a non-array, non-null object. */
@@ -480,6 +486,33 @@ function checkGrm16(items: readonly unknown[], opts: AuditOpts): string[] {
   );
 }
 
+/** The bare label that pins an item to the top of the work order. */
+const PIN_LABEL = 'pin';
+
+/**
+ * GRM-17 - a pin carries its reason, and was set by someone allowed to. The
+ * work order puts a pinned item above Urgent, so a pin nobody explained, or one
+ * set by an account outside `order.pinSetters`, is flagged for a person.
+ */
+function checkGrm17(items: readonly unknown[], opts: AuditOpts): string[] {
+  const setters = opts.pinSetters ?? [];
+  return eachOpenItem(items, (item, label) => {
+    if (!labelsOf(item).includes(PIN_LABEL)) return undefined;
+    const pin = isPlainObject(item.pin) ? item.pin : {};
+    const problems: string[] = [];
+    if (!isNonEmptyString(pin.reason)) {
+      problems.push(
+        `${label} is pinned with no reason: add a comment starting "pin:" that says why`
+      );
+    }
+    if (setters.length > 0 && !(isNonEmptyString(pin.actor) && setters.includes(pin.actor))) {
+      const who = isNonEmptyString(pin.actor) ? pin.actor : 'an unknown account';
+      problems.push(`${label} was pinned by ${who}, who is not in order.pinSetters`);
+    }
+    return problems.length === 0 ? undefined : problems.join('; ');
+  });
+}
+
 /** One groom invariant: its id, a one-line summary, and the check that asserts it. */
 interface Invariant {
   /** The invariant identifier, e.g. `GRM-4`. */
@@ -516,6 +549,7 @@ const INVARIANTS: readonly Invariant[] = [
     check: checkGrm15,
   },
   { id: 'GRM-16', summary: 'no waiting Could untouched past its expiry', check: checkGrm16 },
+  { id: 'GRM-17', summary: 'a pin has a reason and an allowed setter', check: checkGrm17 },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -643,6 +677,11 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
     const keep = isPlainObject(parsed.opts) ? parsed.opts.neverExpireLabels : undefined;
     if (Array.isArray(keep) && keep.every((name) => isNonEmptyString(name) && name.trim() !== '')) {
       opts.neverExpireLabels = keep;
+    }
+    // Account ids, as the config allows; anything else keeps the default (none).
+    const setters = isPlainObject(parsed.opts) ? parsed.opts.pinSetters : undefined;
+    if (Array.isArray(setters) && setters.every((id) => isNonEmptyString(id))) {
+      opts.pinSetters = setters;
     }
     return { items: parsed.items, opts };
   }

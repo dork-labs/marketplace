@@ -6,7 +6,7 @@
  * verdict + exit code, exactly like `validate-adapter.test.ts`.
  *
  * The keystone property here is **every check can fail**: for each of the
- * sixteen GRM invariants there is a seeded mutation of the good fixture that
+ * seventeen GRM invariants there is a seeded mutation of the good fixture that
  * must turn the verdict red, naming exactly that invariant. This ports the
  * "prove the check can fail" self-test from the 2026-08-03 tracker
  * reorganization into committed tests - a groom verification that cannot go
@@ -49,6 +49,7 @@ interface Snapshot {
     unnamespacedLabels?: string[];
     now?: string;
     couldExpiryDays?: number;
+    pinSetters?: string[];
   };
 }
 
@@ -203,6 +204,23 @@ describe('audit-backlog', () => {
         invariant: 'GRM-13',
         seed: (s) => {
           (s.items[0].labels as string[]).push('agent/needs-input');
+        },
+      },
+      {
+        // A pin with no "pin:" comment behind it.
+        invariant: 'GRM-17',
+        seed: (s) => {
+          (s.items[1].labels as string[]).push('pin');
+          s.opts = { ...s.opts, unnamespacedLabels: ['pin'] };
+        },
+      },
+      {
+        // A pin with its reason, but added by an account outside order.pinSetters.
+        invariant: 'GRM-17',
+        seed: (s) => {
+          (s.items[1].labels as string[]).push('pin');
+          s.items[1].pin = { reason: 'ships first', actor: 'someone-else' };
+          s.opts = { ...s.opts, unnamespacedLabels: ['pin'], pinSetters: ['the-lead'] };
         },
       },
       {
@@ -407,6 +425,7 @@ describe('audit-backlog', () => {
       expect(stdout).toContain('GRM-1');
       expect(stdout).toContain('GRM-15');
       expect(stdout).toContain('GRM-16');
+      expect(stdout).toContain('GRM-17');
       expect(stdout).toContain('--fixture');
     });
   });
@@ -588,5 +607,39 @@ describe('Could expiry (GRM-16, DOR-4546)', () => {
     expect(verdict.failures[0].detail).toContain(
       'Closed after 60 days as a Could. Reopen it if it matters.'
     );
+  });
+});
+
+describe('pins (GRM-17, DOR-5063)', () => {
+  const pinned = (pin: Record<string, unknown> | undefined) => ({
+    identifier: 'ABC-1',
+    title: 'Pinned',
+    stateCategory: 'unstarted',
+    labels: ['type/task', 'pin'],
+    ...(pin === undefined ? {} : { pin }),
+  });
+  const grm17 = (item: unknown, opts: Parameters<typeof audit>[1] = {}) =>
+    audit([item], { unnamespacedLabels: ['pin'], ...opts }).failures.find(
+      (f) => f.invariant === 'GRM-17'
+    )?.detail;
+
+  it('passes a pin with a reason, whoever set it, when no setters are configured', () => {
+    expect(grm17(pinned({ reason: 'ships first', actor: 'anyone' }))).toBeUndefined();
+  });
+
+  it('flags a pin with no reason', () => {
+    expect(grm17(pinned(undefined))).toBe(
+      'ABC-1 is pinned with no reason: add a comment starting "pin:" that says why'
+    );
+  });
+
+  it('flags a pin set by someone outside order.pinSetters, and passes one set inside it', () => {
+    const outside = pinned({ reason: 'ships first', actor: 'someone-else' });
+    expect(grm17(outside, { pinSetters: ['the-lead'] })).toBe(
+      'ABC-1 was pinned by someone-else, who is not in order.pinSetters'
+    );
+    expect(
+      grm17(pinned({ reason: 'ships first', actor: 'the-lead' }), { pinSetters: ['the-lead'] })
+    ).toBeUndefined();
   });
 });
