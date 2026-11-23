@@ -141,6 +141,44 @@ describe('flow order', () => {
     expect(result.stdout).not.toContain('ABC-1');
   });
 
+  it("--projects shows flags, the cap and Dorian's projects; dates in words, ISO in JSON", async () => {
+    const projects: ProjectInfo[] = [
+      ...PROJECTS,
+      {
+        id: 'p-search',
+        name: 'Search',
+        slugId: 'search',
+        statusType: 'started',
+        priority: 2,
+        labels: [],
+        blockedBy: [],
+      },
+      {
+        id: 'p-desk',
+        name: 'Desk',
+        slugId: 'desk',
+        statusType: 'started',
+        priority: 1,
+        labels: ['owner/dorian'],
+        blockedBy: [],
+      },
+    ];
+    temp = tempProject({ projects: { startedCap: 1 } });
+    const text = await runFlow(['order', '--projects'], { items: items(), projectInfo: projects });
+    expect(text.stdout).toContain('Projects now (Started: 2, cap 1)');
+    expect(text.stdout).toMatch(/1 +Billing +priority Urgent, target Dec 1,/);
+    expect(text.stdout).toMatch(/2 +Search +.*needs a target date; over cap/);
+    expect(text.stdout).toContain('Project flags: over cap: 2 Started, cap 1; lowest: Search');
+    expect(text.stdout).toContain("Dorian's projects, out of the agent order: Desk");
+    const json = JSON.parse(
+      (await runFlow(['order', '--projects', '--json'], { items: items(), projectInfo: projects }))
+        .stdout
+    );
+    expect(json.projects.now[0]).toMatchObject({ id: 'p-billing', targetDate: '2026-12-01' });
+    expect(json.projects.dorian).toEqual([{ id: 'p-desk', name: 'Desk' }]);
+    expect(json.projects.flags).toEqual(['over cap: 2 Started, cap 1; lowest: Search']);
+  });
+
   it('--rank-of prints the place, or unranked with the reason', async () => {
     const ranked = await runFlow(['order', '--rank-of', 'ABC-1'], {
       items: items(),

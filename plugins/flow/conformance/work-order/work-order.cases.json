@@ -1,6 +1,6 @@
 {
   "contract": "work-order",
-  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target, labels }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys and patch items. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
+  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target (null removes it), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap and patch items (patch) and projects (projectPatch). expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
   "now": "2026-11-23T12:00:00.000Z",
   "base": {
     "projects": [
@@ -36,6 +36,13 @@
         "name": "Shipped",
         "status": "completed",
         "priority": 2
+      },
+      {
+        "id": "p-docs",
+        "name": "Docs",
+        "status": "planned",
+        "priority": 3,
+        "target": "2026-12-20"
       }
     ],
     "items": [
@@ -217,7 +224,22 @@
         "inherits": {
           "ABC-9": "ABC-8"
         },
-        "banners": ["Urgent below pins: ABC-3 (security)"]
+        "banners": ["Urgent below pins: ABC-3 (security)"],
+        "projects": {
+          "now": ["p-billing", "p-search"],
+          "next": ["p-mobile", "p-docs"],
+          "dorian": ["p-ops"],
+          "flags": [],
+          "projectFlags": {
+            "p-billing": [],
+            "p-mobile": ["needs a target date"],
+            "p-docs": []
+          },
+          "why": {
+            "p-search": ["priority High", "target Dec 15", "8 points open"],
+            "p-docs": ["priority Medium", "target Dec 20", "no open issues"]
+          }
+        }
       }
     },
     {
@@ -520,6 +542,237 @@
           "ABC-11": ["triage state"],
           "ABC-12": ["estimate"]
         }
+      }
+    },
+    {
+      "name": "the Started cap: over it, the lowest Started projects are named and nothing else changes",
+      "startedCap": 1,
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-billing", "p-search"],
+          "flags": ["over cap: 2 Started, cap 1; lowest: Search"],
+          "projectFlags": {
+            "p-billing": [],
+            "p-search": ["over cap"]
+          }
+        }
+      }
+    },
+    {
+      "name": "a missing target date sorts the project last among equals and flags it",
+      "projectPatch": {
+        "p-billing": {
+          "target": null
+        },
+        "p-search": {
+          "priority": 1
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "projectFlags": {
+            "p-billing": ["needs a target date"],
+            "p-search": []
+          }
+        }
+      }
+    },
+    {
+      "name": "remaining work breaks a tie, an unsized issue counting as the largest bucket",
+      "projectPatch": {
+        "p-search": {
+          "priority": 1,
+          "target": "2026-12-01"
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "why": {
+            "p-billing": [
+              "priority Urgent",
+              "target Dec 1",
+              "28 points open, 1 unsized counted as 13 each"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "an inherited project rank: the project in the way takes the place of the one waiting on it",
+      "projectPatch": {
+        "p-mobile": {
+          "blockedBy": ["p-docs"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "next": ["p-docs", "p-mobile"],
+          "inherits": {
+            "p-docs": "p-mobile"
+          },
+          "projectFlags": {
+            "p-mobile": ["needs a target date", "can't start: waits on Docs"],
+            "p-docs": []
+          },
+          "why": {
+            "p-docs": [
+              "inherits Mobile's place",
+              "priority Medium",
+              "target Dec 20",
+              "in the way of Mobile",
+              "no open issues"
+            ]
+          }
+        },
+        "held": {
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile"
+        }
+      }
+    },
+    {
+      "name": "a Started project waiting on another: its issues wait, the one in the way rises",
+      "projectPatch": {
+        "p-billing": {
+          "blockedBy": ["p-search"]
+        }
+      },
+      "expected": {
+        "issues": ["ABC-16", "ABC-3", "ABC-17", "ABC-6", "ABC-9", "ABC-1"],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "inherits": {
+            "p-search": "p-billing"
+          },
+          "projectFlags": {
+            "p-billing": ["can't start: waits on Search"]
+          }
+        },
+        "held": {
+          "ABC-2": "waits for project Search",
+          "ABC-4": "waits for project Search",
+          "ABC-5": "waits for project Search",
+          "ABC-7": "waits for project Search",
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile",
+          "ABC-99": "waits for project Search",
+          "ABC-100": "waits for project Search"
+        }
+      }
+    },
+    {
+      "name": "a Planned project's issues wait, except Urgent ones and release gates",
+      "patch": {
+        "ABC-13": {
+          "labels": ["release-gate"]
+        },
+        "ABC-7": {
+          "project": "p-docs"
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-13",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "held": {
+          "ABC-7": "waits for project Docs",
+          "ABC-8": "held by ABC-9"
+        }
+      }
+    },
+    {
+      "name": "an owner/dorian project is out of the agent order, its issues on Dorian's list",
+      "projectPatch": {
+        "p-search": {
+          "labels": ["owner/dorian"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-billing"],
+          "dorian": ["p-search", "p-ops"]
+        },
+        "dorian": ["ABC-1", "ABC-6", "ABC-8", "ABC-9", "ABC-14", "ABC-15"]
       }
     }
   ],

@@ -8,7 +8,9 @@
  *   first (the first 15 in text; all in `--json`), then what is in flight,
  *   held, waiting for triage and kept out by `order.personLabel`.
  * - `-n <N>`: keep the first N issues, in text and JSON.
- * - `--projects`: the project lists only.
+ * - `--projects`: the project lists only: each project's place, its reasons
+ *   (dates in plain words; the JSON keeps `targetDate` as `YYYY-MM-DD`), what
+ *   a person should fix, the Started cap, and Dorian's projects.
  * - `--all`: also the Paused and Backlog projects.
  * - `--why <id>`: one item's reasons, and which field would move it up.
  * - `--rank-of <id>`: the item's place number, or `unranked: <reason>`.
@@ -124,7 +126,7 @@ function projectBlock(heading: string, entries: readonly ProjectEntry[]): string
     trimRow([
       `  ${entry.place}`,
       entry.name,
-      entry.why.map((reason) => reason.text).join(', ') || 'no priority',
+      entry.why.map((reason) => reason.text).join(', '),
       entry.flags.join('; '),
     ])
   );
@@ -140,6 +142,9 @@ export function renderProjects(order: WorkOrder, all: boolean, startedCap: numbe
     ) ?? 'Projects now: none Started.',
     projectBlock('Projects next (Planned)', order.projects.next),
     all ? projectBlock('Projects later (Paused or Backlog)', order.projects.later) : null,
+    order.projects.dorian.length > 0
+      ? `Dorian's projects, out of the agent order: ${order.projects.dorian.map((p) => p.name).join(', ')}`
+      : null,
     order.projects.flags.length > 0 ? `Project flags: ${order.projects.flags.join('; ')}` : null,
   ]
     .filter((block): block is string => block !== null)
@@ -273,6 +278,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     now: order.projects.now,
     next: order.projects.next,
     ...(all ? { later: order.projects.later } : {}),
+    dorian: order.projects.dorian,
     flags: order.projects.flags,
   };
   if (ctx.args.flags.projects === true) {

@@ -46,8 +46,22 @@ interface ShortProject {
   name: string;
   status: ProjectInfo['statusType'];
   priority?: number;
-  target?: string;
+  target?: string | null;
   labels?: string[];
+  blockedBy?: string[];
+  created?: string;
+}
+
+/** What a case expects of the project lists, by project id. */
+interface ExpectedProjects {
+  now?: string[];
+  next?: string[];
+  later?: string[];
+  dorian?: string[];
+  flags?: string[];
+  projectFlags?: Record<string, string[]>;
+  inherits?: Record<string, string>;
+  why?: Record<string, string[]>;
 }
 
 interface CaseFile {
@@ -56,8 +70,11 @@ interface CaseFile {
   cases: {
     name: string;
     orderKeys?: OrderConfig['orderKeys'];
+    startedCap?: number;
     patch?: Record<string, Partial<ShortItem>>;
+    projectPatch?: Record<string, Partial<ShortProject>>;
     expected: {
+      projects?: ExpectedProjects;
       issues: string[];
       held?: Record<string, string>;
       needsTriage?: Record<string, string[]>;
@@ -83,9 +100,10 @@ function project(short: ShortProject): ProjectInfo {
     slugId: `slug-${short.id}`,
     statusType: short.status,
     labels: short.labels ?? [],
-    blockedBy: [],
+    blockedBy: short.blockedBy ?? [],
     ...(short.priority === undefined ? {} : { priority: short.priority as 1 }),
-    ...(short.target === undefined ? {} : { targetDate: short.target }),
+    ...(typeof short.target === 'string' ? { targetDate: short.target } : {}),
+    ...(short.created === undefined ? {} : { createdAt: short.created }),
   };
 }
 
@@ -130,13 +148,23 @@ function item(short: ShortItem, projects: readonly ShortProject[]): WorkItem {
 /** Build the input for the base fixture with patches applied. */
 function input(
   patch: Record<string, Partial<ShortItem>> = {},
-  orderKeys?: OrderConfig['orderKeys']
+  orderKeys?: OrderConfig['orderKeys'],
+  projectPatch: Record<string, Partial<ShortProject>> = {},
+  startedCap?: number
 ): WorkOrderInput {
+  const shortProjects = file.base.projects.map((short) => ({
+    ...short,
+    ...(projectPatch[short.id] ?? {}),
+  }));
   const shortItems = file.base.items.map((short) => ({ ...short, ...(patch[short.id] ?? {}) }));
   return {
-    items: shortItems.map((short) => item(short, file.base.projects)),
-    projects: file.base.projects.map(project),
-    config: orderKeys === undefined ? CONFIG : { ...CONFIG, orderKeys },
+    items: shortItems.map((short) => item(short, shortProjects)),
+    projects: shortProjects.map(project),
+    config: {
+      ...CONFIG,
+      ...(orderKeys === undefined ? {} : { orderKeys }),
+      ...(startedCap === undefined ? {} : { startedCap }),
+    },
     now: file.now,
   };
 }
@@ -156,7 +184,12 @@ function shuffled<T>(list: readonly T[], seed: number): T[] {
 describe('work order cases (conformance/work-order/work-order.cases.json)', () => {
   for (const testCase of file.cases) {
     describe(testCase.name, () => {
-      const given = input(testCase.patch, testCase.orderKeys);
+      const given = input(
+        testCase.patch,
+        testCase.orderKeys,
+        testCase.projectPatch,
+        testCase.startedCap
+      );
       const order = computeWorkOrder(given);
       const { expected } = testCase;
 
@@ -185,6 +218,27 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
           expect(order.personal.map((d) => d.identifier)).toEqual(expected.personal);
         }
         if (expected.banners) expect(order.banners).toEqual(expected.banners);
+      });
+
+      it('ranks and flags the projects', () => {
+        const want = expected.projects;
+        if (want === undefined) return;
+        const ids = (list: { id: string }[]): string[] => list.map((p) => p.id);
+        const all = [...order.projects.now, ...order.projects.next, ...order.projects.later];
+        if (want.now) expect(ids(order.projects.now)).toEqual(want.now);
+        if (want.next) expect(ids(order.projects.next)).toEqual(want.next);
+        if (want.later) expect(ids(order.projects.later)).toEqual(want.later);
+        if (want.dorian) expect(ids(order.projects.dorian)).toEqual(want.dorian);
+        if (want.flags) expect(order.projects.flags).toEqual(want.flags);
+        for (const [id, flags] of Object.entries(want.projectFlags ?? {})) {
+          expect(all.find((p) => p.id === id)?.flags).toEqual(flags);
+        }
+        for (const [heir, from] of Object.entries(want.inherits ?? {})) {
+          expect(all.find((p) => p.id === heir)?.inheritsFrom).toBe(from);
+        }
+        for (const [id, why] of Object.entries(want.why ?? {})) {
+          expect(all.find((p) => p.id === id)?.why.map((r) => r.text)).toEqual(why);
+        }
       });
 
       it('names inherited places', () => {
