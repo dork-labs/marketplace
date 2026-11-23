@@ -239,8 +239,9 @@ still loads, and the work order treats the field as unset.
     is the other project (anchor `end` to `start`). Sorted, no repeats, never
     itself.
   - Each project read asks for at most 10 relations each way and 20 labels.
-    When any of those pages comes back full, some may be missing: warn once
-    per snapshot, naming the projects, rather than guessing.
+    When any of those lists says it has more (`pageInfo { hasNextPage }`),
+    some are missing: warn once per snapshot, naming the projects, rather than
+    guessing.
   - The sum of open estimates is **not** read here: flow adds up the items'
     `size` itself.
 
@@ -256,9 +257,9 @@ still loads, and the work order treats the field as unset.
       pageInfo { hasNextPage endCursor }
       nodes {
         id name slugId priority targetDate createdAt sortOrder status { type }
-        labels(first: 20) { nodes { name parent { name } } }
-        relations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
-        inverseRelations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        labels(first: 20) { pageInfo { hasNextPage } nodes { name parent { name } } }
+        relations(first: 10) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: 10) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
       }
     }
   }

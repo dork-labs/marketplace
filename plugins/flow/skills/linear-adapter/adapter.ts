@@ -193,9 +193,9 @@ export const PROJECT_INFO_QUERY = `query FlowProjectInfo($teamId: String!, $firs
       pageInfo { hasNextPage endCursor }
       nodes {
         id name slugId priority targetDate createdAt sortOrder status { type }
-        labels(first: ${PROJECT_LABEL_PAGE}) { nodes { name parent { name } } }
-        relations(first: ${PROJECT_RELATION_PAGE}) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
-        inverseRelations(first: ${PROJECT_RELATION_PAGE}) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        labels(first: ${PROJECT_LABEL_PAGE}) { pageInfo { hasNextPage } nodes { name parent { name } } }
+        relations(first: ${PROJECT_RELATION_PAGE}) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: ${PROJECT_RELATION_PAGE}) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
       }
     }
   }
@@ -442,9 +442,17 @@ export interface RawProjectInfo {
   createdAt?: string | null;
   sortOrder?: number | null;
   status?: { type?: string | null } | null;
-  labels?: { nodes?: RawLabel[] | null } | null;
-  relations?: { nodes?: RawProjectRelation[] | null } | null;
-  inverseRelations?: { nodes?: RawProjectRelation[] | null } | null;
+  labels?: { nodes?: RawLabel[] | null; pageInfo?: RawNestedPage | null } | null;
+  relations?: { nodes?: RawProjectRelation[] | null; pageInfo?: RawNestedPage | null } | null;
+  inverseRelations?: {
+    nodes?: RawProjectRelation[] | null;
+    pageInfo?: RawNestedPage | null;
+  } | null;
+}
+
+/** Whether a nested list on a project node had more than one read returned. */
+interface RawNestedPage {
+  hasNextPage?: boolean | null;
 }
 
 /** What {@link PIN_QUERY} returns for one issue. */
@@ -1388,12 +1396,12 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   /** Every open project of the team, with the work order's fields. */
   async function projectInfoOf(teamId: string): Promise<ProjectInfo[]> {
     const out: ProjectInfo[] = [];
-    /** Projects whose relations or labels filled their page: some may be missing. */
+    /** Projects whose relations or labels had more than one read returns: some are missing. */
     const truncated: string[] = [];
     const done = (): ProjectInfo[] => {
       if (truncated.length > 0) {
         warn(
-          `Linear gave a full page of relations or labels for ${truncated.sort().join(', ')}; flow read only the first ${PROJECT_RELATION_PAGE} relations each way and ${PROJECT_LABEL_PAGE} labels, so a project dependency or label may be missing`
+          `Linear has more relations or labels for ${truncated.sort().join(', ')} than flow reads (${PROJECT_RELATION_PAGE} relations each way, ${PROJECT_LABEL_PAGE} labels), so a project dependency or label may be missing`
         );
       }
       return out;
@@ -1413,9 +1421,9 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         if (project === null) continue;
         out.push(project);
         if (
-          (node.relations?.nodes?.length ?? 0) >= PROJECT_RELATION_PAGE ||
-          (node.inverseRelations?.nodes?.length ?? 0) >= PROJECT_RELATION_PAGE ||
-          (node.labels?.nodes?.length ?? 0) >= PROJECT_LABEL_PAGE
+          node.relations?.pageInfo?.hasNextPage === true ||
+          node.inverseRelations?.pageInfo?.hasNextPage === true ||
+          node.labels?.pageInfo?.hasNextPage === true
         ) {
           truncated.push(project.name || project.id);
         }
