@@ -65,12 +65,12 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
 - **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
-  untouched for `groom.couldExpiryDays` (default 60) or more days. Propose closing it as `canceled` with the comment the
-  failure quotes. A Could carrying a `groom.neverExpireLabels` label (security
-  work, by default) is never reported. Its evidence is its
-  last-touched date; it needs no ship proof.
+  untouched past `groom.couldExpiryDays`. Propose closing it as `canceled` with the comment the
+  failure quotes; `groom.neverExpireLabels` exempts one. Evidence: its last-touched date.
+- **Pins:** report each GRM-17 failure to the operator, naming who pinned it and when.
+  Never remove a pin or write its `pin:` reason yourself.
 - **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
-  one (the current maintenance project when none fits); never leave one project-less.
+  one (maintenance when none fits); never leave one project-less.
 
 Every closure carries a `flow comment` with evidence. Ambiguity stays open and is flagged.
 

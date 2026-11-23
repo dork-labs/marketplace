@@ -572,16 +572,28 @@ const RANKING_FIELD = /^(?:priority|size|estimate|dueDate)$/;
  */
 function workItemSorts(content: string): string[] {
   const found: string[] = [];
-  const call =
-    /\.(?:sort|toSorted)\(\s*\(\s*(\w+)\s*(?::[^,)]*)?,\s*(\w+)\s*(?::[^)]*)?\)\s*(?::[^=]*)?=>/g;
-  for (let match = call.exec(content); match !== null; match = call.exec(content)) {
-    const body = content.slice(match.index, match.index + 400);
-    const [, a, b] = match;
+  /** Whether a comparator body reads a ranking field off its own parameters `a` and `b`. */
+  const ranks = (body: string, a: string, b: string): boolean => {
     const field = new RegExp(`\\b(?:${a}|${b})\\.(\\w+)\\b(?!\\s*\\.)`, 'g');
     const reads = [...body.matchAll(field)].map((m) => m[1]);
-    if (reads.some((name) => RANKING_FIELD.test(name)) || /\bsizeOrdinal\(/.test(body)) {
-      found.push(body.split('\n')[0].trim());
-    }
+    return reads.some((name) => RANKING_FIELD.test(name)) || /\bsizeOrdinal\(/.test(body);
+  };
+  const inline =
+    /\.(?:sort|toSorted)\(\s*\(\s*(\w+)\s*(?::[^,)]*)?,\s*(\w+)\s*(?::[^)]*)?\)\s*(?::[^=]*)?=>/g;
+  for (let match = inline.exec(content); match !== null; match = inline.exec(content)) {
+    const body = content.slice(match.index, match.index + 400);
+    if (ranks(body, match[1], match[2])) found.push(body.split('\n')[0].trim());
+  }
+  // `.sort(byRank)`: read the comparator where this file defines it.
+  const named = /\.(?:sort|toSorted)\(\s*(\w+)\s*\)/g;
+  for (let match = named.exec(content); match !== null; match = named.exec(content)) {
+    const name = match[1];
+    const definition = new RegExp(
+      `(?:function\\s+${name}\\s*\\(|(?:const|let)\\s+${name}\\s*=\\s*(?:function\\s*)?\\()\\s*(\\w+)[^,]*,\\s*(\\w+)`
+    ).exec(content);
+    if (definition === null) continue;
+    const body = content.slice(definition.index, definition.index + 400);
+    if (ranks(body, definition[1], definition[2])) found.push(match[0]);
   }
   return found;
 }
@@ -630,6 +642,25 @@ describe('one ranking: only the work order files sort work items (DOR-5063)', ()
     expect(planted(elsewhere, 'c.sort((a, b) => a.createdAt.localeCompare(b.createdAt));')).toEqual(
       []
     );
+    // A named comparator defined in the same file is read too.
+    expect(
+      planted(
+        elsewhere,
+        'function byRank(a: WorkItem, b: WorkItem): number {\n  return (a.priority ?? 9) - (b.priority ?? 9);\n}\nitems.sort(byRank);'
+      )
+    ).toHaveLength(1);
+    expect(
+      planted(
+        elsewhere,
+        'const bySize = (x, y) => sizeOrdinal(x.size) - 1;\nlist.toSorted(bySize);'
+      )
+    ).toHaveLength(1);
+    expect(
+      planted(
+        elsewhere,
+        'function byTime(a, b) { return a.createdAt.localeCompare(b.createdAt); }\nc.sort(byTime);'
+      )
+    ).toEqual([]);
     const allowed = path.join(pluginRoot, 'scripts', 'work-order.ts');
     expect(planted(allowed, 'items.sort((a, b) => a.priority - b.priority);')).toEqual([]);
   });
