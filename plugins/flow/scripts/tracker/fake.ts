@@ -41,6 +41,7 @@ import type {
   ItemWithComments,
   TrackerAccount,
   NewItem,
+  ProjectInfo,
   WorkItem,
   WorkItemProject,
   WorkStateChange,
@@ -120,6 +121,8 @@ export interface FakeBacklog {
   closedAt?: Record<string, string>;
   /** Projects the items may reference. */
   projects?: WorkItemProject[];
+  /** The team's open projects with the work order's fields (contract 3.2.0); absent: not read. */
+  projectInfo?: ProjectInfo[];
   /** Comments per item identifier, oldest first. */
   comments?: Record<string, ItemComment[]>;
   /**
@@ -590,6 +593,9 @@ export class FakeTracker {
       projects: structuredClone(
         (this.backlog.projects ?? []).filter((project) => referenced.has(project.id))
       ),
+      ...(this.backlog.projectInfo === undefined
+        ? {}
+        : { projectInfo: structuredClone(this.backlog.projectInfo) }),
     };
   }
 

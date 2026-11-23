@@ -149,6 +149,45 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/next.ts'),
   },
   {
+    name: 'order',
+    summary: 'Show the work order: projects in rank, then issues best first, each with why.',
+    description:
+      'Read-only. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and owner/dorian items are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2.',
+    common: ['project', 'snapshot'],
+    flags: [
+      {
+        name: 'count',
+        kind: 'string',
+        short: 'n',
+        value: 'N',
+        description: 'How many issues to show. Default: 15 in text, all in --json.',
+      },
+      {
+        name: 'projects',
+        kind: 'boolean',
+        description: 'Show only the project order.',
+      },
+      {
+        name: 'all',
+        kind: 'boolean',
+        description: 'Also show Paused and Backlog projects.',
+      },
+      {
+        name: 'why',
+        kind: 'string',
+        value: 'identifier',
+        description: "Explain one item's place, and which field would move it up.",
+      },
+      {
+        name: 'rank-of',
+        kind: 'string',
+        value: 'identifier',
+        description: 'Print the item\'s place number, or "unranked: <reason>".',
+      },
+    ],
+    load: () => import('./cli/order.ts'),
+  },
+  {
     name: 'prs',
     summary: 'Show the open pull requests: the open-PR cap, and the stuck ones.',
     description:

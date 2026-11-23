@@ -537,3 +537,100 @@ describe('the shipped adapter defers to a project override', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// One ranking (DOR-5063): nothing outside the work order's own files sorts
+// work items. A second sort anywhere else is a second answer to "what is
+// next?", which is exactly what the work order exists to prevent.
+// ---------------------------------------------------------------------------
+
+/** The only files allowed to order work items. */
+const RANKING_FILES = new Set(
+  ['work-order.ts', 'project-order.ts', 'dispatch-policy.ts'].map((name) =>
+    path.join(pluginRoot, 'scripts', name)
+  )
+);
+
+/** Where shipped code lives: the engine, the adapter and the DorkOS extension. */
+const SORT_SCAN_ROOTS = [
+  path.join(pluginRoot, 'scripts'),
+  path.join(pluginRoot, 'skills'),
+  path.join(pluginRoot, '.dork', 'extensions'),
+];
+
+/** The work-item fields a ranking reads. A comparator that reads one is ranking work. */
+const RANKING_FIELD = /^(?:priority|size|estimate|dueDate)$/;
+
+/**
+ * Every sort in `content` whose comparator reads a ranking field off one of its
+ * own parameters (`(a, b) => a.priority - b.priority`), or sizes an item with
+ * `sizeOrdinal`. Reads through another object (`a.config.priority`, a
+ * scheduler's own priority) are not work items and do not count.
+ *
+ * @param content - The source text.
+ * @returns One line per offending sort.
+ */
+function workItemSorts(content: string): string[] {
+  const found: string[] = [];
+  const call =
+    /\.(?:sort|toSorted)\(\s*\(\s*(\w+)\s*(?::[^,)]*)?,\s*(\w+)\s*(?::[^)]*)?\)\s*(?::[^=]*)?=>/g;
+  for (let match = call.exec(content); match !== null; match = call.exec(content)) {
+    const body = content.slice(match.index, match.index + 400);
+    const [, a, b] = match;
+    const field = new RegExp(`\\b(?:${a}|${b})\\.(\\w+)\\b(?!\\s*\\.)`, 'g');
+    const reads = [...body.matchAll(field)].map((m) => m[1]);
+    if (reads.some((name) => RANKING_FIELD.test(name)) || /\bsizeOrdinal\(/.test(body)) {
+      found.push(body.split('\n')[0].trim());
+    }
+  }
+  return found;
+}
+
+/** Every shipped source file outside the ranking files that sorts work items. */
+function sortOffenders(files: { file: string; content: string }[]): string[] {
+  return files
+    .filter(({ file }) => !RANKING_FILES.has(file))
+    .flatMap(({ file, content }) =>
+      workItemSorts(content).map((line) => `${path.relative(pluginRoot, file)}: ${line}`)
+    );
+}
+
+describe('one ranking: only the work order files sort work items (DOR-5063)', () => {
+  const sources = SORT_SCAN_ROOTS.flatMap(collectFiles)
+    .filter((file) => /\.(?:ts|tsx)$/.test(file))
+    .filter((file) => !file.split(path.sep).includes('__tests__'))
+    .filter((file) => !file.split(path.sep).includes('node_modules'))
+    .map((file) => ({ file, content: readFileSync(file, 'utf8') }));
+
+  it('no shipped file outside work-order.ts, project-order.ts and dispatch-policy.ts sorts work items', () => {
+    expect(sortOffenders(sources)).toEqual([]);
+  });
+
+  it('the scan reads every root and all three ranking files exist', () => {
+    for (const root of SORT_SCAN_ROOTS) {
+      expect(sources.some(({ file }) => isInside(root, file))).toBe(true);
+    }
+    for (const file of RANKING_FILES) expect(existsSync(file)).toBe(true);
+  });
+
+  it('a planted sort by priority, size or due date fails it; one in a ranking file does not', () => {
+    const planted = (file: string, content: string) => sortOffenders([{ file, content }]);
+    const elsewhere = path.join(pluginRoot, 'scripts', 'cli', 'status.ts');
+    expect(planted(elsewhere, 'items.sort((a, b) => a.priority - b.priority);')).toHaveLength(1);
+    expect(
+      planted(elsewhere, 'list.toSorted((x, y) => (x.dueDate < y.dueDate ? -1 : 1));')
+    ).toHaveLength(1);
+    expect(
+      planted(elsewhere, 'picked.sort((a: WorkItem, b: WorkItem) => sizeOrdinal(a.size) - 1);')
+    ).toHaveLength(1);
+    // Not a work item: a scheduler's own priority, and a comment sorted by time.
+    expect(
+      planted(elsewhere, 'rows.sort((a, b) => a.config.priority - b.config.priority);')
+    ).toEqual([]);
+    expect(planted(elsewhere, 'c.sort((a, b) => a.createdAt.localeCompare(b.createdAt));')).toEqual(
+      []
+    );
+    const allowed = path.join(pluginRoot, 'scripts', 'work-order.ts');
+    expect(planted(allowed, 'items.sort((a, b) => a.priority - b.priority);')).toEqual([]);
+  });
+});
