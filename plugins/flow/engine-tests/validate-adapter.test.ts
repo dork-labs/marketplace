@@ -145,6 +145,41 @@ describe('validate-adapter', () => {
     });
   });
 
+  describe('the work order fields (contract 3.2.0)', () => {
+    /** The good fixture with the first item's fields patched. */
+    function fixtureWith(patch: Record<string, unknown>): string {
+      const items = JSON.parse(readFileSync(GOOD_FIXTURE, 'utf8'));
+      const list = Array.isArray(items) ? items : items.items;
+      Object.assign(list[0], patch);
+      return JSON.stringify(Array.isArray(items) ? list : items);
+    }
+    const ok = (patch: Record<string, unknown>) =>
+      (JSON.parse(runHarness({ stdin: fixtureWith(patch) }).stdout) as Verdict).ok;
+
+    it('accepts a due date, a triage flag and a pin record', () => {
+      expect(
+        ok({
+          dueDate: '2026-11-27',
+          triage: true,
+          pin: {
+            reason: 'ships first',
+            actor: 'u-1',
+            actorName: 'A Person',
+            at: '2026-11-22T00:00:00Z',
+          },
+        })
+      ).toBe(true);
+      expect(ok({ pin: {} })).toBe(true);
+    });
+
+    it('rejects a malformed due date, a non-boolean triage and a pin with a blank field', () => {
+      expect(ok({ dueDate: 'Nov 27' })).toBe(false);
+      expect(ok({ triage: 'yes' })).toBe(false);
+      expect(ok({ pin: { reason: '' } })).toBe(false);
+      expect(ok({ pin: 'ships first' })).toBe(false);
+    });
+  });
+
   describe('INV-6: every comment says whether its author is a member (DOR-3669)', () => {
     /** The good fixture with its `comments` replaced (or removed, for `undefined`). */
     function withComments(comments: unknown): string {

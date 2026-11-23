@@ -124,7 +124,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'next',
     summary: 'Show the next item to work on, ranked by the dispatch policy.',
     description:
-      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. With dispatch.ladder set to v2, picks come from the work order (flow order): each pick carries its place, band and why, and ranked items that cannot start now are listed in "held" with the reason (PR cap, WIP cap, not ready). Exits 7 while flow is paused, unless --manual.',
     common: ['project', 'snapshot', 'manual'],
     flags: [
       {

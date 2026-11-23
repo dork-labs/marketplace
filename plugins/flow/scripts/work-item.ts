@@ -257,7 +257,7 @@ export interface ProjectInfo {
   id: string;
   /** Human-readable project name. */
   name: string;
-  /** The project's short, stable key (Linear's `slugId`); the last tie-break. */
+  /** The project's short, stable key in the tracker; the last tie-break. */
   slugId: string;
   /** The project's status. */
   statusType: ProjectStatus;

@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.1.0. `adapter.ts` beside this file is the code `flow` runs.
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.2.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 
@@ -75,7 +75,8 @@ WorkItem {
   stateCategory,   // backlog|unstarted|started|completed|canceled
   stateName,       // display only
   priority, size,  // native fields, never labels; size never t-shirt converted
-  createdAt, updatedAt, // ISO-8601; updatedAt feeds the Could expiry (GRM-16)
+  createdAt, updatedAt, // ISO-8601; updatedAt feeds GRM-16
+  dueDate, triage, pin,
   project, parent,
   relations { blocks[], blockedBy[], children[], relatedTo[], duplicateOf? },
   labels[],        // re-namespaced group/leaf

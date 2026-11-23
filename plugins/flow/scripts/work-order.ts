@@ -236,7 +236,7 @@ const OWNER_DORIAN_LABEL = 'owner/dorian';
 const NEUTRAL = Number.POSITIVE_INFINITY;
 
 /**
- * Type key: broken or confusing before new. Linear's `Bug`, `Improvement` and
+ * Type key: broken or confusing before new. The bare `Bug`, `Improvement` and
  * `Feature` labels, and flow's `type/*` family mapped onto them. A `Map` for
  * the reason `dispatch-policy.ts` gives on its own lookup tables.
  */

@@ -23,6 +23,12 @@
  * - `--for-project` narrows the candidates (project id, else case-insensitive
  *   name) before dispatch; the WIP load still counts every project.
  * - `-n` (default 1) keeps the first N picks, already capped by WIP.
+ * - `dispatch.ladder: "v2"` (DOR-5063): the picks come from the work order
+ *   (`computeWorkOrder`, what `flow order` prints) instead of the v1 ladder.
+ *   The open-PR cap, the WIP cap, readiness, the `agent/ready` claim gate and
+ *   ownership then hold *starting*, not ranking: an item they stop stays in the
+ *   order and is listed in `held` with why, and each pick carries its place,
+ *   band and reasons.
  * - Paused: exit 7 unless `--manual`. Nothing eligible is still exit 0, with
  *   `atWipCap` saying the WIP cap is what blocks, else `starved` saying whether
  *   a triage pass would help.

@@ -144,7 +144,7 @@ arguments**, it offers **Capture** new · **Work on a project** · **Continue th
 (one tick of `auto`: claim the next item, carry it to its gate, stop) · **Triage**.
 
 Beside the stages sits the whole-backlog sweep: **`/flow:groom`** audits every open
-item against the sixteen groom invariants, closes shipped, duplicate and junk work
+item against the seventeen groom invariants, closes shipped, duplicate and junk work
 with cited evidence behind a human gate, and proves the result with a before/after
 run of the dispatch oracle (`/flow:groom check` is the read-only half). Run it when
 the queue starves or before turning on autonomy.

@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the sixteen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the seventeen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog
@@ -27,7 +27,7 @@ one team's identifiers: stop and fix the read first.
 go to the operator at the phase-5 gate. Labels, priorities, estimates, states,
 relations and description sections proceed under the operator's approval of the groom.
 
-**The sixteen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
+**The seventeen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
 invariant fails); `node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help`
 lists them.
 

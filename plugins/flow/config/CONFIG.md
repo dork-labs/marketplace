@@ -553,6 +553,37 @@ lets every Could expire.
 "groom": { "couldExpiryDays": 45, "neverExpireLabels": ["security", "legal"] }
 ```
 
+## The work order: `dispatch.ladder`, `dispatch.orderKeys`, `projects`, `order`
+
+`flow order` prints the work order: projects in rank, then issues best first,
+each with the reasons for its place. It reads only tracker fields: priority,
+state, labels, estimate, due date, blocking relations, and each project's
+status, priority, target date and relations.
+
+```jsonc
+"dispatch": { "ladder": "v2", "orderKeys": ["dueDate", "projectRank", "unblocks", "size", "age"] },
+"projects": { "startedCap": 6 },
+"order": { "pinSetters": ["<tracker account id>"] }
+```
+
+- `dispatch.ladder` is which list `flow next` picks from. `v1`, the default,
+  is the older ranking, and only items labelled `agent/ready` count. `v2` picks
+  from the work order. The open-PR cap, the WIP cap, readiness and the
+  `agent/ready` label then only decide what may start now. An item they stop
+  stays in the order, listed under `held` with the reason.
+- `dispatch.orderKeys` orders items inside one band (pinned, Urgent, release
+  gate, Must, Should, Could). The keys are `dueDate` (earliest first),
+  `projectRank`, `unblocks` (more first), `type` (Bug, then Improvement, then
+  Feature), `size` (smaller first) and `age` (older first). The issue number
+  breaks the last tie. Each key may appear once. Urgent items skip
+  `projectRank`.
+- `projects.startedCap` is how many projects may be Started at once; the default
+  is `6`. flow never changes a project's status. Over the cap, it names the
+  lowest-ranked Started projects so a person can pause or finish one.
+- `order.pinSetters` lists the tracker accounts allowed to add the `pin` label.
+  The audit (GRM-17) flags a pin added by anyone else, and a pin with no comment
+  starting `pin:` that says why. The default `[]` checks only the reason.
+
 ## `fleet`: the account setup reminder
 
 When this computer has two or more accounts for one tool that flow could spend
