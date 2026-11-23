@@ -285,7 +285,7 @@
           "blockedBy": ["ABC-100"]
         },
         "ABC-100": {
-          "blockedBy": ["ABC-5"]
+          "blockedBy": ["ABC-5", "ABC-10"]
         }
       },
       "expected": {
@@ -304,7 +304,7 @@
           "ABC-8": "held by ABC-9",
           "ABC-9": "held by ABC-5",
           "ABC-5": "blocking cycle: ABC-5 → ABC-100 → ABC-5",
-          "ABC-100": "blocking cycle: ABC-100 → ABC-5 → ABC-100",
+          "ABC-100": "blocking cycle: ABC-100 → ABC-5 → ABC-100; held by ABC-10",
           "ABC-13": "waits for project Mobile"
         }
       }
@@ -453,6 +453,73 @@
           "ABC-4": "ABC-16"
         },
         "banners": ["Urgent below pins: ABC-3 (security)"]
+      }
+    },
+    {
+      "name": "a two-level chain through a project that is not Started: the ranked item at the end takes the place",
+      "patch": {
+        "ABC-1": {
+          "blockedBy": ["ABC-13"]
+        },
+        "ABC-13": {
+          "blocks": ["ABC-1"],
+          "blockedBy": ["ABC-5"]
+        },
+        "ABC-5": {
+          "blocks": ["ABC-13"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-5",
+          "ABC-4",
+          "ABC-7",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "held": {
+          "ABC-1": "held by ABC-13",
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile"
+        },
+        "inherits": {
+          "ABC-5": "ABC-1"
+        }
+      }
+    },
+    {
+      "name": "a Security High with a due date still waits for triage while it is in Triage",
+      "patch": {
+        "ABC-11": {
+          "labels": ["security"],
+          "due": "2026-12-01"
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "needsTriage": {
+          "ABC-11": ["triage state"],
+          "ABC-12": ["estimate"]
+        }
       }
     }
   ],

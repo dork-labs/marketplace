@@ -346,3 +346,11 @@ describe('readiness names blockers in issue-number order', () => {
     ]);
   });
 });
+
+describe('module layout', () => {
+  it('readiness.ts reads identifiers from a leaf module, never a value from work-order.ts', () => {
+    const source = readFileSync(path.join(here, '..', 'scripts', 'readiness.ts'), 'utf8');
+    expect(source).not.toMatch(/^import \{[^}]*\} from '\.\/work-order\.ts';/m);
+    expect(source).toContain("from './identifiers.ts'");
+  });
+});

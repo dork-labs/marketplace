@@ -11,7 +11,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - New: `flow order` shows what comes next, worked out only from your tracker. First your projects in rank, then your issues best first, each with a short reason for its place: "due Nov 27", "project #2 Billing", "unblocks ABC-12", "size 2".
 - Issues go in bands: pinned, Urgent, release gate, confirmed Musts (High, in Todo), Shoulds, Coulds. Inside a band, an earlier due date goes first, then the project's rank, then work that unblocks other work, then smaller and older items.
 - A blocked item doesn't rank. The item blocking it moves up to its place instead, and says so, even when that blocker sits in a project that hasn't started. Items that block each other in a loop are listed with the loop named.
-- A High item labelled `security` with a due date counts as a confirmed Must, whatever its state.
+- A High item labelled `security` with a due date counts as a confirmed Must in any state but Triage.
 - An item whose project is finished or canceled is listed under "needs triage" instead of waiting forever.
 - Nothing is hidden. Work in progress, items waiting on a blocker or on a project that hasn't started, items that need triage, and items labelled `owner/dorian` are each listed apart, with the reason.
 - `flow order --why <item>` explains one item's place and which field would move it up. `--rank-of <item>` prints just its place.

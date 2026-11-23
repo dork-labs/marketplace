@@ -44,11 +44,14 @@
 
 import type { FlowConfig, OrderKeySchema, SizeOrderSchema } from './config-schema.ts';
 import { sizeOrdinal } from './dispatch-policy.ts';
+import { compareIdentifiers, issueNumber } from './identifiers.ts';
 import { rankProjects } from './project-order.ts';
 import { readinessOf } from './readiness.ts';
 import { labelsOf } from './work-item.ts';
 import type { ProjectInfo, WorkItem } from './work-item.ts';
 import type { z } from 'zod';
+
+export { compareIdentifiers, issueNumber } from './identifiers.ts';
 
 /** One key that orders items inside a band (mirrors `OrderKeySchema`). */
 export type OrderKey = z.infer<typeof OrderKeySchema>;
@@ -296,23 +299,6 @@ function compareTuples(a: readonly number[], b: readonly number[]): number {
   return 0;
 }
 
-/** The number in an identifier (`DOR-123` gives 123), or neutral. */
-function issueNumber(identifier: string): number {
-  const match = /-(\d+)$/.exec(identifier);
-  return match === null ? NEUTRAL : Number(match[1]);
-}
-
-/**
- * Order identifiers by issue number, then as text (`ABC-99` before `ABC-100`).
- *
- * @param a - One identifier.
- * @param b - The other.
- * @returns Negative when `a` goes first.
- */
-export function compareIdentifiers(a: string, b: string): number {
-  return compareKey(issueNumber(a), issueNumber(b)) || (a < b ? -1 : a > b ? 1 : 0);
-}
-
 /** A `YYYY-MM-DD` or ISO-8601 string as milliseconds, or neutral. */
 function dateKey(value: unknown): number {
   if (typeof value !== 'string') return NEUTRAL;
@@ -360,7 +346,7 @@ function bandOf(item: WorkItem): Band | null {
   if (has(item, RELEASE_GATE_LABEL)) return 'releaseGate';
   if (priority === 2) {
     // A Security High with a due date is a confirmed Must by that date,
-    // whatever its state (Security's review of the method, DOR-5063).
+    // in any state but Triage, which still waits for triage (Security's review, DOR-5063).
     if (isSecurityMust(item)) return 'must';
     return item.stateCategory === 'unstarted' && item.triage !== true ? 'must' : 'should';
   }
@@ -564,6 +550,11 @@ function buildOrder(input: WorkOrderInput): Built {
   const blocked = new Map<string, { item: WorkItem; tuple: number[]; band: Band }>();
   /** Items held only because their project is not Started: they rank if they inherit a place. */
   const waiting = new Map<string, { item: WorkItem; band: Band }>();
+  /**
+   * Items held for their project that are blocked too: they lend no place of
+   * their own, but inheritance walks through them to the items in their way.
+   */
+  const passThrough = new Map<string, WorkItem>();
 
   for (const item of open.values()) {
     const projectId = item.project?.id;
@@ -604,8 +595,9 @@ function buildOrder(input: WorkOrderInput): Built {
           });
           continue;
         }
-        if (status !== 'started' && openBlockers(item, open).length === 0) {
-          waiting.set(item.identifier, { item, band });
+        if (status !== 'started') {
+          if (openBlockers(item, open).length === 0) waiting.set(item.identifier, { item, band });
+          else passThrough.set(item.identifier, item);
         }
         if (status !== 'started') {
           held.push({
@@ -677,8 +669,8 @@ function buildOrder(input: WorkOrderInput): Built {
         }
         continue;
       }
-      const through = blocked.get(id);
-      if (through !== undefined) stack.push(...openBlockers(through.item, open));
+      const through = blocked.get(id)?.item ?? passThrough.get(id);
+      if (through !== undefined) stack.push(...openBlockers(through, open));
     }
   }
 
@@ -689,7 +681,11 @@ function buildOrder(input: WorkOrderInput): Built {
   }
   for (const entry of held) {
     const cycle = blockingCycle(entry.identifier, blocked, open);
-    if (cycle !== null) entry.reason = `blocking cycle: ${cycle.join(' → ')}`;
+    if (cycle === null) continue;
+    const others = openBlockers(blocked.get(entry.identifier)!.item, open).filter(
+      (id) => !cycle.includes(id)
+    );
+    entry.reason = `blocking cycle: ${cycle.join(' → ')}${others.length > 0 ? `; held by ${others.join(', ')}` : ''}`;
   }
 
   const entries = [...candidates.values()].sort(

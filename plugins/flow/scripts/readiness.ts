@@ -12,7 +12,8 @@
  */
 
 import { sizeOrdinal } from './dispatch-policy.ts';
-import { compareIdentifiers, type Readiness } from './work-order.ts';
+import { compareIdentifiers } from './identifiers.ts';
+import type { Readiness } from './work-order.ts';
 import type { WorkItem } from './work-item.ts';
 
 /** What {@link readinessOf} may look at besides the item. */

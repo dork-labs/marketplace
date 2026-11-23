@@ -1320,7 +1320,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         projectInfo = await projectInfoOf(teamId);
       } catch (error) {
         warn(
-          `Linear project fields could not be read (${(error as Error).message}); projects rank by status alone`
+          `Linear project fields could not be read (${error instanceof Error ? error.message : String(error)}); projects rank by status alone`
         );
       }
       for (const item of items) {
@@ -1330,7 +1330,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
           item.pin = pinInfoOf(data.issue);
         } catch (error) {
           warn(
-            `who pinned ${item.identifier} could not be read (${(error as Error).message}); its pin shows no reason`
+            `who pinned ${item.identifier} could not be read (${error instanceof Error ? error.message : String(error)}); its pin shows no reason`
           );
         }
       }

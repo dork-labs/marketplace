@@ -584,12 +584,14 @@ function workItemSorts(content: string): string[] {
     const body = content.slice(match.index, match.index + 400);
     if (ranks(body, match[1], match[2])) found.push(body.split('\n')[0].trim());
   }
-  // `.sort(byRank)`: read the comparator where this file defines it.
+  // `.sort(byRank)`: read the comparator where this file defines it. A
+  // comparator imported from another file is not followed: the guard reads
+  // one file at a time, so a ranking hidden behind an import needs review.
   const named = /\.(?:sort|toSorted)\(\s*(\w+)\s*\)/g;
   for (let match = named.exec(content); match !== null; match = named.exec(content)) {
     const name = match[1];
     const definition = new RegExp(
-      `(?:function\\s+${name}\\s*\\(|(?:const|let)\\s+${name}\\s*=\\s*(?:function\\s*)?\\()\\s*(\\w+)[^,]*,\\s*(\\w+)`
+      `(?:function\\s+${name}\\s*(?:<[^>(]*>)?\\s*\\(|(?:const|let)\\s+${name}\\s*=\\s*(?:function\\s*)?(?:<[^>(]*>)?\\s*\\()\\s*(\\w+)[^,]*,\\s*(\\w+)`
     ).exec(content);
     if (definition === null) continue;
     const body = content.slice(definition.index, definition.index + 400);
@@ -647,6 +649,13 @@ describe('one ranking: only the work order files sort work items (DOR-5063)', ()
       planted(
         elsewhere,
         'function byRank(a: WorkItem, b: WorkItem): number {\n  return (a.priority ?? 9) - (b.priority ?? 9);\n}\nitems.sort(byRank);'
+      )
+    ).toHaveLength(1);
+    // A generic comparator too.
+    expect(
+      planted(
+        elsewhere,
+        'function byDue<T extends WorkItem>(a: T, b: T): number {\n  return (a.dueDate ?? "") < (b.dueDate ?? "") ? -1 : 1;\n}\nitems.sort(byDue);'
       )
     ).toHaveLength(1);
     expect(
