@@ -12,7 +12,7 @@
  */
 
 import { sizeOrdinal } from './dispatch-policy.ts';
-import type { Readiness } from './work-order.ts';
+import { compareIdentifiers, type Readiness } from './work-order.ts';
 import type { WorkItem } from './work-item.ts';
 
 /** What {@link readinessOf} may look at besides the item. */
@@ -34,7 +34,7 @@ export function readinessOf(item: WorkItem, ctx: ReadinessContext): Readiness {
   const reasons: string[] = [];
   if (sizeOrdinal(item?.size) === undefined) reasons.push('needs a size');
   const blockedBy = item?.relations?.blockedBy;
-  for (const id of Array.isArray(blockedBy) ? [...blockedBy].sort() : []) {
+  for (const id of Array.isArray(blockedBy) ? [...blockedBy].sort(compareIdentifiers) : []) {
     if (ctx.open.has(id)) reasons.push(`blocked by ${id}`);
   }
   return { ready: reasons.length === 0, reasons };

@@ -1752,6 +1752,50 @@ describe('the work order reads (contract 3.2.0)', () => {
     expect(snapshot.items.filter((item) => item.pin !== undefined)).toHaveLength(1);
   });
 
+  it('a failed project or pin read leaves those fields out with a warning, never failing the snapshot', async () => {
+    const pinnedCore = structuredClone(CORE_PAGE_1) as typeof CORE_PAGE_1;
+    (pinnedCore.team.issues.nodes[0].labels as { nodes: unknown[] }).nodes.push({
+      id: 'lbl-pin',
+      name: 'pin',
+      parent: null,
+    });
+    for (const broken of [
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo' ? failedEnvelope('Query too complex') : null,
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo'
+          ? okEnvelope({ team: { projects: null } })
+          : call.operation === 'FlowPin'
+            ? okEnvelope({
+                errors: [{ message: 'RATELIMITED', extensions: { code: 'RATELIMITED' } }],
+              })
+            : null,
+    ]) {
+      const { adapter, warnings } = build(
+        (call) =>
+          broken(call) ??
+          (call.operation === 'FlowSnapshotCore' && call.variables.after === null
+            ? okEnvelope(pinnedCore)
+            : snapshotRoute(call))
+      );
+      const snapshot = await adapter.getBacklogSnapshot();
+      expect(snapshot.items.length).toBeGreaterThan(0);
+      expect(snapshot.projectInfo).toBeUndefined();
+      expect(warnings.join('\n')).toMatch(/project fields could not be read/);
+    }
+    const { adapter, warnings } = build((call) =>
+      call.operation === 'FlowPin'
+        ? failedEnvelope('Entity not found')
+        : call.operation === 'FlowSnapshotCore' && call.variables.after === null
+          ? okEnvelope(pinnedCore)
+          : snapshotRoute(call)
+    );
+    const snapshot = await adapter.getBacklogSnapshot();
+    expect(snapshot.projectInfo).toHaveLength(2);
+    expect(snapshot.items.find((i) => i.identifier === 'DOR-101')?.pin).toBeUndefined();
+    expect(warnings.join('\n')).toMatch(/who pinned DOR-101 could not be read/);
+  });
+
   it('reads a due date as given, and leaves a malformed one out', () => {
     const due = linear.normalizeIssue(
       issueNode('DOR-7', { dueDate: '2026-11-27' }) as never,

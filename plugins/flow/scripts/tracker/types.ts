@@ -127,8 +127,9 @@ export interface BacklogSnapshot {
   /**
    * Every open project of the team with the fields the work order's project
    * layer reads: status, priority, target date, labels and the projects each
-   * waits on (contract 3.2.0). Absent when the adapter does not read them; the
-   * work order then ranks no project and holds every issue that needs one.
+   * waits on (contract 3.2.0). Absent when the adapter does not read them (or
+   * the read failed); `flow order` then ranks the referenced {@link projects}
+   * by status alone.
    */
   projectInfo?: ProjectInfo[];
 }

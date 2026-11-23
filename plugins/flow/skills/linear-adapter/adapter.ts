@@ -1311,14 +1311,28 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     });
 
     // The work order's reads: every open project's fields, and who pinned each
-    // pinned item. A panel read (a bounded maxPages) is display-only and skips them.
+    // pinned item. A panel read (a bounded maxPages) is display-only and skips
+    // them. They are extras: a failure leaves the field out with a warning and
+    // never fails the snapshot, which v1 dispatch, the audit and the drain need.
     let projectInfo: ProjectInfo[] | undefined;
     if (maxPages === MAX_PAGES) {
-      projectInfo = await projectInfoOf(teamId);
+      try {
+        projectInfo = await projectInfoOf(teamId);
+      } catch (error) {
+        warn(
+          `Linear project fields could not be read (${(error as Error).message}); projects rank by status alone`
+        );
+      }
       for (const item of items) {
         if (!item.labels.includes(PIN_LABEL)) continue;
-        const data = await graphql<{ issue?: RawPinRead | null }>(PIN_QUERY, { id: item.id });
-        item.pin = pinInfoOf(data.issue);
+        try {
+          const data = await graphql<{ issue?: RawPinRead | null }>(PIN_QUERY, { id: item.id });
+          item.pin = pinInfoOf(data.issue);
+        } catch (error) {
+          warn(
+            `who pinned ${item.identifier} could not be read (${(error as Error).message}); its pin shows no reason`
+          );
+        }
       }
     }
 

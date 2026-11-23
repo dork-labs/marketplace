@@ -330,3 +330,19 @@ describe('degrades on bad adapter data instead of throwing', () => {
     ).not.toThrow();
   });
 });
+
+describe('readiness names blockers in issue-number order', () => {
+  it('ABC-99 before ABC-100', async () => {
+    const { readinessOf } = await import('../scripts/readiness.ts');
+    const given = input();
+    const open = new Map(given.items.map((it) => [it.identifier, it]));
+    const item = {
+      ...given.items[0],
+      relations: { ...given.items[0].relations, blockedBy: ['ABC-100', 'ABC-99'] },
+    };
+    expect(readinessOf(item, { open }).reasons).toEqual([
+      'blocked by ABC-99',
+      'blocked by ABC-100',
+    ]);
+  });
+});
