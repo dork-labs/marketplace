@@ -580,6 +580,14 @@ status, priority, target date and relations.
 - `projects.startedCap` is how many projects may be Started at once; the default
   is `6`. flow never changes a project's status. Over the cap, it names the
   lowest-ranked Started projects so a person can pause or finish one.
+  Projects labelled `owner/dorian` don't count toward the cap.
+- Projects rank by, first to last: the `pin` label, priority (none last,
+  flagged `needs a priority`), target date (none last, flagged
+  `needs a target date`), what waits on them, the estimates left on their open
+  issues (an unsized issue counts as the largest size), then age. A project
+  that waits on an unfinished project is flagged `can't start: waits on <P>`,
+  its issues wait too, and the project in its way moves up to its place.
+  `flow order --projects` prints only this list.
 - `order.pinSetters` lists the tracker accounts allowed to add the `pin` label.
   The audit (GRM-17) flags a pin added by anyone else, and a pin with no comment
   starting `pin:` that says why. The default `[]` checks only the reason.

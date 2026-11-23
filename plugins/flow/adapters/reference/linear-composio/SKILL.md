@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.1.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `3.2.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -144,9 +144,10 @@ Progress", "Shipped") and varies per team, so the engine branches only on the
 categories. It is the un-triaged holding state. Normalize it to `backlog`
 (non-terminal, so it lists and recovers like any open item). Never emit a sixth
 category (INV-1): the model has exactly five values. A Triage-state item is kept
-out of dispatch by the **absent `agent/ready` label**, not by its category. The
-good fixture's `DOR-6` is exactly this case: `stateName: "Triage"`,
-`stateCategory: "backlog"`, no `agent/ready` label.
+out of dispatch by the **absent `agent/ready` label**, not by its category.
+Since contract 3.2.0 it also carries `triage: true`, so the work order lists it
+under "needs triage". The good fixture's `DOR-6` is exactly this case:
+`stateName: "Triage"`, `stateCategory: "backlog"`, no `agent/ready` label.
 
 **Composio-specific:** `state.type` (the category) is **absent from the LIST
 call** - a listed issue's `state` is `{ name }` only. Resolve the category via
@@ -202,8 +203,68 @@ mandatory, not cosmetic.
     `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)` - because
     the threshold is a t-shirt word and the estimate may be a number. Never write
     `size >= "xl"`.
-- **`updatedAt`** (contract 3.1.0) <- Linear's `updatedAt`, ISO-8601, as given.
-  Missing -> `undefined`. The groom's Could expiry (GRM-16) reads it.
+- **`updatedAt`** (since contract 3.1.0) <- Linear's `updatedAt`, ISO-8601, as
+  given. Missing -> `undefined`. The groom's Could expiry (GRM-16) reads it.
+
+### The work order's reads (contract 3.2.0)
+
+`flow order`, and `flow next` under `dispatch.ladder: "v2"`, rank work from a
+few more Linear fields. Every one is optional: an adapter that leaves one out
+still loads, and the work order treats the field as unset.
+
+- **`dueDate`** <- the issue's `dueDate`, `YYYY-MM-DD` as given. Missing ->
+  `undefined`. The first key inside a band, earliest first.
+- **`triage`** <- `true` when the issue's state `type` is `triage` (its
+  `stateCategory` stays `backlog`, as above). Absent otherwise. The work order
+  lists the item under "needs triage" instead of ranking it.
+- **`pin`** <- read only for an issue with the bare `pin` label:
+  `{ reason?, actor?, actorName?, at? }`. `reason` is the rest of the first line
+  of the latest comment that starts with `pin:`; `actor`, `actorName` and `at`
+  are who added the `pin` label and when, from the issue's history. The groom's
+  GRM-17 flags a pin with no reason or one added outside `order.pinSetters`.
+- **`projectInfo`** on the backlog snapshot <- every open project of the team
+  (status type not `completed` or `canceled`), each with `id`, `name`,
+  `slugId`, `statusType`, `labels` and `blockedBy`, plus `priority`,
+  `targetDate`, `createdAt` and `sortOrder` when Linear has them:
+  - `statusType` <- the project's `status { type }`: `started`, `planned`,
+    `paused`, `backlog`, `completed` or `canceled`. A status flow does not know
+    drops the project.
+  - `priority` <- the project's priority, `1`-`4` only (`0` means none: leave
+    it out). `targetDate` <- its `targetDate`, `YYYY-MM-DD`.
+  - `labels` <- the project's labels, re-namespaced `group/name` like an
+    issue's (`owner/dorian` takes a project out of the agent order; `pin` puts
+    it first).
+  - `blockedBy` <- the ids of the projects this one waits on, from both
+    `relations` and `inverseRelations`: a `dependency` edge whose blocking end
+    is the other project (anchor `end` to `start`). Sorted, no repeats, never
+    itself.
+  - The sum of open estimates is **not** read here: flow adds up the items'
+    `size` itself.
+
+  Without `projectInfo`, flow ranks only the projects the items name, by their
+  status alone.
+
+  **Over Composio:** one paged `LINEAR_RUN_QUERY_OR_MUTATION` read (the same
+  query as `PROJECT_INFO_QUERY` in `skills/linear-adapter/adapter.ts`):
+
+  ```graphql
+  team(id: $teamId) {
+    projects(first: $first, after: $after, filter: { status: { type: { nin: ["completed", "canceled"] } } }) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id name slugId priority targetDate createdAt sortOrder status { type }
+        labels(first: 20) { nodes { name parent { name } } }
+        relations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+      }
+    }
+  }
+  ```
+
+  `LINEAR_LIST_LINEAR_PROJECTS` returns `state: null` and no relations, so it
+  cannot fill this. Read `dueDate` and the state `type` in the same GraphQL
+  issue read the other fields come from; a pinned issue's `history` and
+  `comments` in one more read per pinned issue.
 
 ---
 
@@ -424,7 +485,7 @@ The elicitation primitive - **four atomic effects, in order**:
   `description`, the `type/*` label for `spec.type`, `estimate` for
   `spec.size`, the parent's project and a priority 1-4. `flow create`, which
   normally files it, refuses an item without a type, priority, size, project,
-  `## Proof` and `## Done when` (contract 3.1.0).
+  `## Proof` and `## Done when` (since contract 3.1.0).
 - **Normalize.** Return the created issue **normalized as a `WorkItem`** so the
   caller records its `identifier` as the task's canonical home (the per-task
   `issue` field in `03-tasks.json`). Sub-issue promotion fires only when `size`
@@ -538,5 +599,5 @@ provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), **INV-6** (each comment's `authorIsTrusted`
 read from Linear's `active`/`guest`/`app` flags, team and `botActor`), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `3.1.0`,
+broader candidate set, never pre-filtered). It targets contract version `3.2.0`,
 and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).

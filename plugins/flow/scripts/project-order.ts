@@ -228,12 +228,8 @@ function cleanProjects(projects: readonly ProjectInfo[]): ProjectInfo[] {
       ...project,
       name: typeof project.name === 'string' ? project.name : project.id,
       slugId: typeof project.slugId === 'string' ? project.slugId : project.id,
-      labels: Array.isArray(project.labels)
-        ? project.labels.filter((label): label is string => typeof label === 'string')
-        : [],
-      blockedBy: Array.isArray(project.blockedBy)
-        ? project.blockedBy.filter((id): id is string => typeof id === 'string')
-        : [],
+      labels: stringsOf(project.labels),
+      blockedBy: stringsOf(project.blockedBy),
     };
     const seen = byId.get(project.id);
     if (seen === undefined || compareText(clean.slugId, seen.slugId) < 0) {
@@ -241,6 +237,13 @@ function cleanProjects(projects: readonly ProjectInfo[]): ProjectInfo[] {
     }
   }
   return [...byId.values()];
+}
+
+/** The strings in a list that should hold only strings; anything else reads as empty. */
+function stringsOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 /** The open projects a project waits on, by id, sorted. */
