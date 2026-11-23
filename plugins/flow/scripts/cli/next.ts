@@ -39,7 +39,12 @@
  */
 
 import { lastReadLine, savedReadAt } from '../read-age.ts';
-import { classifyDispatchOutcome } from '../dispatch-policy.ts';
+import {
+  classifyDispatchOutcome,
+  isClaimable,
+  truncateRankedToWipCap,
+  type DispatchOutcome,
+} from '../dispatch-policy.ts';
 import {
   chooseAccount,
   itemRuntime,
@@ -76,6 +81,9 @@ import {
 import { classifyOwnership, type Identity, type OwnershipScope } from '../identity.ts';
 import type { BacklogSnapshot, WorkItem, WorkItemProject } from '../tracker/types.ts';
 import { AGENT_CLAIMED } from '../work-state.ts';
+import { computeWorkOrder, type HeldIssue, type OrderedIssue } from '../work-order.ts';
+import { hasLabel } from '../work-item.ts';
+import { orderInputOf } from './order.ts';
 import { loadProjectConfig, readBacklog, resolveAgentId } from './backlog.ts';
 import { readOpenPrs, type OpenPrRead } from './open-prs-read.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -373,6 +381,8 @@ interface NextSummary {
   prCap: PrCap | null;
   /** The PR to land first, or `null`. */
   land: LandTarget | null;
+  /** Under `dispatch.ladder: "v2"`: each pick's place and reasons, and the banners. */
+  order?: NextOrder;
 }
 
 /** The open PR the drain lands before it claims new work. */
@@ -418,6 +428,7 @@ export function renderNext(summary: NextSummary): string {
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
+  const banners = summary.order?.banners ?? [];
   if (summary.picked.length === 0) {
     const why = summary.prCap?.atCap
       ? 'Nothing urgent is eligible, and the open-PR cap is reached: land an open PR before starting new work.'
@@ -426,7 +437,25 @@ export function renderNext(summary: NextSummary): string {
         : summary.starved
           ? `Nothing is eligible, but ${summary.shapeableCount} item(s) wait behind the agent/ready gate: a triage pass would ready them.`
           : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
-    return [why, wipLine].join('\n');
+    return [...banners, why, wipLine].join('\n');
+  }
+  const order = summary.order;
+  if (order !== undefined) {
+    // The work order (v2): each pick with its place and the reasons for it.
+    const rows = summary.picked.map((item, i) => {
+      const account = summary.accounts?.[i];
+      const entry = order.entries[item.identifier];
+      return [
+        `  #${entry?.place ?? '?'} ${item.identifier} - ${item.title}`,
+        `${(entry?.why ?? []).map((reason) => reason.text).join(' · ')}${account === undefined ? '' : accountSuffix(account)}`,
+      ];
+    });
+    return [
+      ...banners,
+      `Next from the work order (${summary.picked.length} of ${summary.eligibleCount} that may start now):`,
+      formatColumns(rows),
+      wipLine,
+    ].join('\n');
   }
   const rows = summary.picked.map((item, i) => {
     const account = summary.accounts?.[i];
@@ -486,6 +515,99 @@ export interface NextPlan {
   repo: string | null;
   /** What accounts were assigned from (with each account's path), when they were. */
   assignment?: AssignmentInput;
+  /**
+   * Under `dispatch.ladder: "v2"`: each pick's place and reasons in the work
+   * order, the ranked items that cannot start now with why, and the order's
+   * banners. Absent under `v1`.
+   */
+  order?: NextOrder;
+}
+
+/** What `flow next` adds under `dispatch.ladder: "v2"`. */
+export interface NextOrder {
+  /** Each pick's entry in the work order, by identifier. */
+  entries: Record<string, OrderedIssue>;
+  /** Ranked items that cannot start now, in order, with why: the caps hold starting, not ranking. */
+  held: HeldIssue[];
+  /** The work order's banners ("Urgent below pins: ..."). */
+  banners: string[];
+}
+
+/** The agent/ready claim gate: the order ranks every item, but only these may be started. */
+const AGENT_READY = 'agent/ready';
+
+/**
+ * Pick from the work order (`dispatch.ladder: "v2"`): walk the issue order
+ * best first and keep each item that may start now. An item that may not stays
+ * in the order and is listed in `held` with why: it has an open PR, the
+ * open-PR cap holds it (only Urgent starts at the cap), it is not ready, it
+ * lacks the `agent/ready` claim gate, or its owner is not one the agent may
+ * claim. The WIP cap then takes the best that fit; the rest are held as
+ * `WIP cap`. Nothing here reorders: the order is `computeWorkOrder`'s.
+ *
+ * @param order - The issue order and its banners.
+ * @param byId - Every open item by identifier.
+ * @param filter - Which items to consider (`--for-project`, `--items`).
+ * @param gate - The per-item gates: open PRs, the PR cap, ownership.
+ * @param wipCap - The WIP caps.
+ * @param load - The live WIP load.
+ * @returns The outcome and the v2 details.
+ */
+export function pickFromOrder(
+  order: ReturnType<typeof computeWorkOrder>,
+  byId: ReadonlyMap<string, WorkItem>,
+  filter: (item: WorkItem) => boolean,
+  gate: {
+    hasOpenPr: (id: string) => boolean;
+    atPrCap: boolean;
+    claimable: (item: WorkItem) => boolean;
+  },
+  wipCap: { global: number; perProject: number },
+  load: { inProgressByProject: Record<string, number>; inProgressTotal: number }
+): { outcome: DispatchOutcome; eligible: WorkItem[]; order: NextOrder } {
+  const reasons = new Map<string, string>();
+  const eligible: WorkItem[] = [];
+  const entries: Record<string, OrderedIssue> = {};
+  let unready = 0;
+  for (const issue of order.issues) {
+    const item = byId.get(issue.identifier);
+    if (item === undefined || !filter(item)) continue;
+    const id = issue.identifier;
+    if (gate.hasOpenPr(id)) reasons.set(id, 'has an open PR');
+    else if (gate.atPrCap && item.priority !== URGENT_PRIORITY) reasons.set(id, 'PR cap');
+    else if (!issue.readiness.ready) {
+      unready += 1;
+      reasons.set(id, `not ready: ${issue.readiness.reasons.join(', ')}`);
+    } else if (!hasLabel(item, AGENT_READY)) {
+      unready += 1;
+      reasons.set(id, 'not agent/ready yet');
+    } else if (!gate.claimable(item)) {
+      reasons.set(id, 'owned by someone the agent may not claim for');
+    } else eligible.push(item);
+  }
+  const admitted = truncateRankedToWipCap(eligible, wipCap, load);
+  const kept = new Set(admitted.map((item) => item.identifier));
+  for (const item of eligible)
+    if (!kept.has(item.identifier)) reasons.set(item.identifier, 'WIP cap');
+  // Held in the order's own sequence: walking the order again keeps its rank
+  // without sorting anything here.
+  const held: HeldIssue[] = [];
+  for (const issue of order.issues) {
+    if (kept.has(issue.identifier)) entries[issue.identifier] = issue;
+    const reason = reasons.get(issue.identifier);
+    if (reason !== undefined)
+      held.push({ identifier: issue.identifier, title: issue.title, reason });
+  }
+  return {
+    outcome: {
+      picked: admitted,
+      eligibleCount: admitted.length,
+      starved: admitted.length === 0 && unready > 0,
+      shapeableCount: unready,
+    },
+    eligible,
+    order: { entries, held, banners: order.banners },
+  };
 }
 
 /**
@@ -554,6 +676,92 @@ export async function planNext(
       (prCapState?.atCap !== true || item.priority === URGENT_PRIORITY)
   );
 
+  const land = snapshot.panelOnly
+    ? null
+    : landTarget(open, snapshot.items, (item) => classifyOwnership(item, identity, scope));
+
+  let outcome: DispatchOutcome;
+  let atWipCap: boolean;
+  let nextOrder: NextOrder | undefined;
+  if (config.dispatch.ladder === 'v2') {
+    // The work order ranks every open item; the caps and gates only decide
+    // which of them may start now (DOR-5063).
+    const v2 = pickFromOrder(
+      computeWorkOrder(orderInputOf(snapshot, config, ctx.now())),
+      new Map(snapshot.items.map((item) => [item.identifier, item])),
+      (item) =>
+        (projectId === undefined || item.project?.id === projectId) &&
+        (wanted === undefined || wanted.has(item.identifier)),
+      {
+        hasOpenPr: (id) => prsByItem.has(id),
+        atPrCap: prCapState?.atCap === true,
+        claimable: (item) =>
+          isClaimable(classifyOwnership(item, identity, scope), config.ownership),
+      },
+      config.autonomy.wipCap,
+      { inProgressByProject: wip.byProject, inProgressTotal: wip.total }
+    );
+    outcome = v2.outcome;
+    atWipCap = v2.outcome.eligibleCount === 0 && v2.eligible.length > 0;
+    nextOrder = v2.order;
+  } else {
+    ({ outcome, atWipCap } = planV1(candidates, config, identity, scope, wip));
+  }
+
+  const order = request.items;
+  const ranked =
+    order === undefined
+      ? outcome.picked
+      : [...outcome.picked].sort(
+          (a, b) => order.indexOf(a.identifier) - order.indexOf(b.identifier)
+        );
+  const picked = ranked.slice(0, request.count);
+  let accounts: ItemAccount[] | undefined;
+  let assignment: AssignmentInput | undefined;
+  if (request.accounts && picked.length > 0) {
+    assignment = await gatherAssignmentInput(ctx, config, request.refresh);
+    accounts = assignAccounts(picked, assignment);
+  }
+  if (nextOrder !== undefined) {
+    const keep = new Set(picked.map((item) => item.identifier));
+    for (const id of Object.keys(nextOrder.entries))
+      if (!keep.has(id)) delete nextOrder.entries[id];
+  }
+  return {
+    ...(snapshot.panelOnly
+      ? { approximate: true as const, lastReadAt: savedReadAt(snapshot.fetchedAt) }
+      : {}),
+    picked,
+    accounts,
+    outcome,
+    atWipCap,
+    wip,
+    prCap: prCapState,
+    land,
+    repo: assignment?.repo ?? null,
+    assignment,
+    ...(nextOrder === undefined ? {} : { order: nextOrder }),
+  };
+}
+
+/**
+ * Today's ladder (`dispatch.ladder: "v1"`): the dispatch policy over the
+ * candidates, and whether the WIP cap is the only thing in the way.
+ *
+ * @param candidates - The items left after the PR and filter gates.
+ * @param config - The project config.
+ * @param identity - The agent's identity.
+ * @param scope - The ownership scope.
+ * @param wip - The live WIP load.
+ * @returns The outcome and whether the WIP cap blocks.
+ */
+function planV1(
+  candidates: readonly WorkItem[],
+  config: NextConfig,
+  identity: Identity,
+  scope: OwnershipScope,
+  wip: WipLoad
+): { outcome: DispatchOutcome; atWipCap: boolean } {
   const ownershipOf = Object.fromEntries(
     candidates.map((item) => [item.identifier, classifyOwnership(item, identity, scope)])
   );
@@ -575,39 +783,7 @@ export async function planNext(
     },
     { ownershipOf, inProgressByProject: wip.byProject, inProgressTotal: wip.total }
   );
-  const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
-  const land = snapshot.panelOnly
-    ? null
-    : landTarget(open, snapshot.items, (item) => classifyOwnership(item, identity, scope));
-
-  const order = request.items;
-  const ranked =
-    order === undefined
-      ? outcome.picked
-      : [...outcome.picked].sort(
-          (a, b) => order.indexOf(a.identifier) - order.indexOf(b.identifier)
-        );
-  const picked = ranked.slice(0, request.count);
-  let accounts: ItemAccount[] | undefined;
-  let assignment: AssignmentInput | undefined;
-  if (request.accounts && picked.length > 0) {
-    assignment = await gatherAssignmentInput(ctx, config, request.refresh);
-    accounts = assignAccounts(picked, assignment);
-  }
-  return {
-    ...(snapshot.panelOnly
-      ? { approximate: true as const, lastReadAt: savedReadAt(snapshot.fetchedAt) }
-      : {}),
-    picked,
-    accounts,
-    outcome,
-    atWipCap,
-    wip,
-    prCap: prCapState,
-    land,
-    repo: assignment?.repo ?? null,
-    assignment,
-  };
+  return { outcome, atWipCap: outcome.eligibleCount === 0 && uncapped.eligibleCount > 0 };
 }
 
 /**
@@ -664,16 +840,18 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       typeof ctx.args.flags['for-project'] === 'string' ? ctx.args.flags['for-project'] : undefined,
     accounts: ctx.args.flags['no-account'] !== true,
   });
-  const { picked, accounts, outcome, atWipCap, wip, prCap: cap, land } = plan;
+  const { picked, accounts, outcome, atWipCap, wip, prCap: cap, land, order } = plan;
   const blocked = accounts?.find((account) => account.pick === null);
   if (blocked !== undefined) ctx.warn(noAccountMessage(plan.repo, blocked));
   return withSetupNudge(ctx, {
     json: {
       ...(plan.approximate ? { approximate: true, lastReadAt: plan.lastReadAt } : {}),
-      picked:
-        accounts === undefined
-          ? picked
-          : picked.map((item, i) => ({ ...item, account: jsonAccount(accounts[i]) })),
+      picked: picked.map((item, i) => ({
+        ...item,
+        ...(order === undefined ? {} : orderFields(order.entries[item.identifier])),
+        ...(accounts === undefined ? {} : { account: jsonAccount(accounts[i]) }),
+      })),
+      ...(order === undefined ? {} : { ladder: 'v2', banners: order.banners, held: order.held }),
       eligibleCount: outcome.eligibleCount,
       starved: outcome.starved,
       shapeableCount: outcome.shapeableCount,
@@ -694,11 +872,27 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         wipCap: config.autonomy.wipCap,
         prCap: cap,
         land,
+        ...(order === undefined ? {} : { order }),
       }),
     ]
       .filter(Boolean)
       .join('\n'),
   });
+}
+
+/**
+ * A pick's work-order fields for `--json`: its place, band, reasons and
+ * readiness.
+ *
+ * @param entry - The pick's entry in the work order, if any.
+ * @returns The fields, or none.
+ */
+function orderFields(
+  entry: OrderedIssue | undefined
+): Partial<Pick<OrderedIssue, 'place' | 'band' | 'why' | 'readiness' | 'inheritsFrom'>> {
+  if (entry === undefined) return {};
+  const { place, band, why, readiness, inheritsFrom } = entry;
+  return { place, band, why, readiness, ...(inheritsFrom === undefined ? {} : { inheritsFrom }) };
 }
 
 /** The JSON shape of one assignment: `{ runtime, pick, ranked, ineligible, reason }`. */
