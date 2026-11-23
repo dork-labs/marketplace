@@ -49,7 +49,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '3.1.0';
+export const FAKE_CONTRACT_VERSION = '3.3.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';

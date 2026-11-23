@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.2.0`) over **one transport - the in-session Linear MCP
+> (contract version `3.3.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -194,6 +194,25 @@ still loads, and the work order treats the field as unset.
   the issue's `dueDate` and its state `type`; a pinned issue's comments come
   from `list_comments`. When the server cannot show who added the `pin` label,
   leave `actor` and `at` out (GRM-17 then judges the pin on its reason alone).
+
+### Optional labels and reclassifying (contract 3.3.0)
+
+Two writes carry labels the team may not have: the bare `Bug`, `Improvement`
+and `Feature` labels that a `type/*` label implies
+(`../../../scripts/type-labels.ts`). Plenty of teams deleted them.
+
+- **`createItem`'s `optionalLabels`.** Add each one only when the team has a
+  label of that name; skip one it lacks, without an error. Every label in
+  `labels` must still exist, or the create is refused.
+- **`applyWorkState`'s `typeLabel`, `dropLabels` and `optionalLabels`.** Compute
+  the new label set with `labelsAfterChange` (`../../../scripts/work-state.ts`):
+  `typeLabel` replaces the one `type/*` label, `dropLabels` are removed whatever
+  their family, and `optionalLabels` are added. Then leave out any optional
+  label the team lacks and the issue does not already carry, instead of
+  refusing the write. `flow triage --type` sends these three fields, and
+  refuses an adapter below contract 3.3.0 before any write.
+- **The read-back** checks the `type/*` label and that each dropped label is
+  gone. It never asks for an optional label.
 
 ---
 
@@ -504,7 +523,7 @@ provably closed), **INV-4** (labels re-namespaced into the generic families),
 these reads never trust anyone, the trusted example INV-6's fixture needs comes
 from a `cli` read), and **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `3.2.0`, and **declares
+pre-filtered). It targets contract version `3.3.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.
