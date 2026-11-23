@@ -17,7 +17,13 @@
  */
 
 import type { FlowConfig } from '../config-schema.ts';
-import type { ProjectInfo, StateCategory, WorkItem, WorkItemProject } from '../work-item.ts';
+import type {
+  PinInfo,
+  ProjectInfo,
+  StateCategory,
+  WorkItem,
+  WorkItemProject,
+} from '../work-item.ts';
 import type { WorkStateChange } from '../work-state.ts';
 
 export type { WorkStateChange } from '../work-state.ts';
@@ -316,4 +322,4 @@ export interface CodeAdapterModule {
 }
 
 /** Re-exported so an adapter can name the category type without reaching zod. */
-export type { ProjectInfo, StateCategory, WorkItem, WorkItemProject };
+export type { PinInfo, ProjectInfo, StateCategory, WorkItem, WorkItemProject };

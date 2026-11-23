@@ -217,3 +217,103 @@ export const CLOSED_PAGE = {
 
 /** `viewer`, as recorded. */
 export const VIEWER = { viewer: { id: 'user-agent', name: 'Flow bot' } };
+
+/**
+ * The work order's project page (contract 3.2.0). The SHAPE was recorded with
+ * a read-only `team(id:) { projects(...) }` call on 2026-11-23, including a
+ * dependency relation as Linear stores it (`anchorType: "end"` on the project
+ * that must finish, `relatedAnchorType: "start"` on the one that waits) and
+ * seen from both sides. The VALUES are synthesized.
+ */
+export const PROJECT_INFO_PAGE = {
+  team: {
+    projects: {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          id: 'proj-1',
+          name: 'Example project',
+          slugId: 'aaa111',
+          priority: 2,
+          targetDate: '2026-12-15',
+          createdAt: '2026-09-01T00:00:00.000Z',
+          sortOrder: -10.5,
+          status: { type: 'started' },
+          labels: { nodes: [{ id: 'lbl-pin-p', name: 'pin', parent: null }] },
+          relations: {
+            nodes: [
+              {
+                type: 'dependency',
+                anchorType: 'end',
+                relatedAnchorType: 'start',
+                project: { id: 'proj-1' },
+                relatedProject: { id: 'proj-2' },
+              },
+            ],
+          },
+          inverseRelations: { nodes: [] },
+        },
+        {
+          id: 'proj-2',
+          name: 'Another project',
+          slugId: 'bbb222',
+          priority: 0,
+          targetDate: null,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          sortOrder: 3,
+          status: { type: 'planned' },
+          labels: {
+            nodes: [{ id: 'lbl-owner-dorian-p', name: 'dorian', parent: { name: 'owner' } }],
+          },
+          relations: { nodes: [] },
+          inverseRelations: {
+            nodes: [
+              {
+                type: 'dependency',
+                anchorType: 'end',
+                relatedAnchorType: 'start',
+                project: { id: 'proj-1' },
+                relatedProject: { id: 'proj-2' },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  },
+};
+
+/**
+ * Who pinned an item (contract 3.2.0). The SHAPE of `history` (newest first,
+ * `actor`, `addedLabels`) was recorded with a read-only call on 2026-11-23; the
+ * VALUES are synthesized.
+ */
+export const PIN_READ = {
+  issue: {
+    identifier: 'DOR-101',
+    history: {
+      nodes: [
+        {
+          createdAt: '2026-11-22T18:00:00.000Z',
+          actor: { id: 'user-other', name: 'Other Person' },
+          addedLabels: [],
+        },
+        {
+          createdAt: '2026-11-22T15:00:00.000Z',
+          actor: { id: 'user-lead', name: 'Lee Example' },
+          addedLabels: [{ id: 'lbl-pin', name: 'pin', parent: null }],
+        },
+      ],
+    },
+    comments: {
+      nodes: [
+        { body: 'pin: an older reason', createdAt: '2026-11-21T10:00:00.000Z' },
+        {
+          body: 'Pin: ships with the next release\nmore words',
+          createdAt: '2026-11-22T15:01:00.000Z',
+        },
+        { body: 'a comment that mentions pin: later', createdAt: '2026-11-22T16:00:00.000Z' },
+      ],
+    },
+  },
+};

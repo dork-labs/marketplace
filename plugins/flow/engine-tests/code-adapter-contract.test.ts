@@ -565,10 +565,10 @@ describe('the Linear simulator follows the recordings', () => {
     answers: { variables: { comments: number }; comments: { id: string; createdAt: string }[] }[];
   };
 
-  it('answers the query the adapter sends today, apart from the trust fields and updatedAt', () => {
+  it('answers the query the adapter sends today, apart from the trust fields, updatedAt and dueDate', () => {
     // Contract 3.0.0 added the author's account flags to the comment read, and
     // DOR-3677 the team check and botActor; contract 3.1.0 (DOR-4546) added the
-    // issue's updatedAt. The recording predates them and checks ordering and
+    // issue's updatedAt, and contract 3.2.0 (DOR-5063) its dueDate. The recording predates them and checks ordering and
     // limits only, which those fields do not change; it still needs a fresh
     // read-only recording.
     expect(linear.COMMENT_TRUST_FIELDS).toBe(
@@ -578,6 +578,7 @@ describe('the Linear simulator follows the recordings', () => {
       linear.ITEM_WITH_COMMENTS_QUERY.replace(linear.COMMENT_TRUST_FIELDS, 'user { id }')
         .replace(', $teamId: ID!', '')
         .replace(' createdAt updatedAt\n', ' createdAt\n')
+        .replace(' estimate dueDate createdAt', ' estimate createdAt')
     ).toBe(recorded.query);
   });
 
