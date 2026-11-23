@@ -579,8 +579,9 @@ status, priority, target date and relations.
   `projectRank`.
 - `projects.startedCap` is how many projects may be Started at once; the default
   is `6`. flow never changes a project's status. Over the cap, it names the
-  lowest-ranked Started projects so a person can pause or finish one.
-  Projects labelled `owner/dorian` don't count toward the cap.
+  lowest-ranked Started projects so a person can pause or finish one, and the
+  audit (GRM-18) reports it with each Started project's flags. Projects
+  labelled `owner/dorian` don't count toward the cap.
 - Projects rank by, first to last: the `pin` label, priority (none last,
   flagged `needs a priority`), target date (none last, flagged
   `needs a target date`), what waits on them, the estimates left on their open
