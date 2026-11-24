@@ -6,10 +6,12 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.104.0
 
-**Reinstall Flow to receive this change. Nothing changes in what Flow writes yet.**
+**Reinstall Flow to receive this change.**
 
 - Flow now reads the newer form of the hidden signature on comments and items, which names the agent, its chat and its space by DorkOS ids instead of a session id. A reply to a comment signed either way finds its way back to the same session.
-- Flow itself still signs the older way. It moves to the newer form in the next release, once every reader has this one.
+- Flow now signs in the newer form too, the same way DorkOS signs its own pull requests. Inside DorkOS, the signature names the agent, its chat and its space.
+- On pull requests, the signature keeps only the first 8 characters of the chat's id and never names the computer. On tracker comments and items it keeps the whole id and, with DorkOS installed, the code for this computer, as before.
+- When you answer a question by clicking in DorkOS, the signature on your answer never names the agent's chat, agent or space. It is your answer, not the agent's.
 - A signature that still names a computer by its name, from before Flow 0.99.2, no longer counts as naming any computer. A reply to one starts a fresh session instead of joining the old one.
 - A signature is only ever a hint about where a reply might go. Flow never delivers a reply into a session this computer doesn't hold, whatever the signature says.
 

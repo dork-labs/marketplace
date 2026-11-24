@@ -78,7 +78,7 @@ async function defaultBranch(ctx: VerbContext, worktree: string): Promise<string
  * The body with a provenance line appended when it has none. A PR body is
  * world-readable on a public forge, and flow does not read the repository's
  * visibility, so it signs as for a public repository (`docs/provenance.md`
- * §8): the session id cut to 8 characters and no machine name.
+ * §8): the chat id cut to 8 characters and no `host`.
  *
  * @param ctx - The verb context.
  * @param body - The body as written.
@@ -87,12 +87,7 @@ async function defaultBranch(ctx: VerbContext, worktree: string): Promise<string
  */
 function signedPrBody(ctx: VerbContext, body: string, launcher: string | undefined): string {
   if (HAS_PROVENANCE.test(body)) return body;
-  const provenance = sessionProvenance(ctx, launcher);
-  const line = provenanceLine({
-    ...provenance,
-    sessionId: provenance.sessionId?.slice(0, 8),
-    host: undefined,
-  });
+  const line = provenanceLine(sessionProvenance(ctx, launcher), 'public');
   return line === undefined ? body : `${body.trimEnd()}\n\n${line}\n`;
 }
 

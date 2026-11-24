@@ -108,8 +108,9 @@ function markersIn(env: Readonly<Record<string, string | undefined>>): DetectedR
 /**
  * Every variable that says a process runs inside an agent: the markers
  * {@link markersIn} reads, `FLOW_RUNTIME`, the session ids an agent's shell
- * carries (`CLAUDE_CODE_SESSION_ID`, `FLOW_SESSION_ID`), and the identity
- * token DorkOS gives an agent's turn (`DORKOS_AGENT_TOKEN`).
+ * carries (`CLAUDE_CODE_SESSION_ID`, `FLOW_SESSION_ID`), the identity token
+ * DorkOS gives an agent's turn (`DORKOS_AGENT_TOKEN`), and the chat, agent and
+ * space DorkOS names in that turn, which a signature would otherwise carry.
  */
 export const AGENT_ENV_NAMES = [
   'CODEX_THREAD_ID',
@@ -122,6 +123,9 @@ export const AGENT_ENV_NAMES = [
   'FLOW_RUNTIME',
   'FLOW_SESSION_ID',
   'DORKOS_AGENT_TOKEN',
+  'DORKOS_SESSION_ID',
+  'DORKOS_AGENT_ID',
+  'DORKOS_SPACE_ID',
 ] as const;
 
 /**

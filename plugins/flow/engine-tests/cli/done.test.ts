@@ -56,7 +56,7 @@ describe('flow done', () => {
     expect(result.tracker.writes.map((call) => call.method)).toEqual(['comment', 'applyWorkState']);
     const [comment, write] = result.tracker.writes;
     expect((comment as { body: string }).body).toMatch(
-      /^Shipped the fix\.\n\nPR: https:\/\/example\.test\/pr\/1\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc",.*\} -->$/
+      /^Shipped the fix\.\n\nPR: https:\/\/example\.test\/pr\/1\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":2,"harness":"claude-code",.*"chat":"dork:chat:session-abc".*\} -->$/
     );
     expect(write).toEqual({ method: 'applyWorkState', identifier: 'FAKE-1', change: DONE_CHANGE });
     expect(project.runs()['id-FAKE-1']).toMatchObject({

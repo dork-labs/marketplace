@@ -113,13 +113,14 @@ export type FlowStage =
  */
 export interface FlowRunProvenance {
   /**
-   * Signature schema version — flow writes `1` today and reads `1` and `2`
+   * Signature schema version — flow writes `2` and reads `1` and `2`
    * (`signature-line.ts`). The one field that is not harness-derived, so it is
    * the one field a run can always write. A reader that does not recognize a
    * higher version reads the fields it knows and ignores the rest; a signature
    * with no `v` at all is the legacy `flow:provenance` shape and reads as `1`.
-   * The signer writes `"v":1` whatever this holds, so a record a newer flow
-   * wrote never goes out mislabelled (`provenanceLine` in `cli/provenance.ts`).
+   * The signer writes `"v":2` whatever this holds, from the fields it knows
+   * (`provenanceLine` in `cli/provenance.ts`), so a record an older or newer
+   * flow wrote never goes out mislabelled.
    */
   v?: number;
   /**
@@ -147,6 +148,16 @@ export interface FlowRunProvenance {
   account?: string;
   /** The delegated worker/agent id or name the harness assigned, when it assigns one. */
   agentId?: string;
+  /**
+   * The DorkOS chat that ran the work, as its bare id (`DORKOS_SESSION_ID`);
+   * absent outside a DorkOS turn. The signature's `chat` is this, else
+   * {@link sessionId}. Not the resume handle: that stays {@link sessionId}.
+   */
+  chat?: string;
+  /** The DorkOS agent, as `dork:agent:<id>` (`DORKOS_AGENT_ID`); absent outside a DorkOS turn. */
+  agent?: string;
+  /** The agent's space, as `dork:space:<id>` (`DORKOS_SPACE_ID`); absent outside a DorkOS turn. */
+  space?: string;
   /**
    * The DorkOS install the run happened on, as the reference
    * `dork:host:<hash>` (a one-way hash of the install id, `hostRefFor` in

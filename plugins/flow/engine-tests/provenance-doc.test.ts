@@ -81,9 +81,9 @@ const groomingFlat = flat(grooming);
 const prTemplateFlat = flat(prTemplate);
 
 /**
- * The version 1 fields that go ON THE WIRE, what flow's emitters write today.
- * The local run record holds more (`worktree`, `branch`, `agentId`); those must
- * never reach a signed body.
+ * The version 1 fields that went ON THE WIRE before flow 0.104.0, which readers
+ * still accept. The local run record holds more (`worktree`, `branch`,
+ * `agentId`); those must never reach a signed body.
  */
 const WIRE_FIELDS = [
   'v',
@@ -96,7 +96,7 @@ const WIRE_FIELDS = [
   'resumeUrl',
 ] as const;
 
-/** The version 2 fields readers accept now (`scripts/signature-line.ts`). */
+/** The version 2 fields, what flow's emitters write and readers accept (`scripts/signature-line.ts`). */
 const V2_FIELDS = [
   'v',
   'harness',
@@ -261,6 +261,13 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/not privacy, it is theatre/);
   });
 
+  it('says how flow itself signs without reading a visibility', () => {
+    // The signer's choice is documented where the rule is, so it can be checked.
+    expect(specFlat).toMatch(
+      /Flow's signer reads no visibility: it signs PR text as public and tracker text as private/
+    );
+  });
+
   it('names a decidable visibility check, and fails SAFE when undeterminable', () => {
     expect(specFlat).toMatch(/gh repo view --json visibility/);
     expect(specFlat).toMatch(
@@ -269,7 +276,7 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/fail-safe direction/i);
     // VERIFY writes the single most public body, so it must carry the pointer.
     expect(verifyingFlat).toMatch(/public-repository rules/);
-    expect(verifyingFlat).toMatch(/truncate `sessionId` and omit `resumeUrl`/);
+    expect(verifyingFlat).toMatch(/cut the chat id to 8 characters and omit `host`/);
   });
 });
 
@@ -383,16 +390,19 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     expect(verifyingFlat).toMatch(/do not redefine it here/i);
   });
 
-  it('VERIFY scopes `resumeUrl` to DorkOS but NOT `surface`, and never signs `host` or `instanceId`', () => {
+  it('VERIFY scopes `agent` and `space` to DorkOS but NOT `surface` or `chat`, and never signs `host`', () => {
     // `surface` selects the resume mechanism; the bare-cli branch needs it too.
-    expect(verifyingFlat).toMatch(/`account`, `surface`, and \(DorkOS only\) `resumeUrl`/);
+    expect(verifyingFlat).toMatch(
+      /Version 2 carries `harness`, `surface`, `account`, `chat` and \(DorkOS only\) `agent` and `space`/
+    );
     // A PR body is public, and an old run record may hold a hostname (DOR-5047);
     // `instanceId` would be the anonymous usage id.
-    expect(verifyingFlat).toMatch(/never `host` or `instanceId`/);
+    expect(verifyingFlat).toMatch(/never `host`, `turn` or `instanceId`/);
+    expect(verifyingFlat).not.toMatch(/`resumeUrl`/);
   });
 
-  it('the PR template emits `agent:provenance` with `v`, and no local-only field', () => {
-    expect(prTemplate).toMatch(/<!-- agent:provenance \{"v":1/);
+  it('the PR template emits `agent:provenance` version 2, and no local-only field', () => {
+    expect(prTemplate).toMatch(/<!-- agent:provenance \{"v":2/);
     const emitted = prTemplate.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
     expect(emitted).not.toContain('worktree');
     expect(emitted).not.toContain('agentId');
@@ -402,7 +412,10 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     // And its guidance must not send an emitter to put them on the wire.
     expect(prTemplateFlat).toMatch(/stay in flow-state\.json/);
     expect(prTemplateFlat).toMatch(/never an email address/i);
-    expect(prTemplateFlat).toMatch(/truncate `sessionId` to 8 chars, omit `resumeUrl`/);
+    expect(prTemplateFlat).toMatch(/PUBLIC repo: cut the chat id to 8 chars/);
+    expect(prTemplateFlat).toMatch(/Never add `host` or `turn` to a PR body/);
+    expect(prTemplateFlat).toMatch(/Never add `sessionId`, `resumeUrl` or `instanceId`/);
+    expect(emitted).not.toContain('sessionId');
   });
 
   it('NO shipped surface still emits the legacy marker literal', () => {
@@ -427,8 +440,9 @@ describe('agent provenance — EXECUTE stamps it through flow claim', () => {
     expect(executing).not.toMatch(/\|\s*`agentId`\s*\|/);
   });
 
-  it('adds only what flow claim cannot derive, and never fabricates', () => {
-    expect(executingFlat).toMatch(/Add `resumeUrl` when you have it/);
+  it('adds nothing by hand to what flow claim derives, and never fabricates', () => {
+    // Version 2 has no `resumeUrl`: a reader builds the link from its own origin.
+    expect(executingFlat).not.toMatch(/`resumeUrl`/);
     expect(executingFlat).not.toMatch(/`instanceId`/);
     expect(executingFlat).toMatch(/never fabricate/i);
   });
@@ -544,12 +558,39 @@ describe('agent provenance — the reader routes on it', () => {
 });
 
 describe('agent provenance — version 2 (DOR-5047)', () => {
-  it('says readers accept v2 now and emitters still write v1 until the next release', () => {
-    expect(specFlat).toMatch(/\*\*Signature version: 2 for readers, 1 for emitters\.\*\*/);
+  it('says emitters write v2 and readers accept both (Flow 0.104.0)', () => {
+    expect(specFlat).toMatch(/\*\*Signature version: 2\.\*\* Emitters write version 2/);
+    expect(specFlat).toMatch(/Emit version 2; accept both forever/);
+    expect(specFlat).toMatch(/\*\*Flow's emitters write version 2 from 0\.104\.0\*\*/);
+    // The staged-rollout wording is gone.
+    expect(specFlat).not.toMatch(/still write version 1/);
+    expect(specFlat).not.toMatch(/until the next release/);
+  });
+
+  it('pins the fixed field order and the drop rule the signer follows', () => {
     expect(specFlat).toMatch(
-      /Emit version 2 once the reader in front of you accepts it; accept both forever/
+      /one fixed order: `v`, `harness`, `surface`, `account`, `agent`, `chat`, `space`, `host`, `turn`, `address`/
     );
-    expect(specFlat).toMatch(/\*\*Flow's emitters still write version 1 in this release\*\*/);
+    expect(specFlat).toMatch(
+      /A field that would not read back \(section 11\) is left out, never repaired/
+    );
+    // The examples follow the order.
+    const order = [
+      'v',
+      'harness',
+      'surface',
+      'account',
+      'agent',
+      'chat',
+      'space',
+      'host',
+      'turn',
+      'address',
+    ];
+    for (const example of spec.match(/<!-- agent:provenance \{"v":2[^\n]*-->/g) ?? []) {
+      const keys = Object.keys(JSON.parse(/\{.*\}/.exec(example)?.[0] ?? '{}'));
+      expect(keys).toEqual(order.filter((key) => keys.includes(key)));
+    }
   });
 
   it('the v2 example carries references, and no sessionId, resumeUrl or instanceId', () => {

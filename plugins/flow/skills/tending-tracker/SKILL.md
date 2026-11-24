@@ -71,7 +71,8 @@ thread.
    signature that is NOT your own:** this loop signs its own replies, a self-delivery
    cycle. **Compare each signature's chat id against this session's own id and skip the
    matches**; an id of 8 or more characters that starts yours matches too, a shorter one
-   only when it is your whole id. In shared-account mode this comparison is the only
+   only when it is your whole id. In a DorkOS turn, `DORKOS_SESSION_ID` is your id too.
+   In shared-account mode this comparison is the only
    discriminator. A blob that fails to parse counts as absent, and so does a signature
    a human stripped.
 

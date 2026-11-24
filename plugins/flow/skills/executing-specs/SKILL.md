@@ -77,8 +77,7 @@ or a loud stop, never a silent 2; `"never"` starts at 2. With `context.perIssue`
 6. **Claim** an item this session has not claimed (`--manual` when a person drives):
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <this session's id> --worktree <path> --branch <branch> --json`.
    It records the run and its provenance (`<flow-root>/docs/provenance.md`). Exit 5
-   names the blocker; exit 7 means paused. Add `resumeUrl` when you have it; never
-   fabricate a field.
+   names the blocker; exit 7 means paused. Never fabricate a field.
 
 ## Phase 1: Setup
 

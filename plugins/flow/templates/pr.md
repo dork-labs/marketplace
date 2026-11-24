@@ -12,8 +12,8 @@
   tracker string here.
 
   The optional `agent:provenance` line at the bottom is the machine-readable
-  record of where this change came from — schema version, harness, session,
-  account, surface, and (under DorkOS) a resume URL. Its
+  record of where this change came from — schema version, harness, surface,
+  account, chat, and (under DorkOS) agent and space. Its
   shape is defined once, in docs/provenance.md; this template only carries it,
   and this PR-body stamp is the one place the signature is written ONCE PER RUN
   rather than per write. Emit only the fields
@@ -77,19 +77,21 @@ by default, so plan assumptions surface here at the review gate.}
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-<!-- Provenance: the line below ships `v` (always 1) plus `surface`, which any run can
-     determine. Add `harness`, `sessionId`, `account`, and — under DorkOS only —
-     `resumeUrl`, if you actually determined them. Those eight fields are
-     the WHOLE wire format: `worktree`, `branch` and the worker id stay in flow-state.json —
+<!-- Provenance: the line below ships `v` (always 2) plus `surface`, which any run can
+     determine. Add `harness`, `account`, `chat` (`dork:chat:<id>`) and — in a DorkOS
+     turn only — `agent` and `space`, if you actually determined them, in the order
+     v, harness, surface, account, agent, chat, space. Those are the WHOLE wire format
+     a PR body carries: `worktree`, `branch` and the worker id stay in flow-state.json —
      an absolute worktree path is /Users/<real name>/… and this body can be public forever,
      and the PR already shows its own branch.
      JSON-escape every value, and drop any field you cannot escape safely — this line
      is machine-parsed, so one stray quote invalidates all of it. Nothing to say? Delete
      the line rather than shipping empty placeholders. `account` is a short non-PII handle
      for the HARNESS account, never an email address and never the tracker account. In a
-     PUBLIC repo: truncate `sessionId` to 8 chars, omit `resumeUrl`. Never add `host` to a
-     PR body: it is never a hostname, and its install reference is for private trackers
-     only (a stock macOS hostname is Firstname-Lastname-MacBook-Pro.local). Readers also
+     PUBLIC repo: cut the chat id to 8 chars. Never add `host` or `turn` to a PR body:
+     `host` is never a hostname, and its install reference is for private trackers
+     only (a stock macOS hostname is Firstname-Lastname-MacBook-Pro.local). Never add
+     `sessionId`, `resumeUrl` or `instanceId`: version 2 has none. Readers also
      accept the legacy `flow:provenance` name; emit `agent:provenance`. Full spec:
      docs/provenance.md. -->
-<!-- agent:provenance {"v":1,"surface":"{surface}"} -->
+<!-- agent:provenance {"v":2,"surface":"{surface}"} -->

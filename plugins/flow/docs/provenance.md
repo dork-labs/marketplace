@@ -1,8 +1,7 @@
 # Agent Provenance — signing outward writes
 
-> **Signature version: 2 for readers, 1 for emitters.** Readers accept version 1
-> and version 2 now. Flow's emitters still write version 1 until the next release,
-> then move to version 2. This is the **generic, tracker-neutral** spec for the
+> **Signature version: 2.** Emitters write version 2; readers accept version 1
+> and version 2. This is the **generic, tracker-neutral** spec for the
 > provenance signature. It names no tracker, no API, and no slug. Every adapter,
 > every stage skill, and every reader references this document; none of them
 > redefines it.
@@ -32,7 +31,7 @@ Append **one line, as the LAST line** of any body the agent writes outward. Vers
 <!-- agent:provenance {"v":2,"harness":"claude-code","surface":"dorkos","account":"work","agent":"dork:agent:01KJXYKJYW4N8QGQ5W4GB6YM9J","chat":"dork:chat:7c1e4b2a-9f3d-4e8b-a6c5-a1b2c3d4e5f6","space":"dork:space:01JD3F1W2KQ8Z0YV9N6B5T4RMA","host":"dork:host:3c594f448c55cbfade7fd79a1915dab8","turn":"dork:turn:01JD3F2Z7P1Q4R8S9T0U2V3W4X","address":"dork:acme/owl"} -->
 ```
 
-Version 1, which flow's emitters still write today, looks like this:
+Version 1, which flow wrote before 0.104.0, looks like this:
 
 ```
 <!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"7c1e4b2a-9f3d-4e8b-a6c5-a1b2c3d4e5f6","account":"work","host":"dork:host:3c594f448c55cbfade7fd79a1915dab8","surface":"dorkos"} -->
@@ -43,9 +42,13 @@ reads it back without parsing prose. It stays **one line of JSON** in that fixed
 comment, so a script can read it with `grep` and `jq`.
 
 **Version 2 names the writer by `dork:` references; version 1 named it by a session
-id and, before flow 0.99.2, a hostname.** Emit version 2 once the reader in front
-of you accepts it; accept both forever. **Flow's emitters still write version 1 in
-this release**; they move to version 2 in the next one, once readers have it.
+id and, before flow 0.99.2, a hostname.** Emit version 2; accept both forever.
+**Flow's emitters write version 2 from 0.104.0**, field for field as DorkOS's own
+builder writes it (`buildProvenanceV2` in DorkOS's `@dorkos/shared/provenance`).
+
+The fields go in one fixed order: `v`, `harness`, `surface`, `account`, `agent`,
+`chat`, `space`, `host`, `turn`, `address`. A field that would not read back
+(section 11) is left out, never repaired.
 
 **Emit `agent:provenance`. Accept `flow:provenance` on READ.** The prefix is
 `agent:` because non-`/flow` sessions emit this too; `flow:provenance` is the
@@ -79,11 +82,11 @@ the agent's handle, and optionally a named conversation. The grammar is DorkOS's
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `v`       | Signature schema version: `2`. A reader that does not know a higher version reads the fields it recognizes and ignores the rest.                                                                                                        |
 | `harness` | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                                              |
-| `surface` | Where the run was driven from: `dorkos` \| `bare-cli` \| `ci`. **Always emitted when determinable**, on every surface — it is what selects the resume _mechanism_, and the `bare-cli` path needs it exactly as much as the `dorkos` one. |
+| `surface` | Where the run was driven from: `dorkos` inside a DorkOS turn, `ci` when `CI` is `true`, else `bare-cli`. **Always emitted**, on every surface — it is what selects the resume _mechanism_, and the `bare-cli` path needs it exactly as much as the `dorkos` one. |
 | `account` | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". **NEVER an email address** (section 7).                                        |
-| `agent`   | The agent that wrote it, as `dork:agent:<id>`. An opaque id: a ULID reveals only when the agent was made.                                                                                                                                |
-| `chat`    | The chat that wrote it, as `dork:chat:<id>`: the handle a later reader resumes with. Derive it, never guess. A reader that can open the chat builds the link itself: `<its own origin>/r/dork:chat:<id>`.                              |
-| `space`   | The space the chat belongs to, as `dork:space:<id>`.                                                                                                                                                                                    |
+| `agent`   | The agent that wrote it, as `dork:agent:<id>`, from `DORKOS_AGENT_ID`. An opaque id: a ULID reveals only when the agent was made.                                                                                                       |
+| `chat`    | The chat that wrote it, as `dork:chat:<id>`: `DORKOS_SESSION_ID` in a DorkOS turn, else the harness's own session id. Derive it, never guess. A reader that can open the chat builds the link itself: `<its own origin>/r/dork:chat:<id>`. |
+| `space`   | The space the chat belongs to, as `dork:space:<id>`, from `DORKOS_SPACE_ID` (a bare id or the whole reference).                                                                                                                         |
 | `host`    | The DorkOS install holding the chat, as `"dork:host:" + hex(sha256("dork:host:v1:" + lowercase(install id)))[0:32]`. Omitted without a DorkOS install, and in public. A mismatch rules local resume out.                                 |
 | `turn`    | The turn that wrote it, as `dork:turn:<id>`. Optional. Only in signatures, never a link. Omitted in public.                                                                                                                              |
 | `address` | The agent's address, as `dork:<space>/<handle>`, when it has one. Optional. It is the agent's public name.                                                                                                                               |
@@ -104,7 +107,7 @@ anonymous usage id, which never leaves the machine).
 | `host`       | The install reference, as in version 2. A line written before flow 0.99.2 may hold a hostname here instead; readers ignore it (section 11).                                                    |
 | `surface`    | As in version 2.                                                                                                                                                                                 |
 | `instanceId` | **Omit it.** The only install UUID DorkOS has is its anonymous usage id. `host` names the install instead.                                                                                     |
-| `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead. Omitted in public repositories (section 8). Readers ignore it. |
+| `resumeUrl`  | A URL that opened the session, only when it was resumable. Omitted in public repositories (section 8). Readers ignore it. |
 
 **These fields are the whole wire format.** A run records more about itself
 locally — the worktree path, the branch, the delegated worker id — and those stay
@@ -179,14 +182,12 @@ fields change.
 <!-- agent:provenance {"v":2,"harness":"claude-code","surface":"dorkos","account":"work","agent":"dork:agent:01KJXYKJYW4N8QGQ5W4GB6YM9J","chat":"dork:chat:7c1e4b2a","space":"dork:space:01JD3F1W2KQ8Z0YV9N6B5T4RMA","address":"dork:acme/owl"} -->
 ```
 
-**Version 1**, what flow's emitters write today:
+**Version 1**, for an emitter that still writes it:
 
 - **`sessionId`** — an emitter MAY ship only its **first 8 characters** instead of
   omitting it.
 - **`resumeUrl`** — **omit it.** Truncating `sessionId` while shipping a full
-  resume URL that contains the same id is not privacy, it is theatre. The URL is
-  reconstructible locally by anyone who can actually resume the session, which is
-  the only person it helps.
+  resume URL that contains the same id is not privacy, it is theatre.
 - **`host`** — **omit it.** It is for private trackers.
 
 In both versions readers treat the chat id as an **opaque token matched locally**,
@@ -204,6 +205,9 @@ and the equivalent read on another forge. **When visibility cannot be determined
 treat the repository as public.** That is the fail-safe direction: the cost of
 being wrong toward "public" is one degraded resume, and the cost of being wrong
 toward "private" is a permanent leak.
+
+Flow's signer reads no visibility: it signs PR text as public and tracker text as
+private.
 
 ## 9. Which writes carry it
 

@@ -614,7 +614,7 @@ describe('flow pr', () => {
     const create = r.forge.calls.find((c) => c.method === 'createPr')?.arg as CreatePrInput;
     expect(create).toMatchObject({ head: 'work', base: 'work', title: 'Export CSV' });
     expect(create.body).toMatch(
-      /^Adds CSV export\.\n\n<!-- agent:provenance .*"sessionId":"session-"/
+      /^Adds CSV export\.\n\n<!-- agent:provenance \{"v":2,.*"chat":"dork:chat:session-"\}/
     );
     expect(create.body).not.toContain('"host"');
     expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);

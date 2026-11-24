@@ -190,7 +190,11 @@ describe('readSignature — a malformed field is dropped alone', () => {
     ['an address whose space is another kind word', { address: 'dork:agent/owl' }, 'address'],
     ['an address whose space is the todo kind', { address: 'dork:todo/owl' }, 'address'],
     ['an address whose space is the run kind', { address: 'dork:run/owl' }, 'address'],
-    ['an address whose space is the reserved project word', { address: 'dork:project/owl' }, 'address'],
+    [
+      'an address whose space is the reserved project word',
+      { address: 'dork:project/owl' },
+      'address',
+    ],
   ])('%s', (_name, override, dropped) => {
     const signature = readSignature(body({ ...V2, ...override }));
     expect(signature).toBeDefined();

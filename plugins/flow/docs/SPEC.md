@@ -177,7 +177,7 @@ FlowRun {
   checkpointAt?, checkpointSha?; // the last flow checkpoint
   drain?;                       // flow drain: phase, sessions, reports, rev. Phases: working,
                                 //   reviewing, fixing, pr-ready, watching, fixing-ci, closing, parked
-  provenance?;                  // v/harness/session/account/worker/host/instance/surface/resumeUrl
+  provenance?;                  // v/harness/session/account/worker/chat/agent/space/host/instance/surface/resumeUrl
 }
 ```
 
