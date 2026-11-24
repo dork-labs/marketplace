@@ -18,6 +18,7 @@ import {
   signBody,
   unsignedBody,
 } from '../../scripts/cli/provenance.ts';
+import { readSignature } from '../../scripts/signature-line.ts';
 
 /** A made-up install id. */
 const INSTALL_ID = '4f7c2c6e-1b0a-4c2a-9a1e-8d3b7f6e5c21';
@@ -177,6 +178,36 @@ describe('provenanceLine', () => {
   it('writes no line when only the version is known', () => {
     // Purpose: an empty stamp looks like provenance and routes nothing.
     expect(provenanceLine({ v: 1 })).toBeUndefined();
+    expect(provenanceLine({ v: 2 })).toBeUndefined();
+  });
+
+  it('still writes a v1 line from a v2 run record (DOR-5047, reader first)', () => {
+    // Purpose: a newer flow may leave `v: 2` and v2 fields in the run record.
+    // This release writes version 1, so the line keeps `"v":1` and version 1's
+    // fields only; it never goes out as a v2 line carrying v1 fields.
+    const record = {
+      v: 2,
+      harness: 'claude-code',
+      sessionId: 's-1',
+      chat: 'dork:chat:s-1',
+      agent: 'dork:agent:01KJXYKJYW4N8QGQ5W4GB6YM9J',
+      space: 'dork:space:01JD3F1W2KQ8Z0YV9N6B5T4RMA',
+      turn: 'dork:turn:01JD3F2Z7P1Q4R8S9T0U2V3W4X',
+      address: 'dork:acme/owl',
+      host: HOST_REF,
+    };
+    const line = provenanceLine(record);
+    expect(line).toBe(
+      `<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"s-1","host":"${HOST_REF}"} -->`
+    );
+    // And the reader reads it back as the same chat.
+    expect(readSignature(`Done.\n${line}`)).toEqual({
+      name: 'agent:provenance',
+      v: 1,
+      harness: 'claude-code',
+      chat: 's-1',
+      host: HOST_REF,
+    });
   });
 });
 
@@ -204,5 +235,11 @@ describe('signBody and unsignedBody', () => {
   it('accepts the legacy marker name when stripping', () => {
     // Purpose: readers accept flow:provenance, so the idempotency check must too.
     expect(unsignedBody('Hi\n<!-- flow:provenance {"sessionId":"x"} -->')).toBe('Hi');
+  });
+
+  it('strips a v2 line, so a summary posted by a v2 emitter compares equal', () => {
+    const v1 = signBody('Done.', '— 🤖 /flow', { v: 1, sessionId: 'one' });
+    const v2 = 'Done.\n\n— 🤖 /flow\n<!-- agent:provenance {"v":2,"chat":"dork:chat:two"} -->';
+    expect(unsignedBody(v2)).toBe(unsignedBody(v1));
   });
 });

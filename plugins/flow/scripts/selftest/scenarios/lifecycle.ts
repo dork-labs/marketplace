@@ -25,6 +25,7 @@
 import { PROVENANCE_MARKER } from '../../cli/provenance.ts';
 import { journalFor, read as readJournal, runtimeOf } from '../../journal.ts';
 import { detectRuntime } from '../../runtime-detect.ts';
+import { readSignature } from '../../signature-line.ts';
 import { AGENT_READY } from '../../work-state.ts';
 import {
   check,
@@ -88,13 +89,6 @@ export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
 
 /** The item the scenario carries through. */
 const ID = 'FAKE-1';
-
-/** The last provenance line of a body, parsed, or `undefined`. */
-function provenanceOf(body: string): Record<string, unknown> | undefined {
-  const lines = body.trimEnd().split('\n');
-  const match = new RegExp(`^<!-- ${PROVENANCE_MARKER} (\\{.*\\}) -->$`).exec(lines.at(-1) ?? '');
-  return match === null ? undefined : (JSON.parse(match[1]) as Record<string, unknown>);
-}
 
 /** Check the item's category, display state and `agent/*` and `stage/*` labels. */
 function expectItem(
@@ -234,14 +228,15 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
       comment.body.includes(config.identity.marker),
       `the completion comment lacks the identity marker ${config.identity.marker}`
     );
-    const provenance = provenanceOf(comment.body);
+    // Read as every reader reads it, so the check holds whichever version flow emits.
+    const provenance = readSignature(comment.body);
     check(
-      provenance !== undefined,
+      provenance !== undefined && provenance.name === PROVENANCE_MARKER,
       'the completion comment has no provenance line as its last line'
     );
     checkEqual(provenance.harness, recorded.harness, `the ${runtime} provenance harness`);
     checkEqual(
-      provenance.sessionId,
+      provenance.chat,
       recorded.sessionId === '' ? undefined : recorded.sessionId,
       `the ${runtime} provenance session id`
     );

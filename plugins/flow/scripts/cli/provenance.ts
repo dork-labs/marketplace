@@ -9,7 +9,9 @@
  *   the install reference `dork:host:<hash>`, a one-way hash of the DorkOS
  *   install id ({@link hostRefFor}), or absent.
  * - {@link provenanceLine} turns that into the one hidden line a signed body
- *   ends with, carrying only the eight wire fields.
+ *   ends with, carrying only version 1's wire fields. Flow reads version 2
+ *   lines (`../signature-line.ts`) but still writes version 1 until the next
+ *   release (`docs/provenance.md` §2).
  * - {@link signBody} and {@link unsignedBody} add and strip the marker and the
  *   line, so `flow done` can tell whether a summary is already posted.
  *
@@ -49,7 +51,7 @@ export const LAUNCHERS = ['cli', 'dorkos', 'cmux'] as const;
 /** One of {@link LAUNCHERS}. */
 export type Launcher = (typeof LAUNCHERS)[number];
 
-/** The fields that go on the wire (`docs/provenance.md` §4), in emit order. */
+/** The version 1 fields that go on the wire (`docs/provenance.md` §4), in emit order. */
 const WIRE_FIELDS = [
   'v',
   'harness',
@@ -201,10 +203,16 @@ export function buildProvenance(input: ProvenanceInput): FlowRunProvenance {
 }
 
 /**
- * The hidden signature line for a provenance block: the wire fields only (the
- * local-only worktree, branch and worker id never go out), as valid JSON. A
- * `host` that is not an install reference ({@link isHostRef}) is left out, and
- * so is `instanceId`.
+ * The hidden signature line for a provenance block: the version 1 wire fields
+ * only (the local-only worktree, branch and worker id never go out), as valid
+ * JSON. A `host` that is not an install reference ({@link isHostRef}) is left
+ * out, and so is `instanceId`.
+ *
+ * Always `"v":1`, whatever `v` the block holds: these are version 1's fields,
+ * and a run record a newer flow wrote (`v: 2`, with `chat` or `agent`) must
+ * not go out as a version 2 line carrying version 1's fields. The version 2
+ * fields are read (`../signature-line.ts`), never written, until the emitters
+ * move to version 2 (`docs/provenance.md` §2).
  *
  * @param provenance - The block to sign with.
  * @returns The line, or `undefined` when nothing but the version is known
@@ -213,14 +221,15 @@ export function buildProvenance(input: ProvenanceInput): FlowRunProvenance {
 export function provenanceLine(provenance: FlowRunProvenance): string | undefined {
   const wire: Record<string, unknown> = {};
   for (const field of WIRE_FIELDS) {
+    if (field === 'v') continue;
     const value = provenance[field];
     if (field === 'host' && !isHostRef(provenance.host)) continue;
     // The only install UUID DorkOS has is its anonymous usage id (DOR-5047).
     if (field === 'instanceId') continue;
     if (value !== undefined && value !== '') wire[field] = value;
   }
-  if (Object.keys(wire).every((key) => key === 'v')) return undefined;
-  if (wire.v === undefined) wire.v = 1;
+  if (Object.keys(wire).length === 0) return undefined;
+  wire.v = 1;
   const ordered = Object.fromEntries(WIRE_FIELDS.filter((f) => f in wire).map((f) => [f, wire[f]]));
   return `<!-- ${PROVENANCE_MARKER} ${JSON.stringify(ordered)} -->`;
 }

@@ -712,6 +712,27 @@ describe('flow status', () => {
     const forged = await status(['FAKE-6', '--json'], backlog);
     expect(forged.stdout).not.toContain('FORGED');
     expect(forged.json().parked[0].question.body).toBe('Which database?');
+
+    // DOR-5047: a question signed with a v2 line is the agent's question too,
+    // and a line that does not parse is no signature.
+    backlog.comments!['FAKE-6'].push(
+      {
+        id: 'c5',
+        author: 'agent-1',
+        authorIsTrusted: false,
+        body: 'Which region?\n<!-- agent:provenance {"v":2,"chat":"dork:chat:abc"} -->',
+        createdAt: '2026-09-26T11:40:00.000Z',
+      },
+      {
+        id: 'c6',
+        author: 'agent-1',
+        authorIsTrusted: false,
+        body: 'BROKEN question\n<!-- agent:provenance {"v":2 -->',
+        createdAt: '2026-09-26T11:50:00.000Z',
+      }
+    );
+    const v2 = await status(['FAKE-6', '--json'], backlog);
+    expect(v2.json().parked[0].question.body).toBe('Which region?');
   });
 
   it('reads a saved snapshot instead of the tracker', async () => {

@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.100.0
+
+**Reinstall Flow to receive this change. Nothing changes in what Flow writes yet.**
+
+- Flow now reads the newer form of the hidden signature on comments and items, which names the agent, its chat and its space by DorkOS ids instead of a session id. A reply to a comment signed either way finds its way back to the same session.
+- Flow itself still signs the older way. It moves to the newer form in the next release, once every reader has this one.
+- A signature that still names a computer by its name, from before Flow 0.99.2, no longer counts as naming any computer. A reply to one starts a fresh session instead of joining the old one.
+- A signature is only ever a hint about where a reply might go. Flow never delivers a reply into a session this computer doesn't hold, whatever the signature says.
+
 ## 0.99.2
 
 **Reinstall Flow to receive this fix.**

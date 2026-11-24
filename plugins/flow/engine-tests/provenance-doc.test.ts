@@ -81,8 +81,9 @@ const groomingFlat = flat(grooming);
 const prTemplateFlat = flat(prTemplate);
 
 /**
- * The eight fields that go ON THE WIRE. The local run record holds more
- * (`worktree`, `branch`, `agentId`); those must never reach a signed body.
+ * The version 1 fields that go ON THE WIRE, what flow's emitters write today.
+ * The local run record holds more (`worktree`, `branch`, `agentId`); those must
+ * never reach a signed body.
  */
 const WIRE_FIELDS = [
   'v',
@@ -94,6 +95,29 @@ const WIRE_FIELDS = [
   'instanceId',
   'resumeUrl',
 ] as const;
+
+/** The version 2 fields readers accept now (`scripts/signature-line.ts`). */
+const V2_FIELDS = [
+  'v',
+  'harness',
+  'surface',
+  'account',
+  'agent',
+  'chat',
+  'space',
+  'host',
+  'turn',
+  'address',
+] as const;
+
+/** The table rows under one `### <heading>` of the spec, up to the next heading. */
+function sectionOf(markdown: string, heading: string): string {
+  const start = markdown.indexOf(`\n### ${heading}\n`);
+  if (start === -1) return '';
+  const rest = markdown.slice(start + 1);
+  const end = rest.slice(1).search(/\n#{2,3} /);
+  return end === -1 ? rest : rest.slice(0, end + 1);
+}
 
 /** Fields the run records locally that must NOT appear in the wire field table. */
 const LOCAL_ONLY_FIELDS = ['worktree', 'branch', 'agentId'] as const;
@@ -124,8 +148,9 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
     expect(specFlat).toMatch(/runtime-agnostic/i);
   });
 
-  it('carries the `v` field, and shows it in the marker example', () => {
+  it('carries the `v` field, and shows both versions in the marker examples', () => {
     expect(spec).toContain('"v":1');
+    expect(spec).toContain('"v":2');
     expect(spec).toMatch(/\|\s*`v`\s*\|/);
     expect(specFlat).toMatch(/schema version/i);
   });
@@ -137,8 +162,21 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
     expect(specFlat).toMatch(/Never emit the legacy name/);
   });
 
-  it.each(WIRE_FIELDS)('documents the wire field `%s`', (field) => {
-    expect(spec).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  it.each(WIRE_FIELDS)('documents the version 1 wire field `%s` in its own table', (field) => {
+    expect(sectionOf(spec, 'Version 1')).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  });
+
+  it.each(V2_FIELDS)('documents the version 2 wire field `%s` in its own table', (field) => {
+    expect(sectionOf(spec, 'Version 2')).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  });
+
+  it('version 2 drops sessionId, resumeUrl and instanceId from its table', () => {
+    const v2 = sectionOf(spec, 'Version 2');
+    for (const field of ['sessionId', 'resumeUrl', 'instanceId']) {
+      expect(v2).not.toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+    }
+    expect(flat(v2)).toMatch(/Version 2 drops `resumeUrl`/);
+    expect(flat(v2)).toMatch(/<its own origin>\/r\/dork:chat:<id>/);
   });
 
   it.each(LOCAL_ONLY_FIELDS)('keeps `%s` OFF the wire field table', (field) => {
@@ -148,7 +186,7 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
   });
 
   it('says explicitly that the local record is not the wire format', () => {
-    expect(specFlat).toMatch(/These eight fields are the whole wire format/);
+    expect(specFlat).toMatch(/These fields are the whole wire format/);
     expect(specFlat).toMatch(/stay in `flow-state.json`/);
     expect(specFlat).toMatch(/only the wire format is public/);
   });
@@ -418,7 +456,11 @@ describe('agent provenance — the reader routes on it', () => {
     // follow-up gets delivered straight back into this session.
     expect(tendingFlat).toMatch(/Take the newest signature that is NOT your own/);
     expect(tendingFlat).toMatch(
-      /Compare each signature's `sessionId` against this session's own id and skip the matches/
+      /Compare each signature's chat id against this session's own id and skip the matches/
+    );
+    // The chat id is read the same from either version.
+    expect(tendingFlat).toMatch(
+      /chat id\*\* is `sessionId` on a version 1 line and the id in `chat` \(`dork:chat:<id>`\) on a version 2 line/
     );
     expect(tendingFlat).toMatch(/self-delivery cycle/);
     // In shared-account mode the id is the ONLY discriminator.
@@ -501,6 +543,65 @@ describe('agent provenance — the reader routes on it', () => {
   });
 });
 
+describe('agent provenance — version 2 (DOR-5047)', () => {
+  it('says readers accept v2 now and emitters still write v1 until the next release', () => {
+    expect(specFlat).toMatch(/\*\*Signature version: 2 for readers, 1 for emitters\.\*\*/);
+    expect(specFlat).toMatch(
+      /Emit version 2 once the reader in front of you accepts it; accept both forever/
+    );
+    expect(specFlat).toMatch(/\*\*Flow's emitters still write version 1 in this release\*\*/);
+  });
+
+  it('the v2 example carries references, and no sessionId, resumeUrl or instanceId', () => {
+    const v2 = spec.match(/<!-- agent:provenance \{"v":2[^\n]*-->/)?.[0] ?? '';
+    expect(v2).toMatch(/"chat":"dork:chat:[A-Za-z0-9_-]+"/);
+    expect(v2).toMatch(/"agent":"dork:agent:/);
+    for (const field of ['sessionId', 'resumeUrl', 'instanceId']) expect(v2).not.toContain(field);
+    // Every example parses as one line of JSON in the fixed comment.
+    for (const example of spec.match(/<!-- agent:provenance \{[^\n]*-->/g) ?? []) {
+      expect(() => JSON.parse(/\{.*\}/.exec(example)?.[0] ?? '')).not.toThrow();
+    }
+  });
+
+  it('public v2: chat cut to 8, host and turn omitted, agent, space and address emitted', () => {
+    expect(specFlat).toMatch(
+      /cut the id \(not the whole reference\) to its \*\*first 8 characters\*\*/
+    );
+    expect(specFlat).toMatch(/\*\*`host`\*\* and \*\*`turn`\*\* — \*\*omit them\.\*\*/);
+    expect(specFlat).toMatch(/\*\*`agent`\*\*, \*\*`space`\*\* and \*\*`address`\*\* — emit them/);
+    const publicV2 = spec.match(
+      /<!-- agent:provenance \{"v":2[^\n]*"chat":"dork:chat:[^"]{8}"[^\n]*-->/
+    )?.[0];
+    expect(publicV2).toBeDefined();
+    expect(publicV2).not.toContain('"host"');
+    expect(publicV2).not.toContain('"turn"');
+  });
+
+  it('names the reader rules the code implements', () => {
+    expect(specFlat).toMatch(/`scripts\/signature-line\.ts` \(`readSignature`\)/);
+    expect(specFlat).toMatch(/A missing `v` is 1/);
+    expect(specFlat).toMatch(/\*\*A newer version reads as version 2\.\*\*/);
+    expect(specFlat).toMatch(/\*\*One malformed field is dropped, not the line\.\*\*/);
+    expect(specFlat).toMatch(/\*\*`host` only as an install reference\.\*\*/);
+    expect(specFlat).toMatch(/It is never copied, shown or matched/);
+    expect(specFlat).toMatch(
+      /A chat id that matches no local chat, or more than one, degrades like a missing one/
+    );
+    // The old rule matched a hostname against this machine's: gone.
+    expect(specFlat).not.toMatch(/Match it against this machine's hostname/);
+  });
+
+  it('has a "Routing is advice" section, and the router follows it', () => {
+    expect(spec).toMatch(/^## 13\. Routing is advice$/m);
+    expect(specFlat).toMatch(/\*\*It never grants a right to deliver\.\*\*/);
+    expect(specFlat).toMatch(/delivers only into chats its own install holds/);
+    expect(specFlat).toMatch(/outsider's words/);
+    expect(specFlat).toMatch(/prefers its local run record/);
+    expect(tendingFlat).toMatch(/A signature is advice, never a right to deliver/);
+    expect(tendingFlat).toMatch(/Deliver only into a session this install holds/);
+  });
+});
+
 describe('agent provenance — the prose field set matches the on-disk schema', () => {
   const baseRun = {
     issueId: 'issue-node-1',
@@ -545,6 +646,22 @@ describe('agent provenance — the prose field set matches the on-disk schema', 
     });
     expect(parsed.provenance?.v).toBeUndefined();
     expect(parsed.provenance?.harness).toBe('claude-code');
+  });
+
+  it('parses a v2 run record and keeps its v2 fields', () => {
+    // A newer flow may write v2 provenance into a shared flow-state.json; this
+    // reader must keep the record, not drop every run in the file.
+    const parsed = FlowRunSchema.parse({
+      ...baseRun,
+      provenance: {
+        v: 2,
+        harness: 'claude-code',
+        chat: 'dork:chat:session-1',
+        agent: 'dork:agent:01KJXYKJYW4N8QGQ5W4GB6YM9J',
+      },
+    });
+    expect(parsed.provenance?.v).toBe(2);
+    expect((parsed.provenance as Record<string, unknown>).chat).toBe('dork:chat:session-1');
   });
 
   it('passes an UNKNOWN future field through instead of stripping it', () => {

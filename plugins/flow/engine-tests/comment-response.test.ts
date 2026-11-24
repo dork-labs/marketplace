@@ -207,13 +207,19 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
     });
   });
 
-  it("silences the agent's own comment whose marker the tracker garbled, by its signature line", () => {
-    const c = comment({ author: 'agent-account', body: `Picked this up.\n\n— /flow\n${LINE}` });
-    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
-      action: 'ignore',
-      rule: 1,
-    });
-  });
+  it.each([
+    ['a v1 line', LINE],
+    ['a v2 line', '<!-- agent:provenance {"v":2,"chat":"dork:chat:s-1"} -->'],
+  ])(
+    "silences the agent's own comment whose marker the tracker garbled, by its signature line (%s)",
+    (_name, line) => {
+      const c = comment({ author: 'agent-account', body: `Picked this up.\n\n— /flow\n${line}` });
+      expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+        action: 'ignore',
+        rule: 1,
+      });
+    }
+  );
 
   it.each([['Shipped from DorkOS.'], ['Sent back: rerun /flow verify with the fixture']])(
     "takes flow's record of a review for flow's own, signed or not: %s",
@@ -301,6 +307,7 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
     ['in the middle of the body', `${LINE}\nCould /flow pick this up?`],
     ['that is not valid JSON', 'Could /flow pick this up?\n<!-- agent:provenance {"v":1 -->'],
     ['whose JSON is not an object', 'Could /flow pick this up?\n<!-- agent:provenance [1] -->'],
+    ['whose v is not a number', 'Could /flow pick this up?\n<!-- agent:provenance {"v":"2"} -->'],
   ])('does not take a signature line %s as the agent', (_name, body) => {
     const c = comment({ author: 'agent-account', body });
     expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({

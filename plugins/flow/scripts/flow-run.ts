@@ -113,11 +113,13 @@ export type FlowStage =
  */
 export interface FlowRunProvenance {
   /**
-   * Signature schema version — `1` today. The one field that is not
-   * harness-derived, so it is the one field a run can always write. A reader that
-   * does not recognize a higher version reads the fields it knows and ignores the
-   * rest; a signature with no `v` at all is the legacy `flow:provenance` shape and
-   * reads as `1`.
+   * Signature schema version — flow writes `1` today and reads `1` and `2`
+   * (`signature-line.ts`). The one field that is not harness-derived, so it is
+   * the one field a run can always write. A reader that does not recognize a
+   * higher version reads the fields it knows and ignores the rest; a signature
+   * with no `v` at all is the legacy `flow:provenance` shape and reads as `1`.
+   * The signer writes `"v":1` whatever this holds, so a record a newer flow
+   * wrote never goes out mislabelled (`provenanceLine` in `cli/provenance.ts`).
    */
   v?: number;
   /**
