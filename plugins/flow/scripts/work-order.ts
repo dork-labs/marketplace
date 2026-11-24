@@ -139,7 +139,7 @@ export interface ProjectEntry {
   status: 'started' | 'planned' | 'paused' | 'backlog';
   /** One reason per key that decided its place. */
   why: OrderReason[];
-  /** What a person should fix: "needs a priority", "needs a target date", "over cap", "can't start: waits on <P>". */
+  /** What a person should fix: "needs a priority", "over cap", "can't start: waits on <P>". */
   flags: string[];
 }
 
@@ -853,7 +853,7 @@ export function explainIssue(input: WorkOrderInput, identifier: string): string[
         typeof above.item.dueDate === 'string'
           ? `${ahead} is due ${plainDate(above.item.dueDate, order.generatedAt)}; an earlier due date moves it up`
           : `${ahead} sorts first on due date; an earlier due date moves it up`,
-      projectRank: `${ahead}'s project ranks higher; a higher project priority or an earlier target date moves its project up`,
+      projectRank: `${ahead}'s project ranks higher; a higher project priority moves its project up`,
       unblocks: `${ahead} unblocks more open items; a blocks relation to an open item counts for it`,
       type: `${ahead} is a type that ranks first (Bug, then Improvement, then Feature)`,
       size: `${ahead} is smaller; splitting it into smaller items moves the first one up`,

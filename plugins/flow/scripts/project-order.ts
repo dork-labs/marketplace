@@ -5,8 +5,8 @@
  * Started projects are "now" and feed the issue order; Planned ones are
  * "next"; Paused and Backlog ones are "later" (shown only with `--all`);
  * Completed and Canceled ones are left out. Inside each list: project
- * priority (none last), target date (none last), created time, then the
- * project's slug.
+ * priority (none last), created time, then the project's slug. A target date
+ * is data only: it never moves a project (no steering by dates).
  *
  * Pure and deterministic, like `work-order.ts`: same input, same output, and
  * input order never matters.
@@ -35,7 +35,7 @@ function priorityKey(project: ProjectInfo): number {
   return typeof p === 'number' && p >= 1 && p <= 4 ? p : NEUTRAL;
 }
 
-/** A `YYYY-MM-DD` or ISO date as a sort key; none or unreadable last. */
+/** An ISO time as a sort key; none or unreadable last. */
 function dateKey(value: string | undefined): number {
   if (typeof value !== 'string') return NEUTRAL;
   const ms = Date.parse(value);
@@ -51,7 +51,6 @@ function compareKeys(a: number, b: number): number {
 function compareProjects(a: ProjectInfo, b: ProjectInfo): number {
   return (
     compareKeys(priorityKey(a), priorityKey(b)) ||
-    compareKeys(dateKey(a.targetDate), dateKey(b.targetDate)) ||
     compareKeys(dateKey(a.createdAt), dateKey(b.createdAt)) ||
     (a.slugId < b.slugId ? -1 : a.slugId > b.slugId ? 1 : 0) ||
     (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
@@ -63,9 +62,6 @@ function reasonsOf(project: ProjectInfo): ProjectEntry['why'] {
   const why: ProjectEntry['why'] = [];
   const p = priorityKey(project);
   if (p !== NEUTRAL) why.push({ key: 'priority', text: `priority ${p}` });
-  if (typeof project.targetDate === 'string') {
-    why.push({ key: 'targetDate', text: `target ${project.targetDate}` });
-  }
   return why;
 }
 

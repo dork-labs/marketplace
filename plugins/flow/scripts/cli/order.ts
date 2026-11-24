@@ -124,7 +124,7 @@ function projectBlock(heading: string, entries: readonly ProjectEntry[]): string
     trimRow([
       `  ${entry.place}`,
       entry.name,
-      entry.why.map((reason) => reason.text).join(', ') || 'no priority or target date',
+      entry.why.map((reason) => reason.text).join(', ') || 'no priority',
       entry.flags.join('; '),
     ])
   );

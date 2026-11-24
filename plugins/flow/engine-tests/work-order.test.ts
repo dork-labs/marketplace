@@ -285,6 +285,42 @@ describe('the base order, in words', () => {
   });
 });
 
+describe('projects rank without dates (Nov 24: no steering by dates)', () => {
+  const twin = (id: string, created: string, target?: string): ProjectInfo => ({
+    id,
+    name: id,
+    slugId: id,
+    statusType: 'started',
+    priority: 2,
+    labels: [],
+    blockedBy: [],
+    createdAt: created,
+    ...(target === undefined ? {} : { targetDate: target }),
+  });
+
+  it('a target date neither moves a project nor shows in its reasons', () => {
+    const order = computeWorkOrder({
+      items: [],
+      projects: [
+        twin('p-late', '2026-01-02T00:00:00Z', '2026-12-01'),
+        twin('p-early', '2026-01-01T00:00:00Z'),
+      ],
+      config: CONFIG,
+      now: file.now,
+    });
+    expect(order.projects.now.map((p) => p.id)).toEqual(['p-early', 'p-late']);
+    expect(order.projects.now[1].why.map((r) => r.text)).toEqual(['priority 2']);
+    expect(order.projects.now.flatMap((p) => p.flags)).toEqual([]);
+  });
+
+  it('the advice for the project key never suggests a target date', () => {
+    const ids = computeWorkOrder(input()).issues.map((i) => i.identifier);
+    const text = ids.map((id) => explainIssue(input(), id).join('\n')).join('\n');
+    expect(text).toMatch(/project ranks higher/);
+    expect(text).not.toMatch(/target date/);
+  });
+});
+
 describe('degrades on bad adapter data instead of throwing', () => {
   // Every field the fixture's first item has, plus the optional ones it lacks.
   const fields = [
