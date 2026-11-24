@@ -87,6 +87,8 @@ interface AuditOpts {
   projects?: readonly unknown[];
   /** How many projects may be Started at once (config `projects.startedCap`). Default: 6. */
   startedCap?: number;
+  /** The label that keeps a project out of the agent order (config `order.personLabel`). Default: none. */
+  personLabel?: string;
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -114,7 +116,7 @@ Fixture: a JSON array of WorkItems, or
     "now": "<ISO>", "couldExpiryDays": 60,
     "neverExpireLabels": ["security", "needs-security-design"],
     "pinSetters": ["<account id>"], "projects": [<ProjectInfo>...],
-    "startedCap": 6 } }.
+    "startedCap": 6, "personLabel": "owner/someone" } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -155,7 +157,7 @@ Invariants ("ready" = carries the literal agent/ready label):
           pinned by one of those accounts (pin.actor)
   GRM-18  the projects in opts.projects are within opts.startedCap (default 6)
           Started at once, and every Started one has a priority and waits on
-          no open project. A target date is never required. A report for a
+          no open project. A project with opts.personLabel is not counted. A target date is never required. A report for a
           person: flow never changes a project's status
 `;
 
@@ -541,6 +543,7 @@ function checkGrm18(items: readonly unknown[], opts: AuditOpts): string[] {
     orderKeys: [],
     sizeOrder: 'small-first',
     startedCap: opts.startedCap ?? DEFAULT_STARTED_CAP,
+    ...(opts.personLabel === undefined ? {} : { personLabel: opts.personLabel }),
   });
   const details = [...ranking.flags];
   for (const project of ranking.now) {
@@ -733,6 +736,9 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
     // The config's rule: a positive whole number; anything else keeps the default.
     const cap = isPlainObject(parsed.opts) ? parsed.opts.startedCap : undefined;
     if (typeof cap === 'number' && Number.isInteger(cap) && cap > 0) opts.startedCap = cap;
+    // A label, as the config allows; anything else keeps the default (none).
+    const personLabel = isPlainObject(parsed.opts) ? parsed.opts.personLabel : undefined;
+    if (isNonEmptyString(personLabel)) opts.personLabel = personLabel;
     return { items: parsed.items, opts };
   }
   throw new Error(

@@ -228,7 +228,7 @@
         "projects": {
           "now": ["p-billing", "p-search"],
           "next": ["p-mobile", "p-docs"],
-          "dorian": ["p-ops"],
+          "personal": ["p-ops"],
           "flags": [],
           "projectFlags": {
             "p-billing": [],
@@ -745,10 +745,10 @@
       }
     },
     {
-      "name": "an owner/dorian project is out of the agent order, its issues on Dorian's list",
+      "name": "a project with the person label (owner/someone) is out of the agent order, and so are its issues",
       "projectPatch": {
         "p-search": {
-          "labels": ["owner/dorian"]
+          "labels": ["owner/someone"]
         }
       },
       "expected": {
@@ -765,9 +765,9 @@
         ],
         "projects": {
           "now": ["p-billing"],
-          "dorian": ["p-search", "p-ops"]
+          "personal": ["p-search", "p-ops"]
         },
-        "dorian": ["ABC-1", "ABC-6", "ABC-8", "ABC-9", "ABC-14", "ABC-15"]
+        "personal": ["ABC-1", "ABC-6", "ABC-8", "ABC-9", "ABC-14", "ABC-15"]
       }
     },
     {

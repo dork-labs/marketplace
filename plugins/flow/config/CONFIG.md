@@ -581,7 +581,7 @@ status, priority, target date and relations.
   is `6`. flow never changes a project's status. Over the cap, it names the
   lowest-ranked Started projects so a person can pause or finish one, and the
   audit (GRM-18) reports it with each Started project's flags. Projects
-  labelled `owner/dorian` don't count toward the cap.
+  with the `order.personLabel` label don't count toward the cap.
 - Projects rank by, first to last: the `pin` label, priority (none last,
   flagged `needs a priority`), what waits on them, the estimates left on their
   open issues (an unsized issue counts as the largest size), then age. A

@@ -6,9 +6,10 @@
  *
  * Started projects are "now" and feed the issue order; Planned ones are
  * "next"; Paused and Backlog ones are "later" (shown only with `--all`);
- * Completed and Canceled ones are left out. A project labelled `owner/dorian`
- * is in none of them: it is on {@link ProjectRanking.dorian}, out of the agent
- * order, and its issues go to Dorian's list.
+ * Completed and Canceled ones are left out. A project carrying the configured
+ * `order.personLabel` is in none of them: it is on
+ * {@link ProjectRanking.personal}, out of the agent order, and so are its
+ * issues. Unset, no project is.
  *
  * ## Rank inside a list, first key first
  *
@@ -19,8 +20,8 @@
  *    `can't start: waits on <P>` (its issues do not rank), and the project in
  *    the way takes the better of its own keys and those of every Started or
  *    Planned project waiting on it, through any depth, cycle-safe, and always
- *    sorts ahead of the projects in its list that wait on it. Dorian's
- *    projects still lift the projects in their way, though they are not
+ *    sorts ahead of the projects in its list that wait on it. Projects kept
+ *    out by `order.personLabel` still lift the projects in their way, though they are not
  *    listed themselves.
  * 4. Remaining work: the estimates of its open issues added up, smaller
  *    first. An unsized issue counts as the largest bucket, so a project
@@ -37,8 +38,8 @@
  * projects and reports `over cap: N Started, cap M; lowest: P1, P2`, naming
  * Started projects that can't start (they wait on another) before those that
  * can run. It never changes a project's status: a person pauses or finishes
- * one. Projects on
- * Dorian's list do not count toward the cap.
+ * one. Projects kept
+ * out by `order.personLabel` do not count toward the cap.
  *
  * Pure and deterministic, like `work-order.ts`: same input, same output, and
  * input order never matters.
@@ -70,7 +71,6 @@ const OPEN_CATEGORIES = new Set(['backlog', 'unstarted', 'started']);
 
 /** The project labels the ranking reads, matched by group and name. */
 const PIN_LABEL = 'pin';
-const OWNER_DORIAN_LABEL = 'owner/dorian';
 
 /** Priority names, by priority number, for the `why` list. */
 const PRIORITY_NAME = new Map<number, string>([
@@ -341,10 +341,10 @@ function blockersFirst(
  *
  * @param projects - Every open project of the team.
  * @param items - Every open item of the team (for remaining work).
- * @param config - The resolved order settings (`startedCap`).
+ * @param config - The resolved order settings (`startedCap`, `personLabel`).
  * @param now - The moment the order is for, ISO-8601: dates in the `why` text
  *   leave out the year when it is this one. Without it they always carry it.
- * @returns The three lists, Dorian's projects, whole-list flags, the projects
+ * @returns The three lists, the projects `order.personLabel` keeps out, whole-list flags, the projects
  *   that wait on another, and each listed project's rank.
  */
 export function rankProjects(
@@ -405,11 +405,12 @@ export function rankProjects(
     compareText(a.project.id, b.project.id);
 
   const lists = { now: [] as Ranked[], next: [] as Ranked[], later: [] as Ranked[] };
-  const dorian: ProjectRanking['dorian'] = [];
+  const personal: ProjectRanking['personal'] = [];
+  const personLabel = config.personLabel;
   const sorted = [...ranked.values()].sort(compare);
   for (const entry of sorted) {
-    if (hasLabel(entry.project, OWNER_DORIAN_LABEL)) {
-      dorian.push({ id: entry.project.id, name: entry.project.name });
+    if (personLabel !== undefined && hasLabel(entry.project, personLabel)) {
+      personal.push({ id: entry.project.id, name: entry.project.name });
       continue;
     }
     lists[LIST_OF.get(entry.project.statusType) as 'now' | 'next' | 'later'].push(entry);
@@ -470,5 +471,5 @@ export function rankProjects(
     ].map((entry) => entry.name);
     flags.push(`over cap: ${nowList.length} Started, cap ${cap}; lowest: ${lowest.join(', ')}`);
   }
-  return { now: nowList, next, later, dorian, flags, rankOf, waitsOn };
+  return { now: nowList, next, later, personal, flags, rankOf, waitsOn };
 }

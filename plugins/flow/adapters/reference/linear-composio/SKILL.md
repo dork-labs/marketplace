@@ -232,7 +232,7 @@ still loads, and the work order treats the field as unset.
   - `priority` <- the project's priority, `1`-`4` only (`0` means none: leave
     it out). `targetDate` <- its `targetDate`, `YYYY-MM-DD`.
   - `labels` <- the project's labels, re-namespaced `group/name` like an
-    issue's (`owner/dorian` takes a project out of the agent order; `pin` puts
+    issue's (the `order.personLabel` label takes a project out of the agent order; `pin` puts
     it first).
   - `blockedBy` <- the ids of the projects this one waits on, from both
     `relations` and `inverseRelations`: a `dependency` edge whose blocking end

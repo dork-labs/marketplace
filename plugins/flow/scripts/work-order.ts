@@ -156,8 +156,8 @@ export interface ProjectRanking {
   next: ProjectEntry[];
   /** Paused and Backlog projects, in rank: shown only with `--all`. */
   later: ProjectEntry[];
-  /** Projects labelled `owner/dorian`, in rank: out of the agent order. */
-  dorian: { id: string; name: string }[];
+  /** Projects with `order.personLabel`, in rank: out of the agent order. */
+  personal: { id: string; name: string }[];
   /** Whole-list flags, e.g. "over cap: 9 Started, cap 6; lowest: P1, P2". */
   flags: string[];
   /** Each project that waits on an open project, by id, to the names of the projects it waits on. */
@@ -181,7 +181,7 @@ export interface WorkOrder {
     now: ProjectEntry[];
     next: ProjectEntry[];
     later: ProjectEntry[];
-    dorian: ProjectRanking['dorian'];
+    personal: ProjectRanking['personal'];
     flags: string[];
   };
   /** The issue order, best first. */
@@ -745,7 +745,7 @@ function buildOrder(input: WorkOrderInput): Built {
         now: ranking.now,
         next: ranking.next,
         later: ranking.later,
-        dorian: ranking.dorian,
+        personal: ranking.personal,
         flags: ranking.flags,
       },
       issues,

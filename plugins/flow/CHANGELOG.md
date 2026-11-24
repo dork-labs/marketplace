@@ -12,7 +12,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - A project with no priority is flagged. So is a project waiting on one that isn't finished. Its issues wait too, and the project in its way moves up, ahead of every project waiting on it.
 - An issue with no estimate counts as the largest size when Flow adds up a project's open work, so a project nobody has sized doesn't look small.
 - When more projects are Started than `projects.startedCap` allows (6 by default), `flow order` names the ones to pause or finish. Projects that can't start yet come first, then the lowest-ranked. Flow never changes a project's status itself.
-- A project labelled `owner/dorian` is left out of the agent order and listed on its own. Its issues go on Dorian's list.
+- A project carrying the label you set in `order.personLabel` is left out of the agent order and listed on its own, and so are its issues.
 - `flow audit` has a new check, GRM-18. It reports Started projects over the cap, and any Started project with no priority or waiting on an unfinished project. It only reports; a person decides.
 - The Linear adapter warns when a project has more relations or labels than it reads (10 each way, 20 labels), since a dependency may be missing.
 

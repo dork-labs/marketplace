@@ -51,6 +51,7 @@ interface Snapshot {
     couldExpiryDays?: number;
     pinSetters?: string[];
     projects?: Array<Record<string, unknown>>;
+    personLabel?: string;
     startedCap?: number;
   };
 }
@@ -679,10 +680,11 @@ describe('project flags (GRM-18, DOR-5067)', () => {
     blockedBy: [],
     ...extra,
   });
-  const grm18 = (projects: unknown[] | undefined, startedCap?: number) =>
+  const grm18 = (projects: unknown[] | undefined, startedCap?: number, personLabel?: string) =>
     audit([], {
       ...(projects === undefined ? {} : { projects }),
       ...(startedCap === undefined ? {} : { startedCap }),
+      ...(personLabel === undefined ? {} : { personLabel }),
     }).failures.find((f) => f.invariant === 'GRM-18')?.detail;
 
   it('passes when no project info was read, or every Started project is in order', () => {
@@ -701,14 +703,24 @@ describe('project flags (GRM-18, DOR-5067)', () => {
     ).toBe("Started project C: can't start: waits on D; Started project A: needs a priority");
   });
 
-  it("leaves Planned, Paused and Dorian's projects out of the report", () => {
+  it('leaves Planned, Paused and order.personLabel projects out of the report', () => {
     expect(
-      grm18([
-        project('a', { statusType: 'planned', priority: undefined }),
-        project('b', { statusType: 'paused', targetDate: undefined }),
-        project('c', { labels: ['owner/dorian'], priority: undefined }),
-      ])
+      grm18(
+        [
+          project('a', { statusType: 'planned', priority: undefined }),
+          project('b', { statusType: 'paused', targetDate: undefined }),
+          project('c', { labels: ['owner/someone'], priority: undefined }),
+        ],
+        undefined,
+        'owner/someone'
+      )
     ).toBeUndefined();
+  });
+
+  it('with no personLabel, a project carrying that label is reported like any other', () => {
+    expect(grm18([project('c', { labels: ['owner/someone'], priority: undefined })])).toBe(
+      'Started project C: needs a priority'
+    );
   });
 
   it('reports the Started cap, default 6, naming the lowest projects', () => {
@@ -723,8 +735,9 @@ describe('project flags (GRM-18, DOR-5067)', () => {
     const snapshot = goodSnapshot();
     snapshot.opts = {
       ...snapshot.opts,
-      projects: [project('a'), project('b')],
+      projects: [project('a'), project('b'), project('c', { labels: ['owner/someone'] })],
       startedCap: 1,
+      personLabel: 'owner/someone',
     };
     const { status, stdout } = runOracle({ stdin: JSON.stringify(snapshot) });
     expect(status).toBe(1);

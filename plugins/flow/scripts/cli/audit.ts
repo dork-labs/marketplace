@@ -8,7 +8,8 @@
  *   and reads `groom.couldExpiryDays` and `groom.neverExpireLabels`. GRM-17 (a pin
  *   with no reason, or set by someone else) reads `order.pinSetters`.
  *   GRM-18 (Started projects over the cap, unprioritised or waiting) reads the pull's
- *   `projectInfo` and `projects.startedCap`; with no `projectInfo` it checks nothing.
+ *   `projectInfo`, `projects.startedCap` and `order.personLabel`; with no `projectInfo`
+ *   it checks nothing.
  * - Human output: one block per failing invariant, titled from the oracle's
  *   own invariant list, one line per offending item.
  * - `--json`: the oracle's `{ ok, failures }`.
@@ -69,6 +70,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     pinSetters: project.loaded.config.order.pinSetters,
     ...(Array.isArray(snapshot.projectInfo) ? { projects: snapshot.projectInfo } : {}),
     startedCap: project.loaded.config.projects.startedCap,
+    ...(project.loaded.config.order.personLabel === undefined
+      ? {}
+      : { personLabel: project.loaded.config.order.personLabel }),
   });
   const verdict = verdictOf(results);
   return {

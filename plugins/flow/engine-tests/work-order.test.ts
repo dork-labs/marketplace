@@ -58,7 +58,7 @@ interface ExpectedProjects {
   now?: string[];
   next?: string[];
   later?: string[];
-  dorian?: string[];
+  personal?: string[];
   flags?: string[];
   projectFlags?: Record<string, string[]>;
   inherits?: Record<string, string>;
@@ -232,7 +232,7 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
         if (want.now) expect(ids(order.projects.now)).toEqual(want.now);
         if (want.next) expect(ids(order.projects.next)).toEqual(want.next);
         if (want.later) expect(ids(order.projects.later)).toEqual(want.later);
-        if (want.dorian) expect(ids(order.projects.dorian)).toEqual(want.dorian);
+        if (want.personal) expect(ids(order.projects.personal)).toEqual(want.personal);
         if (want.flags) expect(order.projects.flags).toEqual(want.flags);
         for (const [id, flags] of Object.entries(want.projectFlags ?? {})) {
           expect(all.find((p) => p.id === id)?.flags).toEqual(flags);
