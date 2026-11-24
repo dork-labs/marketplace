@@ -142,7 +142,7 @@ export interface ProjectEntry {
   why: OrderReason[];
   /** What a person should fix: "needs a priority", "over cap", "can't start: waits on <P>". */
   flags: string[];
-  /** Its target date, `YYYY-MM-DD`, when it has one (the `why` text says it in plain words). */
+  /** Its target date, `YYYY-MM-DD`, when it has one: data only, it never moves the project. */
   targetDate?: string;
   /** The project waiting on this one whose place it took, when it inherited a better one. */
   inheritsFrom?: string;

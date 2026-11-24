@@ -15,18 +15,21 @@
  * 1. Pinned (project label `pin`).
  * 2. Project priority, Urgent (1) to Low (4); none last, flagged
  *    `needs a priority`.
- * 3. Target date, earliest first; none last, flagged `needs a target date`.
- * 4. Dependencies: a project waiting on an open project is flagged
+ * 3. Dependencies: a project waiting on an open project is flagged
  *    `can't start: waits on <P>` (its issues do not rank), and the project in
  *    the way takes the better of its own keys and those of every Started or
  *    Planned project waiting on it, through any depth, cycle-safe, and always
  *    sorts ahead of the projects in its list that wait on it. Dorian's
  *    projects still lift the projects in their way, though they are not
  *    listed themselves.
- * 5. Remaining work: the estimates of its open issues added up, smaller
+ * 4. Remaining work: the estimates of its open issues added up, smaller
  *    first. An unsized issue counts as the largest bucket, so a project
  *    nobody has sized does not look small.
- * 6. Created time, older first; then the slug.
+ * 5. Created time, older first; then the slug.
+ *
+ * A target date is data only (the JSON carries it): it never moves a project
+ * and nothing flags its absence. Flow does not steer by dates; a deadline that
+ * matters belongs on the issues as a due date.
  *
  * ## The cap
  *
@@ -109,7 +112,7 @@ export function plainDate(value: string, now?: string): string {
 interface Ranked {
   /** The project. */
   project: ProjectInfo;
-  /** Its own keys: pin, priority, target date, remaining work, created time. */
+  /** Its own keys: pin, priority, remaining work, created time. */
   own: number[];
   /** The keys it sorts by: its own, or a better set it inherited. */
   effective: number[];
@@ -265,9 +268,6 @@ function reasonsOf(
   if (hasLabel(project, PIN_LABEL)) why.push({ key: 'pin', text: 'pinned' });
   const p = priorityKey(project);
   if (p !== NEUTRAL) why.push({ key: 'priority', text: `priority ${PRIORITY_NAME.get(p)}` });
-  if (dateKey(project.targetDate) !== NEUTRAL) {
-    why.push({ key: 'targetDate', text: `target ${plainDate(project.targetDate as string, now)}` });
-  }
   if (dependants.length > 0) {
     why.push({ key: 'dependencies', text: `in the way of ${dependants.join(', ')}` });
   }
@@ -363,7 +363,6 @@ export function rankProjects(
     const own = [
       hasLabel(project, PIN_LABEL) ? 0 : 1,
       priorityKey(project),
-      dateKey(project.targetDate),
       remaining.points,
       dateKey(project.createdAt),
     ];
@@ -442,7 +441,6 @@ export function rankProjects(
       rankOf.set(project.id, rank);
       const flags: string[] = [];
       if (priorityKey(project) === NEUTRAL) flags.push('needs a priority');
-      if (dateKey(project.targetDate) === NEUTRAL) flags.push('needs a target date');
       if (overCap.has(project.id)) flags.push('over cap');
       const blockers = waitsOn.get(project.id);
       if (blockers !== undefined) flags.push(`can't start: waits on ${blockers}`);

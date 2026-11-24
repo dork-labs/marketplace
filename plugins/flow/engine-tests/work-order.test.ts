@@ -409,7 +409,8 @@ describe('projects rank without dates (Nov 24: no steering by dates)', () => {
       now: file.now,
     });
     expect(order.projects.now.map((p) => p.id)).toEqual(['p-early', 'p-late']);
-    expect(order.projects.now[1].why.map((r) => r.text)).toEqual(['priority 2']);
+    const why = order.projects.now.flatMap((p) => p.why);
+    expect(why.some((r) => r.key === 'targetDate' || /target/.test(r.text))).toBe(false);
     expect(order.projects.now.flatMap((p) => p.flags)).toEqual([]);
   });
 

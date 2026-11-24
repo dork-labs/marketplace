@@ -7,7 +7,7 @@
  *   when that is `auto`. GRM-16 (an expired Could) measures against the run's clock
  *   and reads `groom.couldExpiryDays` and `groom.neverExpireLabels`. GRM-17 (a pin
  *   with no reason, or set by someone else) reads `order.pinSetters`.
- *   GRM-18 (Started projects over the cap, undated or waiting) reads the pull's
+ *   GRM-18 (Started projects over the cap, unprioritised or waiting) reads the pull's
  *   `projectInfo` and `projects.startedCap`; with no `projectInfo` it checks nothing.
  * - Human output: one block per failing invariant, titled from the oracle's
  *   own invariant list, one line per offending item.

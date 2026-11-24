@@ -9,7 +9,7 @@
  *   held, waiting for triage and kept out by `order.personLabel`.
  * - `-n <N>`: keep the first N issues, in text and JSON.
  * - `--projects`: the project lists only: each project's place, its reasons
- *   (dates in plain words; the JSON keeps `targetDate` as `YYYY-MM-DD`), what
+ *   (dates in plain words; the JSON also carries `targetDate` as data), what
  *   a person should fix, the Started cap, and Dorian's projects.
  * - `--all`: also the Paused and Backlog projects.
  * - `--why <id>`: one item's reasons, and which field would move it up.

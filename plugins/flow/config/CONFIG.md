@@ -583,9 +583,10 @@ status, priority, target date and relations.
   audit (GRM-18) reports it with each Started project's flags. Projects
   labelled `owner/dorian` don't count toward the cap.
 - Projects rank by, first to last: the `pin` label, priority (none last,
-  flagged `needs a priority`), target date (none last, flagged
-  `needs a target date`), what waits on them, the estimates left on their open
-  issues (an unsized issue counts as the largest size), then age. A project
+  flagged `needs a priority`), what waits on them, the estimates left on their
+  open issues (an unsized issue counts as the largest size), then age. A
+  project's target date never moves it and is never required; a real outside
+  deadline goes on the issues as a due date. A project
   that waits on an unfinished project is flagged `can't start: waits on <P>`,
   its issues wait too, and the project in its way moves up to its place.
   `flow order --projects` prints only this list.

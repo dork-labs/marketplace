@@ -166,8 +166,9 @@ describe('flow order', () => {
     temp = tempProject({ projects: { startedCap: 1 } });
     const text = await runFlow(['order', '--projects'], { items: items(), projectInfo: projects });
     expect(text.stdout).toContain('Projects now (Started: 2, cap 1)');
-    expect(text.stdout).toMatch(/1 +Billing +priority Urgent, target Dec 1,/);
-    expect(text.stdout).toMatch(/2 +Search +.*needs a target date; over cap/);
+    expect(text.stdout).toMatch(/1 +Billing +priority Urgent, /);
+    expect(text.stdout).toMatch(/2 +Search +.*  over cap/);
+    expect(text.stdout).not.toMatch(/target Dec 1|needs a target date/);
     expect(text.stdout).toContain('Project flags: over cap: 2 Started, cap 1; lowest: Search');
     expect(text.stdout).toContain("Dorian's projects, out of the agent order: Desk");
     const json = JSON.parse(

@@ -690,7 +690,7 @@ describe('project flags (GRM-18, DOR-5067)', () => {
     expect(grm18([project('a'), project('b')])).toBeUndefined();
   });
 
-  it('reports a Started project with no priority, no target date, or waiting on another', () => {
+  it('reports a Started project with no priority or waiting on another, never one with no target date', () => {
     expect(
       grm18([
         project('a', { priority: undefined }),
@@ -698,9 +698,7 @@ describe('project flags (GRM-18, DOR-5067)', () => {
         project('c', { blockedBy: ['d'] }),
         project('d', { statusType: 'planned' }),
       ])
-    ).toBe(
-      "Started project C: can't start: waits on D; Started project B: needs a target date; Started project A: needs a priority"
-    );
+    ).toBe("Started project C: can't start: waits on D; Started project A: needs a priority");
   });
 
   it("leaves Planned, Paused and Dorian's projects out of the report", () => {
@@ -715,7 +713,7 @@ describe('project flags (GRM-18, DOR-5067)', () => {
 
   it('reports the Started cap, default 6, naming the lowest projects', () => {
     const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id, i) =>
-      project(id, { targetDate: `2026-12-0${i + 1}` })
+      project(id, { createdAt: `2026-01-0${i + 1}T00:00:00Z` })
     );
     expect(grm18(seven)).toBe('over cap: 7 Started, cap 6; lowest: G');
     expect(grm18(seven.slice(0, 3), 2)).toBe('over cap: 3 Started, cap 2; lowest: C');

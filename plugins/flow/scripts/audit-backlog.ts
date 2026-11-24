@@ -154,9 +154,9 @@ Invariants ("ready" = carries the literal agent/ready label):
           "pin:", read into pin.reason), and, when opts.pinSetters is set, was
           pinned by one of those accounts (pin.actor)
   GRM-18  the projects in opts.projects are within opts.startedCap (default 6)
-          Started at once, and every Started one has a priority and a target
-          date and waits on no open project. A report for a person: flow never
-          changes a project's status
+          Started at once, and every Started one has a priority and waits on
+          no open project. A target date is never required. A report for a
+          person: flow never changes a project's status
 `;
 
 /** True for a non-array, non-null object. */
@@ -530,10 +530,10 @@ const DEFAULT_STARTED_CAP = 6;
 /**
  * GRM-18 - the project layer of the work order is in order (DOR-5067): no more
  * Started projects than `projects.startedCap`, and every Started one has a
- * priority and a target date and waits on no open project. It reports the work
- * order's own project flags, so the groom and `flow order --projects` always
- * agree. Read only: a person pauses, finishes or dates a project; flow never
- * changes one. Checks nothing when the snapshot carries no project info.
+ * priority and waits on no open project (a target date is never required).
+ * It reports the work order's own project flags, so the groom and
+ * `flow order --projects` always agree. Read only: a person pauses, finishes
+ * or prioritizes a project; flow never changes one. Checks nothing when the snapshot carries no project info.
  */
 function checkGrm18(items: readonly unknown[], opts: AuditOpts): string[] {
   if (!Array.isArray(opts.projects)) return [];
@@ -589,7 +589,7 @@ const INVARIANTS: readonly Invariant[] = [
   { id: 'GRM-17', summary: 'a pin has a reason and an allowed setter', check: checkGrm17 },
   {
     id: 'GRM-18',
-    summary: 'Started projects are within the cap, dated, prioritised and free to start',
+    summary: 'Started projects are within the cap, prioritised and free to start',
     check: checkGrm18,
   },
 ];

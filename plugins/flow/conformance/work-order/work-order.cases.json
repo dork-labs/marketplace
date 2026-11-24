@@ -1,6 +1,6 @@
 {
   "contract": "work-order",
-  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target (null removes it), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap patch items (patch) and projects (projectPatch), and add projects (addProjects); a project may also give slug, and priority null removes it. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
+  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target (null removes it; data only, it never moves a project or flags one), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap patch items (patch) and projects (projectPatch), and add projects (addProjects); a project may also give slug, and priority null removes it. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
   "now": "2026-11-23T12:00:00.000Z",
   "base": {
     "projects": [
@@ -232,12 +232,12 @@
           "flags": [],
           "projectFlags": {
             "p-billing": [],
-            "p-mobile": ["needs a target date"],
+            "p-mobile": [],
             "p-docs": []
           },
           "why": {
-            "p-search": ["priority High", "target Dec 15", "8 points open"],
-            "p-docs": ["priority Medium", "target Dec 20", "no open issues"]
+            "p-search": ["priority High", "8 points open"],
+            "p-docs": ["priority Medium", "no open issues"]
           }
         }
       }
@@ -573,11 +573,43 @@
       }
     },
     {
-      "name": "a missing target date sorts the project last among equals and flags it",
+      "name": "a target date never moves a project, and none missing is flagged",
       "projectPatch": {
         "p-billing": {
-          "target": null
+          "target": "2026-11-25"
         },
+        "p-search": {
+          "priority": 1,
+          "target": null
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "projectFlags": {
+            "p-billing": [],
+            "p-search": []
+          }
+        }
+      }
+    },
+    {
+      "name": "remaining work breaks a tie, an unsized issue counting as the largest bucket",
+      "projectPatch": {
         "p-search": {
           "priority": 1
         }
@@ -599,44 +631,8 @@
         ],
         "projects": {
           "now": ["p-search", "p-billing"],
-          "projectFlags": {
-            "p-billing": ["needs a target date"],
-            "p-search": []
-          }
-        }
-      }
-    },
-    {
-      "name": "remaining work breaks a tie, an unsized issue counting as the largest bucket",
-      "projectPatch": {
-        "p-search": {
-          "priority": 1,
-          "target": "2026-12-01"
-        }
-      },
-      "expected": {
-        "issues": [
-          "ABC-16",
-          "ABC-3",
-          "ABC-17",
-          "ABC-6",
-          "ABC-9",
-          "ABC-1",
-          "ABC-2",
-          "ABC-4",
-          "ABC-7",
-          "ABC-5",
-          "ABC-99",
-          "ABC-100"
-        ],
-        "projects": {
-          "now": ["p-search", "p-billing"],
           "why": {
-            "p-billing": [
-              "priority Urgent",
-              "target Dec 1",
-              "28 points open, 1 unsized counted as 13 each"
-            ]
+            "p-billing": ["priority Urgent", "28 points open, 1 unsized counted as 13 each"]
           }
         }
       }
@@ -669,14 +665,13 @@
             "p-docs": "p-mobile"
           },
           "projectFlags": {
-            "p-mobile": ["needs a target date", "can't start: waits on Docs"],
+            "p-mobile": ["can't start: waits on Docs"],
             "p-docs": []
           },
           "why": {
             "p-docs": [
               "inherits Mobile's place",
               "priority Medium",
-              "target Dec 20",
               "in the way of Mobile",
               "no open issues"
             ]
@@ -1031,7 +1026,7 @@
         "projects": {
           "now": ["p-search", "p-billing"],
           "why": {
-            "p-search": ["pinned", "priority High", "target Dec 15", "8 points open"]
+            "p-search": ["pinned", "priority High", "8 points open"]
           }
         }
       }
