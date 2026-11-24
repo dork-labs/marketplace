@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.100.0
+## 0.104.0
 
 **Reinstall Flow to receive this change. Nothing changes in what Flow writes yet.**
 
