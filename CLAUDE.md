@@ -2,13 +2,13 @@
 
 ## What This Is
 
-The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters, shapes) that extend DorkOS. Currently at marketplace version 0.1.0, listing 6 packages in `.claude-plugin/marketplace.json`, all in `plugins/`. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
+The official DorkOS marketplace repository: a catalog of packages that extend DorkOS, all in `plugins/`. The full list is `.claude-plugin/marketplace.json`. It is both the regression fixture for the marketplace validator and the place DorkOS packages are published from.
 
-This repo is also the workspace for the `dork-os-marketing` agent, which handles DorkOS marketing tasks.
+This repo's agent is DorkOS Marketplace (`.dork/agent.json`). It maintains the packages here.
 
 ## What DorkOS Is
 
-DorkOS is a workspace for people and agents: DMs, group DMs, channels and threads, where your agents join your team chat and take on real work. That is the category, not the lead. The canonical strategy is `../dorkos/meta/positioning-202610/00-overview.md`; where this section and that file disagree, that file wins.
+DorkOS is a workspace for people and agents: DMs, group DMs, channels and threads, where your agents join your team chat and take on real work. That is the category, not the lead. The canon is `../dorkos/meta/VISION.md`, `PRINCIPLES.md`, `VOICE.md` and `ROADMAP.md`; where this section and they disagree, they win.
 
 **The message stack** (use it wherever a tagline or description of DorkOS is wanted):
 1. **"You, Multiplied."** The tagline, hero surfaces only.
@@ -20,7 +20,7 @@ DorkOS is a workspace for people and agents: DMs, group DMs, channels and thread
 2. **Built for founders.** Not general purpose. Ready-made founder mini apps and goals are roadmap: say "coming" or leave them out.
 3. **Ownership.** Your agents, tools, files and data stay yours, wherever they run.
 
-**Who it is for:** the founder (primary), semi-technical, building a big or complex business mostly with agents; Kai (secondary), the developer running many agents across many projects.
+**Who it is for:** the founder (primary), semi-technical, building a big or complex business mostly with agents; Kai (secondary), the developer running many agents across many projects. The anti-persona is the prompt dabbler. The personas are in `../dorkos/meta/personas/`.
 
 **Manifesto line:** "Intelligence doesn't scale. Coordination does." (essays only, never a headline)
 
@@ -39,13 +39,13 @@ DorkOS is a workspace for people and agents: DMs, group DMs, channels and thread
 **Key facts:**
 - MIT licensed; runs on your own computer, with DorkOS Cloud as an optional hosted layer; telemetry is off unless you turn it on
 - Runs Claude Code, Codex and OpenCode agents; speaks MCP
-- Tech stack: TypeScript, React 19, Vite 6, Express, SQLite, Turborepo monorepo
+- Tech stack: TypeScript, React 19, Vite 6, Hono on Node, SQLite, Turborepo monorepo
 - Website: https://dorkos.ai
 - GitHub: https://github.com/dork-labs/dorkos
 - npm: `dorkos`
 - Contact: hey@dorkos.ai
 - Creator: Dorian Collier / Dork Labs
-- Current version: v0.98.0 (check `git tag` in the dorkos repo; this line goes stale)
+- Current version: check `git tag` in the dorkos repo
 
 ## Repository Structure
 
@@ -68,13 +68,7 @@ marketplace/
 
 ## Package Types
 
-| Type | Description | Examples |
-|------|-------------|---------|
-| **agent** | Full AI agent with persona, skills, tasks | none in the catalog yet |
-| **plugin** | Claude Code extension with commands/hooks/UI | flow, safety-hooks |
-| **skill-pack** | Bundles of reusable SKILL.md expertise files | writing-pack, marketplace-dev, ephemeral-infra |
-| **adapter** | Integration bridge for external services | none in the catalog yet |
-| **shape** | A bundle of packages, extensions, agents and schedules that sets DorkOS up for one job | linear-ops |
+Package types follow the DorkOS schema (`../dorkos/contributing/marketplace-packages.md`). Today there are five: `plugin`, `skill-pack`, `shape`, `agent`, and `adapter` (a channel bridge Relay uses; none in the catalog). Each package's type is in `.claude-plugin/dorkos.json`.
 
 ## Key Manifests
 
@@ -125,9 +119,10 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
 - `security-gate.yml`, check **`security-gate`** (not required yet). A change to a
   security path (anything under `plugins/`, docs and tests included; CI, agent config,
   dependencies)
-  needs DorkOS Security's `security-reviewed` label, added after the PR's last push, with
-  no `hold`. On an open PR it only waits, so green doesn't mean reviewed: read the
-  `security-review` status, which main's copy of the gate writes. The queue never waits.
+  needs the `security-reviewed` label, added after the PR's last push, with no `hold`.
+  Ask the coordinator when a PR needs one. On an open PR it only waits, so green doesn't
+  mean reviewed: read the `security-review` status, which main's copy of the gate writes.
+  The queue never waits.
   `.github/SECURITY-GATE.md` has the path list, how approval works, and the steps to make
   it required.
 
@@ -152,15 +147,13 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   keeps one. `skills and manifests` fails the PR otherwise.
 - **Arm your own PR once it is open and reviewed:** `gh pr merge --auto --squash <n>`.
   It goes into the queue and merges by itself when the required checks pass. Nothing else
-  arms PRs yet, so an unarmed PR sits open.
+  arms PRs here, so an unarmed PR sits open.
 - **What may merge by itself.** The rules are `scripts/should-arm-automerge.sh`, pinned by its
   fixtures: a PR is armed only when every signal is good. Never arm a draft; a PR labelled
   `hold`, `do-not-merge`, `wip` or `blocked`; a conflicting PR or one whose mergeability GitHub
   has not worked out yet; a PR with changes requested or an unresolved review thread; or a PR
   with any check failing, cancelled or still running. The labels mean the same in
-  dork-labs/dorkos. A scheduled `merge-tail` workflow that applies these rules to every open
-  PR arrives once the `dorkos-merge-tail` GitHub App is set up on this repo (DOR-2270);
-  until then, authors arm their own.
+  dork-labs/dorkos.
 - **Tracker routing.** Work for this repo is tracked in Linear team DOR (the same team as
   dorkos), and an item that lands here carries the **`repo/marketplace`** label (group `repo`).
   An item with no `repo` label lands in dork-labs/dorkos. This repo is public: nothing from a
@@ -177,35 +170,3 @@ Paths assume the dorkos repo is checked out beside this one, as `../dorkos/`.
 - **Research:** `../dorkos/research/` — 370+ research reports
 - **Website:** `../dorkos/apps/site/` — Next.js 16 marketing site + Fumadocs docs
 - **Docs content:** `../dorkos/docs/` — MDX documentation for the docs site
-
-## Brand & Marketing Context
-
-### Target Personas
-- **Kai Nakamura** (Primary) — 28-35, senior full-stack / indie hacker. Ships daily, runs 10-20 agent sessions/week. Frustrated by session isolation, agents forgetting context, can't run overnight.
-- **Priya Sharma** (Secondary) — 30-40, staff engineer / technical architect. Manages architecture across services. Frustrated by context-switching, no cross-client session visibility.
-- **Ikechi** (Secondary) — non-developer founder who ships apps by directing agents; an operator, not a programmer.
-- **Lil** (Horizon, not a launch target) — privacy-first non-technical professional.
-- **Jordan Wells** (Anti-persona) — wants a hosted chat app. The line is operator mentality (won't own and run their own system), not technical skill.
-- **AI-Native Dev Shop** (ICP) — 1-10 devs, bootstrapped/seed-stage, already paying for Claude Pro/Team API.
-
-### Brand Voice
-- Confident, technical, minimal, sharp, honest
-- "Built by dorks. For dorks. Run by you."
-- Embrace "dork" as someone who cares too much about something most people don't care about at all
-- Pro-human positioning: agents augment developers, not replace them
-- No enterprise jargon, no AI hype, no "revolutionary" language
-
-### Key Pain Themes (from customer research)
-1. Terminal Isolation — agents stuck in terminal, can't manage remotely
-2. No Background/Scheduled Execution — can't run overnight, Mac sleep problem
-3. Agent Communication — agents can't notify or coordinate with each other
-4. Session Memory/Context Loss — agents forget everything between sessions
-5. Trust and Transparency — safety concerns with autonomous execution
-6. Self-Hosted/Open Source Identity — developers want control and privacy
-
-### Competitive Position
-DorkOS is NOT: an agent, a wrapper, a hosted service, a replacement for Claude Code.
-DorkOS IS: the infrastructure layer that makes agents autonomous — the coordination system, not the intelligence.
-
-### Website Creative Process
-Uses "The Panel" — 5 advertising/design legends as creative agent personas (Ogilvy, Jobs, Godin, Ive, Wieden) to develop copy through structured rounds. Decisions documented in `../dorkos/meta/website-copy/decisions.md`.

@@ -4,10 +4,9 @@ The official marketplace for [DorkOS](https://dorkos.ai). DorkOS: build and run 
 
 This repo holds the packages you can add to DorkOS. Each one gives your agents something new:
 
-- **Agents:** a ready-made agent with its own job, like reviewing pull requests.
+- **Agents:** a ready-made agent with its own job, like building your team's mini apps.
 - **Plugins:** commands, skills, hooks and extensions for your agents. The [flow](plugins/flow) workflow plugin is one.
 - **Skill packs:** bundles of skills, which are written instructions that teach an agent how to do one kind of task.
-- **Adapters:** bridges that let your agents send and receive messages through another service.
 - **Shapes:** one install that sets up DorkOS for a job, such as working your Linear issues.
 
 The full list, with a description of each, is in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). Some listings are early and hold little more than a description so far.
