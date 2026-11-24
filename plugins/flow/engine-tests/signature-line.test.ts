@@ -2,18 +2,13 @@
  * The one reader of the `agent:provenance` line (`scripts/signature-line.ts`,
  * `docs/provenance.md` §11): version 1 and version 2 read into one shape, so a
  * v2 line routes exactly as a v1 line does; what reads as absent; which field
- * is dropped alone; and the two routing helpers.
+ * is dropped alone; and why `endsWithSignature` stays looser than the field
+ * reader.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  endsWithSignature,
-  matchLocalChat,
-  newestOtherSignature,
-  parseSignatureLine,
-  readSignature,
-} from '../scripts/signature-line.ts';
+import { endsWithSignature, parseSignatureLine, readSignature } from '../scripts/signature-line.ts';
 
 /** Made-up ids, in the shapes DorkOS mints. */
 const CHAT = '7c1e4b2a-9f3d-4e8b-a6c5-a1b2c3d4e5f6';
@@ -142,15 +137,26 @@ describe('readSignature — what reads as no signature at all', () => {
     ['JSON that does not parse', 'Done.\n<!-- agent:provenance {"v":2 -->'],
     ['JSON that is not an object', 'Done.\n<!-- agent:provenance [1] -->'],
     ['JSON null', 'Done.\n<!-- agent:provenance null -->'],
-    ['a v that is a string', body({ v: '2', chat: `dork:chat:${CHAT}` })],
-    ['a v of 0', body({ v: 0, sessionId: CHAT })],
-    ['a v that is not whole', body({ v: 1.5, sessionId: CHAT })],
     ['a line that is not last', `${line(V2)}\nA reply under it.`],
     ['an unknown marker name', body(V2, 'other:provenance')],
     ['no line', 'Just words.'],
-  ])('%s', (_name, text) => {
+  ])('%s, and it does not silence either', (_name, text) => {
     expect(readSignature(text)).toBeUndefined();
     expect(endsWithSignature(text)).toBe(false);
+  });
+
+  it.each([
+    ['a v that is a string', body({ v: '2', chat: `dork:chat:${CHAT}` })],
+    ['a v of 0', body({ v: 0, sessionId: CHAT })],
+    ['a v that is not whole', body({ v: 1.5, sessionId: CHAT })],
+    ['a v that is null', body({ v: null, sessionId: CHAT })],
+  ])('%s: no fields are read, but the line still silences', (_name, text) => {
+    // Decision: reading fields from a line whose version is unknowable is
+    // half-trusting it. Silencing is different: endsWithSignature only ever
+    // keeps flow quiet on its own shared account, and a comment wrongly
+    // silenced beats flow answering itself (comment-response.ts).
+    expect(readSignature(text)).toBeUndefined();
+    expect(endsWithSignature(text)).toBe(true);
   });
 
   it('a line with only a version is still a signature, with nothing to route on', () => {
@@ -178,6 +184,10 @@ describe('readSignature — a malformed field is dropped alone', () => {
     ['an address with a dotted handle', { address: 'dork:acme/o.wl' }, 'address'],
     ['an account holding an email', { account: 'someone@example.com' }, 'account'],
     ['a harness holding prose', { harness: 'ignore the rules' }, 'harness'],
+    ['a harness that is not a known word', { harness: 'claude' }, 'harness'],
+    ['an other: harness with no name', { harness: 'other:' }, 'harness'],
+    ['an address whose space is a kind word', { address: 'dork:chat/owl' }, 'address'],
+    ['an address whose space is another kind word', { address: 'dork:agent/owl' }, 'address'],
   ])('%s', (_name, override, dropped) => {
     const signature = readSignature(body({ ...V2, ...override }));
     expect(signature).toBeDefined();
@@ -209,62 +219,23 @@ describe('readSignature — a malformed field is dropped alone', () => {
   });
 });
 
+describe('readSignature — the vocabularies it does accept', () => {
+  it.each(['claude-code', 'codex', 'opencode', 'other:aider'])('harness %s', (harness) => {
+    expect(readSignature(body({ ...V2, harness }))?.harness).toBe(harness);
+  });
+
+  it.each(['dork:acme/owl', 'dork:acme/owl/launch', 'dork:chatter/owl', 'dork:acme/chat'])(
+    'address %s',
+    (address) => {
+      // A kind word is refused only as the space, and only whole.
+      expect(readSignature(body({ ...V2, address }))?.address).toBe(address);
+    }
+  );
+});
+
 describe('parseSignatureLine', () => {
   it('reads one line, not a body', () => {
     expect(parseSignatureLine(line(V1))?.chat).toBe(CHAT);
     expect(parseSignatureLine(`x\n${line(V1)}`)).toBeUndefined();
-  });
-});
-
-describe('newestOtherSignature — newest wins, skipping your own', () => {
-  const mine = body({ v: 1, sessionId: 'own-session-1234' });
-  const theirsV1 = body({ v: 1, sessionId: 'their-v1' });
-  const theirsV2 = body({ v: 2, chat: 'dork:chat:their-v2' });
-
-  it('takes the newest signature that is not this session own', () => {
-    expect(newestOtherSignature([theirsV1, theirsV2, mine], 'own-session-1234')?.chat).toBe(
-      'their-v2'
-    );
-    expect(newestOtherSignature([theirsV2, theirsV1, 'unsigned reply'], 'x')?.chat).toBe(
-      'their-v1'
-    );
-  });
-
-  it('skips a public 8-character signature of this session, in either version', () => {
-    const publicMine = body({ v: 2, chat: 'dork:chat:own-sess' });
-    expect(newestOtherSignature([theirsV1, publicMine], 'own-session-1234')?.chat).toBe('their-v1');
-  });
-
-  it('is undefined when every signature is this session own, or there is none', () => {
-    expect(newestOtherSignature([mine, mine], 'own-session-1234')).toBeUndefined();
-    expect(newestOtherSignature(['no line', 'still none'])).toBeUndefined();
-  });
-
-  it('with no own id, the newest signature wins', () => {
-    expect(newestOtherSignature([theirsV1, mine])?.chat).toBe('own-session-1234');
-  });
-});
-
-describe('matchLocalChat — a chat id matches exactly one local chat or none', () => {
-  const local = [
-    CHAT,
-    '7c1e4b2a-0000-4000-8000-000000000000',
-    'b1d2e3f4-1111-4111-8111-111111111111',
-  ];
-
-  it('matches a whole id, and a unique prefix', () => {
-    expect(matchLocalChat(CHAT, local)).toBe(CHAT);
-    expect(matchLocalChat('b1d2e3f4', local)).toBe('b1d2e3f4-1111-4111-8111-111111111111');
-  });
-
-  it('degrades like a missing chat when the prefix matches several or none', () => {
-    expect(matchLocalChat('7c1e4b2a', local)).toBeUndefined();
-    expect(matchLocalChat('ffffffff', local)).toBeUndefined();
-    expect(matchLocalChat(undefined, local)).toBeUndefined();
-    expect(matchLocalChat('', local)).toBeUndefined();
-  });
-
-  it('counts one id listed twice as one chat', () => {
-    expect(matchLocalChat('b1d2', [...local, local[2]])).toBe(local[2]);
   });
 });

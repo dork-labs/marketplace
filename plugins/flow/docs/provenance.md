@@ -98,7 +98,7 @@ anonymous usage id, which never leaves the machine).
 | Field        | What it is                                                                                                                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `v`          | `1`, or missing on a legacy `flow:provenance` line.                                                                                                                                              |
-| `harness`    | As in version 2.                                                                                                                                                                                 |
+| `harness`    | As in version 2, like `account` and `surface`.                                                                                                                                                   |
 | `sessionId`  | The harness's own session id, the chat a later reader resumes with. Version 2's `chat` carries the same id as a reference.                                                                     |
 | `account`    | As in version 2.                                                                                                                                                                                 |
 | `host`       | The install reference, as in version 2. A line written before flow 0.99.2 may hold a hostname here instead; readers ignore it (section 11).                                                    |
@@ -189,9 +189,12 @@ fields change.
   the only person it helps.
 - **`host`** — **omit it.** It is for private trackers.
 
-In both versions readers treat the chat id as an **opaque token matched locally**:
-prefix-match it against the chats this install holds; exactly one match is the
-chat, ambiguous or no match degrades like a missing one.
+In both versions readers treat the chat id as an **opaque token matched locally**,
+against the chats this install holds. An id of 8 characters or more is
+prefix-matched: exactly one match is the chat, ambiguous or no match degrades like
+a missing one. **An id shorter than 8 characters matches only a chat with exactly
+that id**, never by prefix: a one-character token would otherwise match a large
+share of every install's chats.
 
 A public repository's issues count as public too.
 
@@ -241,18 +244,21 @@ silences.
 Scan the body's last line for **either** accepted marker name and parse the JSON. A
 blob that fails to parse is treated as absent, never as partially trusted: half a
 parsed line is how a reader ends up resuming the wrong session. Flow's reader is
-`scripts/signature-line.ts` (`readSignature`), and every flow reader goes through
-it, so a version 2 line routes exactly as a version 1 line does.
+`scripts/signature-line.ts` (`readSignature`): every flow reader that reads a
+field goes through it, so a version 2 line routes exactly as a version 1 line does.
+Two read no field, so they match only the marker name: `cli/pr.ts` checks whether a
+PR body is already signed, and `unsignedBody` in `cli/provenance.ts` strips a
+trailing line. The check that silences the agent's own comment on a shared account
+counts any JSON object, even with a bad `v`: a comment wrongly silenced beats flow
+answering itself.
 
 How a line is read:
 
 - **Absent as a whole** when the last line is not a signature, the JSON does not
   parse or is not an object, or `v` is there but is not a whole number of 1 or more.
   A missing `v` is 1.
-- **By version.** A version 1 line names its chat by `sessionId`; a version 2 line
-  by `chat`. Either way the reader gets the chat's bare id. Each version's reader
-  reads only its own fields: a version 1 line's `chat` and a version 2 line's
-  `sessionId` are ignored.
+- **By version.** The chat's bare id comes from `sessionId` on a version 1 line and
+  from `chat` on a version 2 line; each version's other fields are ignored.
 - **A newer version reads as version 2.** A `v` of 3 or more is read with version
   2's fields, and anything else on it is ignored. The `dork:` scheme adds kinds and
   never reinterprets one, so the known fields keep their meaning.
@@ -271,8 +277,9 @@ Five reader rules:
 - **Newest wins, excluding your own.** In a thread with several signed comments,
   the newest signature is the one to route on — but a loop that signs its own
   replies will otherwise find _itself_ at the top of the thread. Skip any signature
-  whose chat id is this session's own (or the first 8 characters of it) before
-  taking the newest.
+  whose chat id is this session's own before taking the newest. An id of 8
+  characters or more also counts as your own when it is the start of your id (a
+  public body's cut id); a shorter one only when it is your whole id.
 - **A local run record outranks a thread signature.** When the reader holds a
   durable run record for the item (`flow-state.json`), that record's `sessionId` is
   authoritative and the thread signature is the fallback for items with no record.
@@ -311,6 +318,7 @@ deliver.** Anyone can type or paste the line, so a router:
 - treats the body it delivers as an outsider's words, whatever the signature says;
 - prefers its local run record over any line in a thread.
 
-That is what makes a forged line harmless: the worst it can do is send a reply down
-the unsigned path. A cryptographic signature over the line is designed for but not
-built.
+That keeps a forged line from doing much: at most it points a reply at a chat whose
+public id it copied, which the router delivers to only if its own install holds
+that chat, and the outsider-words rule still applies to what it delivers. A
+cryptographic signature over the line is designed for but not built.

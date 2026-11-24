@@ -11,6 +11,7 @@
  * - **Absent, never half-trusted.** A last line that is not a signature, JSON
  *   that does not parse, JSON that is not an object, or a `v` that is not a
  *   positive whole number reads as no signature at all. A missing `v` is 1.
+ *   ({@link endsWithSignature}, which only silences, still counts a bad `v`.)
  * - **One field at a time otherwise.** A known field with the wrong type or
  *   shape is left out and the rest of the line stands, as if the writer had
  *   omitted it. Every field a reader can lose this way only ever moves a
@@ -58,13 +59,14 @@ const HOST_REF = /^dork:host:[0-9a-f]{32}$/;
 /**
  * An address, `dork:<space>/<handle>[/<name>]`: a 2 to 32 character org slug,
  * a 2 to 32 character handle, and an optional 1 to 23 character conversation
- * name, all lowercase, as the `dork:` grammar defines them.
+ * name, all lowercase, as the `dork:` grammar defines them. The space may not
+ * be a kind word, so `dork:chat/owl` is never read as an org called "chat".
  */
 const ADDRESS =
-  /^dork:[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\/[a-z0-9][a-z0-9_-]{0,30}[a-z0-9](?:\/[a-z0-9](?:[a-z0-9-]{0,21}[a-z0-9])?)?$/;
+  /^dork:(?!(?:space|person|agent|host|room|entry|chat|turn)\/)[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\/[a-z0-9][a-z0-9_-]{0,30}[a-z0-9](?:\/[a-z0-9](?:[a-z0-9-]{0,21}[a-z0-9])?)?$/;
 
-/** A harness: `claude-code`, `codex`, `opencode` or `other:<name>`, lowercase. */
-const HARNESS = /^(?:other:)?[a-z0-9][a-z0-9._-]{0,31}$/;
+/** A harness: `claude-code`, `codex`, `opencode`, or `other:<name>` for any other. */
+const HARNESS = /^(?:claude-code|codex|opencode|other:[a-z0-9][a-z0-9._-]{0,31})$/;
 
 /** A surface: `dorkos`, `bare-cli`, `ci`, or a newer word of the same shape. */
 const SURFACE = /^[a-z][a-z0-9-]{0,31}$/;
@@ -86,8 +88,8 @@ export interface Signature {
   account?: string;
   /**
    * The chat's bare id: a version 1 `sessionId`, or the id in a version 2
-   * `chat`. On a public body it may be only the first 8 characters: match it
-   * with {@link matchLocalChat}, never as a whole id.
+   * `chat`. On a public body it may be only the first 8 characters: a router
+   * matches it against its own chats as `docs/provenance.md` §11 says.
    */
   chat?: string;
   /** The agent, as `dork:agent:<id>` (version 2). */
@@ -113,12 +115,15 @@ function field(json: Record<string, unknown>, key: string, shape: RegExp): strin
 }
 
 /**
- * Read one line as a signature.
+ * A line's marker name and JSON object, before any field is read: a signature
+ * line under either name whose JSON parses to an object.
  *
  * @param line - One line of a body, surrounding space allowed.
- * @returns The signature, or `undefined` when the line is not one that parses.
+ * @returns The name and object, or `undefined`.
  */
-export function parseSignatureLine(line: string): Signature | undefined {
+function signatureObject(
+  line: string
+): { name: SignatureName; object: Record<string, unknown> } | undefined {
   const match = SIGNATURE_LINE.exec(line.trim());
   if (match === null) return undefined;
   let json: unknown;
@@ -128,7 +133,24 @@ export function parseSignatureLine(line: string): Signature | undefined {
     return undefined;
   }
   if (typeof json !== 'object' || json === null || Array.isArray(json)) return undefined;
-  const object = json as Record<string, unknown>;
+  return { name: match[1] as SignatureName, object: json as Record<string, unknown> };
+}
+
+/** A body's last non-blank line. */
+function lastLine(body: string): string {
+  return body.trimEnd().split('\n').at(-1) ?? '';
+}
+
+/**
+ * Read one line as a signature.
+ *
+ * @param line - One line of a body, surrounding space allowed.
+ * @returns The signature, or `undefined` when the line is not one that parses.
+ */
+export function parseSignatureLine(line: string): Signature | undefined {
+  const parsed = signatureObject(line);
+  if (parsed === undefined) return undefined;
+  const { name, object } = parsed;
   const v = Object.hasOwn(object, 'v') ? object.v : 1;
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 1) return undefined;
 
@@ -147,7 +169,7 @@ export function parseSignatureLine(line: string): Signature | undefined {
     fields.turn = field(object, 'turn', TURN_REF);
     fields.address = field(object, 'address', ADDRESS);
   }
-  const signature: Signature = { name: match[1] as SignatureName, v };
+  const signature: Signature = { name, v };
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined) signature[key as SignatureField] = value;
   }
@@ -162,62 +184,20 @@ export function parseSignatureLine(line: string): Signature | undefined {
  * @returns The signature, or `undefined` when the body does not end in one that parses.
  */
 export function readSignature(body: string): Signature | undefined {
-  return parseSignatureLine(body.trimEnd().split('\n').at(-1) ?? '');
+  return parseSignatureLine(lastLine(body));
 }
 
 /**
- * Whether the last non-blank line of `body` is a provenance line that parses
- * ({@link readSignature}). Anyone can paste such a line, so on its own it
- * never proves who wrote a comment.
+ * Whether the last non-blank line of `body` is a provenance line under either
+ * name whose JSON is an object. Looser than {@link readSignature} on purpose:
+ * a bad `v` still counts, because this only ever silences (the agent's own
+ * comment on a shared account, `comment-response.ts`), and a comment wrongly
+ * silenced beats flow answering itself. Never use it to read a field. Anyone
+ * can paste such a line, so on its own it never proves who wrote a comment.
  *
  * @param body - A comment body.
- * @returns `true` when the body ends in a valid signature.
+ * @returns `true` when the body ends in a signature line holding a JSON object.
  */
 export function endsWithSignature(body: string): boolean {
-  return readSignature(body) !== undefined;
-}
-
-/**
- * The newest signature in a thread that is not this session's own
- * (`docs/provenance.md` §11): a loop that signs its own replies would
- * otherwise find itself at the top. A signature whose chat id is this
- * session's id, or a prefix of it (a public body's 8 characters), is skipped.
- *
- * @param bodies - The thread's bodies, oldest first.
- * @param ownChat - This session's own chat id, when it has one.
- * @returns The newest signature not this session's own, or `undefined` when there is none.
- */
-export function newestOtherSignature(
-  bodies: readonly string[],
-  ownChat?: string
-): Signature | undefined {
-  for (let index = bodies.length - 1; index >= 0; index--) {
-    const signature = readSignature(bodies[index]);
-    if (signature === undefined) continue;
-    const own =
-      ownChat !== undefined &&
-      ownChat !== '' &&
-      signature.chat !== undefined &&
-      ownChat.startsWith(signature.chat);
-    if (!own) return signature;
-  }
-  return undefined;
-}
-
-/**
- * The one local chat a signature's chat id names (`docs/provenance.md` §8 and
- * §11): the local ids it is a prefix of, which must be exactly one. None, or
- * more than one, reads as no chat, so the router takes its unsigned path.
- *
- * @param chat - {@link Signature.chat}.
- * @param localChats - The chat ids this install holds; never ids seen only in threads.
- * @returns The matching local id, or `undefined`.
- */
-export function matchLocalChat(
-  chat: string | undefined,
-  localChats: readonly string[]
-): string | undefined {
-  if (chat === undefined || chat === '') return undefined;
-  const hits = new Set(localChats.filter((id) => id.startsWith(chat)));
-  return hits.size === 1 ? [...hits][0] : undefined;
+  return signatureObject(lastLine(body)) !== undefined;
 }

@@ -210,6 +210,10 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
   it.each([
     ['a v1 line', LINE],
     ['a v2 line', '<!-- agent:provenance {"v":2,"chat":"dork:chat:s-1"} -->'],
+    // A bad `v` reads no fields, but still silences: wrongly silenced beats
+    // flow answering itself.
+    ['a line whose v is not a number', '<!-- agent:provenance {"v":"2"} -->'],
+    ['a legacy line whose v is null', '<!-- flow:provenance {"v":null} -->'],
   ])(
     "silences the agent's own comment whose marker the tracker garbled, by its signature line (%s)",
     (_name, line) => {
@@ -307,7 +311,6 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
     ['in the middle of the body', `${LINE}\nCould /flow pick this up?`],
     ['that is not valid JSON', 'Could /flow pick this up?\n<!-- agent:provenance {"v":1 -->'],
     ['whose JSON is not an object', 'Could /flow pick this up?\n<!-- agent:provenance [1] -->'],
-    ['whose v is not a number', 'Could /flow pick this up?\n<!-- agent:provenance {"v":"2"} -->'],
   ])('does not take a signature line %s as the agent', (_name, body) => {
     const c = comment({ author: 'agent-account', body });
     expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({

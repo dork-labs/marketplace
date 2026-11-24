@@ -181,9 +181,8 @@ FlowRun {
 }
 ```
 
-The eight-field **wire subset** of `provenance` is the version 1
-`agent:provenance` signature every outward write carries today — specified,
-tracker-neutrally, with the version 2 fields readers also accept, in
+The eight-field **wire subset** of `provenance` is the `agent:provenance`
+signature every outward write carries — specified, tracker-neutrally, in
 [`provenance.md`](./provenance.md). `worktreePath` and the delegated worker id
 stay local: they are a run record, not a wire format.
 

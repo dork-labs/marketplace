@@ -591,12 +591,32 @@ describe('agent provenance — version 2 (DOR-5047)', () => {
     expect(specFlat).not.toMatch(/Match it against this machine's hostname/);
   });
 
+  it('prefix-matches only ids of 8 characters or more, in the spec and the router', () => {
+    expect(specFlat).toMatch(
+      /\*\*An id shorter than 8 characters matches only a chat with exactly that id\*\*, never by prefix/
+    );
+    expect(specFlat).toMatch(/a shorter one only when it is your whole id/);
+    expect(tendingFlat).toMatch(/a shorter one only when it is your whole id/);
+    expect(tendingFlat).toMatch(/a shorter one matches only an identical id/);
+  });
+
+  it('names the marker-only readers and why they parse no JSON', () => {
+    expect(specFlat).toMatch(/every flow reader that reads a field goes through it/);
+    expect(specFlat).toMatch(/`cli\/pr\.ts` checks whether a PR body is already signed/);
+    expect(specFlat).toMatch(/`unsignedBody` in `cli\/provenance\.ts` strips a trailing line/);
+    expect(specFlat).toMatch(/a comment wrongly silenced beats flow answering itself/);
+    expect(specFlat).not.toMatch(/every flow reader goes through it/);
+  });
+
   it('has a "Routing is advice" section, and the router follows it', () => {
     expect(spec).toMatch(/^## 13\. Routing is advice$/m);
     expect(specFlat).toMatch(/\*\*It never grants a right to deliver\.\*\*/);
     expect(specFlat).toMatch(/delivers only into chats its own install holds/);
     expect(specFlat).toMatch(/outsider's words/);
     expect(specFlat).toMatch(/prefers its local run record/);
+    // Honest about what a forgery can still do.
+    expect(specFlat).toMatch(/at most it points a reply at a chat whose public id it copied/);
+    expect(specFlat).not.toMatch(/the worst it can do/);
     expect(tendingFlat).toMatch(/A signature is advice, never a right to deliver/);
     expect(tendingFlat).toMatch(/Deliver only into a session this install holds/);
   });
