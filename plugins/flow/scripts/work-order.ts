@@ -29,8 +29,8 @@
  *   item's, through any depth.
  * - An item in a project that is not Started is held "waits for project
  *   <P>", unless it is Urgent or a release gate.
- * - An item or project labelled `owner/dorian` is {@link WorkOrder.dorian}: out
- *   of the agent order.
+ * - An item or project carrying the configured `order.personLabel` is
+ *   {@link WorkOrder.personal}: out of the agent order. Unset, nothing is.
  *
  * ## Pure
  *
@@ -177,8 +177,8 @@ export interface WorkOrder {
   held: HeldIssue[];
   /** Items that need a person to fill a field before they can rank. */
   needsTriage: NeedsTriage[];
-  /** Items labelled `owner/dorian`, or in such a project: out of the agent order. */
-  dorian: { identifier: string; title: string }[];
+  /** Items with `order.personLabel`, or in a project with it: out of the agent order. */
+  personal: { identifier: string; title: string }[];
 }
 
 /** The settings the work order reads, resolved from the flow config by {@link orderConfigOf}. */
@@ -189,6 +189,8 @@ export interface OrderConfig {
   sizeOrder: z.infer<typeof SizeOrderSchema>;
   /** `projects.startedCap`: how many projects may be Started at once. */
   startedCap: number;
+  /** `order.personLabel`: the label that keeps work out of the agent order; unset, none does. */
+  personLabel?: string;
 }
 
 /** What {@link computeWorkOrder} reads. */
@@ -214,6 +216,7 @@ export function orderConfigOf(config: FlowConfig): OrderConfig {
     orderKeys: config.dispatch.orderKeys,
     sizeOrder: config.dispatch.sizeOrder,
     startedCap: config.projects.startedCap,
+    ...(config.order.personLabel === undefined ? {} : { personLabel: config.order.personLabel }),
   };
 }
 
@@ -233,7 +236,6 @@ const OPEN_CATEGORIES = new Set(['backlog', 'unstarted', 'started']);
 /** The labels the work order reads, matched by group and name. */
 const PIN_LABEL = 'pin';
 const RELEASE_GATE_LABEL = 'release-gate';
-const OWNER_DORIAN_LABEL = 'owner/dorian';
 
 /** A neutral key: sorts after every real value. */
 const NEUTRAL = Number.POSITIVE_INFINITY;
@@ -345,8 +347,8 @@ function bandOf(item: WorkItem): Band | null {
   if (priority === 1) return 'urgent';
   if (has(item, RELEASE_GATE_LABEL)) return 'releaseGate';
   if (priority === 2) {
-    // A Security High with a due date is a confirmed Must by that date,
-    // in any state but Triage, which still waits for triage (Security's review, DOR-5063).
+    // A Security High whose due date is a real outside deadline (e.g. a
+    // disclosure date) is a confirmed Must by that date, in any state but Triage, which still waits for triage (Security's review, DOR-5063).
     if (isSecurityMust(item)) return 'must';
     return item.stateCategory === 'unstarted' && item.triage !== true ? 'must' : 'should';
   }
@@ -355,7 +357,10 @@ function bandOf(item: WorkItem): Band | null {
   return null;
 }
 
-/** A Security-labelled High with a real due date: a confirmed Must in any state. */
+/**
+ * A Security-labelled High with a due date: a confirmed Must in any state. The
+ * due date there is a real outside deadline (e.g. a disclosure date).
+ */
 function isSecurityMust(item: WorkItem): boolean {
   return priorityOf(item) === 2 && isSecurity(item) && dateKey(item.dueDate) !== NEUTRAL;
 }
@@ -544,7 +549,8 @@ function buildOrder(input: WorkOrderInput): Built {
   const inFlight: InFlight[] = [];
   const held: HeldIssue[] = [];
   const needsTriage: NeedsTriage[] = [];
-  const dorian: WorkOrder['dorian'] = [];
+  const personal: WorkOrder['personal'] = [];
+  const personLabel = config.personLabel;
   const candidates = new Map<string, Entry>();
   /** Blocked items that would rank but for their blocker: they pass their place on. */
   const blocked = new Map<string, { item: WorkItem; tuple: number[]; band: Band }>();
@@ -559,8 +565,11 @@ function buildOrder(input: WorkOrderInput): Built {
   for (const item of open.values()) {
     const projectId = item.project?.id;
     const project = typeof projectId === 'string' ? projectById.get(projectId) : undefined;
-    if (has(item, OWNER_DORIAN_LABEL) || project?.labels.includes(OWNER_DORIAN_LABEL)) {
-      dorian.push({ identifier: item.identifier, title: item.title });
+    if (
+      personLabel !== undefined &&
+      (has(item, personLabel) || project?.labels.includes(personLabel))
+    ) {
+      personal.push({ identifier: item.identifier, title: item.title });
       continue;
     }
     if (item.stateCategory === 'started') {
@@ -739,7 +748,7 @@ function buildOrder(input: WorkOrderInput): Built {
       inFlight: byIdentifier(inFlight),
       held: byIdentifier(held),
       needsTriage: byIdentifier(needsTriage),
-      dorian: byIdentifier(dorian),
+      personal: byIdentifier(personal),
     },
     entries,
     rankOf: ranking.rankOf,
@@ -826,7 +835,7 @@ export function explainIssue(input: WorkOrderInput, identifier: string): string[
   const built = buildOrder(input);
   const { order, entries } = built;
   const at = order.issues.findIndex((issue) => issue.identifier === identifier);
-  if (at === -1) return [rankOfIssue(order, identifier)];
+  if (at === -1) return [rankOfIssue(order, identifier, built.config.personLabel)];
   const issue = order.issues[at];
   const lines = [
     `${issue.identifier} is #${issue.place}: ${issue.title}`,
@@ -871,9 +880,10 @@ export function explainIssue(input: WorkOrderInput, identifier: string): string[
  *
  * @param order - A computed work order.
  * @param identifier - The item's human key.
+ * @param personLabel - `order.personLabel`, named in the reason for an item kept out by it.
  * @returns The place as text, e.g. `3`, or `unranked: held by DOR-12`.
  */
-export function rankOfIssue(order: WorkOrder, identifier: string): string {
+export function rankOfIssue(order: WorkOrder, identifier: string, personLabel?: string): string {
   const ranked = order.issues.find((issue) => issue.identifier === identifier);
   if (ranked !== undefined) return String(ranked.place);
   const heldItem = order.held.find((entry) => entry.identifier === identifier);
@@ -882,8 +892,8 @@ export function rankOfIssue(order: WorkOrder, identifier: string): string {
   if (triage !== undefined) return `unranked: needs triage (${triage.missing.join(', ')})`;
   const flight = order.inFlight.find((entry) => entry.identifier === identifier);
   if (flight !== undefined) return `unranked: in flight (${flight.stateName})`;
-  if (order.dorian.some((entry) => entry.identifier === identifier)) {
-    return "unranked: on Dorian's list (owner/dorian)";
+  if (order.personal.some((entry) => entry.identifier === identifier)) {
+    return `unranked: out of the agent order${personLabel === undefined ? '' : ` (label ${personLabel})`}`;
   }
   return 'unranked: not an open item of the team';
 }

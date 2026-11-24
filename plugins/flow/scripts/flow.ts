@@ -152,7 +152,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'order',
     summary: 'Show the work order: projects in rank, then issues best first, each with why.',
     description:
-      'Read-only. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and owner/dorian items are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2.',
+      'Read-only. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and items with the order.personLabel label are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2.',
     common: ['project', 'snapshot'],
     flags: [
       {

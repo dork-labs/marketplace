@@ -263,7 +263,7 @@ export const PROJECT_INFO_PAGE = {
           sortOrder: 3,
           status: { type: 'planned' },
           labels: {
-            nodes: [{ id: 'lbl-owner-dorian-p', name: 'dorian', parent: { name: 'owner' } }],
+            nodes: [{ id: 'lbl-owner-someone-p', name: 'someone', parent: { name: 'owner' } }],
           },
           relations: { nodes: [] },
           inverseRelations: {

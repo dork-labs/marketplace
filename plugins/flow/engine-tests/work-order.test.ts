@@ -62,7 +62,7 @@ interface CaseFile {
       held?: Record<string, string>;
       needsTriage?: Record<string, string[]>;
       inFlight?: string[];
-      dorian?: string[];
+      personal?: string[];
       inherits?: Record<string, string>;
       banners?: string[];
     };
@@ -71,7 +71,9 @@ interface CaseFile {
 }
 
 const file = JSON.parse(readFileSync(CASES_PATH, 'utf8')) as CaseFile;
-const CONFIG = orderConfigOf(FlowConfigSchema.parse({}));
+/** The fixture's person label: `order.personLabel`, so the case file's `owner/someone` items stand apart. */
+const PERSON_LABEL = 'owner/someone';
+const CONFIG = orderConfigOf(FlowConfigSchema.parse({ order: { personLabel: PERSON_LABEL } }));
 
 /** Expand one short project. */
 function project(short: ShortProject): ProjectInfo {
@@ -179,8 +181,8 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
         if (expected.inFlight) {
           expect(order.inFlight.map((f) => f.identifier)).toEqual(expected.inFlight);
         }
-        if (expected.dorian) {
-          expect(order.dorian.map((d) => d.identifier)).toEqual(expected.dorian);
+        if (expected.personal) {
+          expect(order.personal.map((d) => d.identifier)).toEqual(expected.personal);
         }
         if (expected.banners) expect(order.banners).toEqual(expected.banners);
       });
@@ -211,8 +213,12 @@ describe('one flip per field moves the item where the case file says', () => {
   const base = computeWorkOrder(input());
   for (const flip of file.flips) {
     it(flip.name, () => {
-      const before = rankOfIssue(base, flip.item);
-      const after = rankOfIssue(computeWorkOrder(input({ [flip.item]: flip.set })), flip.item);
+      const before = rankOfIssue(base, flip.item, PERSON_LABEL);
+      const after = rankOfIssue(
+        computeWorkOrder(input({ [flip.item]: flip.set })),
+        flip.item,
+        PERSON_LABEL
+      );
       expect(after).toBe(flip.expected);
       expect(after).not.toBe(before);
     });
@@ -282,6 +288,42 @@ describe('the base order, in words', () => {
     expect(rankOfIssue(order, 'ABC-16')).toBe('1');
     expect(rankOfIssue(order, 'ABC-13')).toBe('unranked: waits for project Mobile');
     expect(rankOfIssue(order, 'ABC-404')).toBe('unranked: not an open item of the team');
+  });
+});
+
+describe('order.personLabel: the one label that keeps work out of the agent order', () => {
+  it('lists an item with the label, or in a project with it, apart', () => {
+    const order = computeWorkOrder(input({ 'ABC-2': { labels: [PERSON_LABEL] } }));
+    expect(order.personal.map((entry) => entry.identifier)).toContain('ABC-2');
+    expect(order.issues.map((issue) => issue.identifier)).not.toContain('ABC-2');
+    expect(rankOfIssue(order, 'ABC-2', PERSON_LABEL)).toBe(
+      `unranked: out of the agent order (label ${PERSON_LABEL})`
+    );
+  });
+
+  it('with no personLabel set, nothing is kept out: the same items rank', () => {
+    const unset = orderConfigOf(FlowConfigSchema.parse({}));
+    expect(unset.personLabel).toBeUndefined();
+    const order = computeWorkOrder({
+      ...input({ 'ABC-2': { labels: [PERSON_LABEL] } }),
+      config: unset,
+    });
+    expect(order.personal).toEqual([]);
+    expect(order.issues.map((issue) => issue.identifier)).toContain('ABC-2');
+  });
+
+  it('hard-codes no person: no other label keeps work out', () => {
+    const order = computeWorkOrder(input({ 'ABC-2': { labels: ['owner/someone-else'] } }));
+    expect(order.personal.map((entry) => entry.identifier)).not.toContain('ABC-2');
+  });
+
+  it('accepts only a group/name label', () => {
+    for (const bad of ['someone', '/someone', 'owner/', 'a/b/c', ' owner/someone']) {
+      expect(FlowConfigSchema.safeParse({ order: { personLabel: bad } }).success).toBe(false);
+    }
+    expect(FlowConfigSchema.safeParse({ order: { personLabel: 'owner/someone' } }).success).toBe(
+      true
+    );
   });
 });
 

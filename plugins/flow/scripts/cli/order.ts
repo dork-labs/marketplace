@@ -6,7 +6,7 @@
  *
  * - No flags: the banners, Started and Planned projects, then the issues best
  *   first (the first 15 in text; all in `--json`), then what is in flight,
- *   held, waiting for triage and on Dorian's list.
+ *   held, waiting for triage and kept out by `order.personLabel`.
  * - `-n <N>`: keep the first N issues, in text and JSON.
  * - `--projects`: the project lists only.
  * - `--all`: also the Paused and Backlog projects.
@@ -173,13 +173,15 @@ function unrankedBlock(heading: string, rows: readonly (readonly string[])[]): s
  * @param shown - How many issues to show.
  * @param all - Whether to show Paused and Backlog projects.
  * @param startedCap - `projects.startedCap`, for the heading.
+ * @param personLabel - `order.personLabel`, for the heading of the items it keeps out.
  * @returns The text.
  */
 export function renderOrder(
   order: WorkOrder,
   shown: number,
   all: boolean,
-  startedCap: number
+  startedCap: number,
+  personLabel?: string
 ): string {
   const issues = order.issues.slice(0, shown);
   const more = order.issues.length - issues.length;
@@ -211,8 +213,10 @@ export function renderOrder(
       ])
     ),
     unrankedBlock(
-      "Dorian's list, out of the agent order",
-      order.dorian.map((item) => [item.identifier, cut(item.title)])
+      personLabel === undefined
+        ? 'Out of the agent order'
+        : `Out of the agent order (label ${personLabel})`,
+      order.personal.map((item) => [item.identifier, cut(item.title)])
     ),
     `Computed ${order.generatedAt}.`,
   ]
@@ -242,7 +246,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const order = computeWorkOrder(input);
 
   if (typeof rankOf === 'string') {
-    const rank = rankOfIssue(order, rankOf);
+    const rank = rankOfIssue(order, rankOf, input.config.personLabel);
     const place = /^\d+$/.test(rank) ? Number(rank) : null;
     return {
       json: {
@@ -283,6 +287,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       projects,
       issues: count === undefined ? order.issues : order.issues.slice(0, count),
     },
-    text: renderOrder(order, count ?? TEXT_DEFAULT_COUNT, all, config.projects.startedCap),
+    text: renderOrder(
+      order,
+      count ?? TEXT_DEFAULT_COUNT,
+      all,
+      config.projects.startedCap,
+      config.order.personLabel
+    ),
   };
 }

@@ -63,10 +63,10 @@ describe('flow show', () => {
     const at = '2026-09-26T12:00:00.000Z';
     const result = await runFlow(['show', 'FAKE-2', '--json'], temp, {
       ...backlog(),
-      members: ['dorian'],
+      members: ['mira'],
       comments: {
         'FAKE-2': [
-          { id: 'c1', author: 'dorian', authorIsTrusted: true, body: 'Go with B.', createdAt: at },
+          { id: 'c1', author: 'mira', authorIsTrusted: true, body: 'Go with B.', createdAt: at },
           { id: 'c2', author: 'guest', authorIsTrusted: true, body: 'SECRET-G', createdAt: at },
           { id: 'c3', author: '', authorIsTrusted: false, body: 'SECRET-N', createdAt: at },
         ],

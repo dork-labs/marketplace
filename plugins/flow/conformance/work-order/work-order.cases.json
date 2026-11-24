@@ -1,6 +1,6 @@
 {
   "contract": "work-order",
-  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target, labels }. 'base' is the shared fixture; each case may replace config.orderKeys and patch items. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and dorian list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
+  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target, labels }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys and patch items. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
   "now": "2026-11-23T12:00:00.000Z",
   "base": {
     "projects": [
@@ -29,7 +29,7 @@
         "name": "Ops",
         "status": "started",
         "priority": 3,
-        "labels": ["owner/dorian"]
+        "labels": ["owner/someone"]
       },
       {
         "id": "p-done",
@@ -141,7 +141,7 @@
         "p": 2,
         "project": "p-billing",
         "size": 1,
-        "labels": ["owner/dorian"]
+        "labels": ["owner/someone"]
       },
       {
         "id": "ABC-15",
@@ -213,7 +213,7 @@
           "ABC-12": ["estimate"]
         },
         "inFlight": ["ABC-10"],
-        "dorian": ["ABC-14", "ABC-15"],
+        "personal": ["ABC-14", "ABC-15"],
         "inherits": {
           "ABC-9": "ABC-8"
         },
@@ -373,7 +373,7 @@
       }
     },
     {
-      "name": "a Security High with a due date is a confirmed Must in any state; without a due date it is not",
+      "name": "a Security High whose due date is a real outside deadline (e.g. a disclosure date) is a confirmed Must in any state; without a due date it is not",
       "patch": {
         "ABC-7": {
           "labels": ["security"],
@@ -494,7 +494,7 @@
       }
     },
     {
-      "name": "a Security High with a due date still waits for triage while it is in Triage",
+      "name": "a Security High whose due date is a real outside deadline (e.g. a disclosure date) still waits for triage while it is in Triage",
       "patch": {
         "ABC-11": {
           "labels": ["security"],
@@ -645,12 +645,12 @@
       "expected": "unranked: waits for project Mobile"
     },
     {
-      "name": "owner/dorian takes it out of the agent order",
+      "name": "the configured person label (order.personLabel: owner/someone) takes it out of the agent order",
       "item": "ABC-2",
       "set": {
-        "labels": ["owner/dorian"]
+        "labels": ["owner/someone"]
       },
-      "expected": "unranked: on Dorian's list (owner/dorian)"
+      "expected": "unranked: out of the agent order (label owner/someone)"
     },
     {
       "name": "starting it moves it to in flight",

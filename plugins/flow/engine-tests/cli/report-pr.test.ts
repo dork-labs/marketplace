@@ -561,7 +561,7 @@ describe('flow report blocked', () => {
     // After a person replies, the same question is posted again.
     tracker.backlog.comments!['ACME-12']!.push({
       id: 'reply',
-      author: 'dorian',
+      author: 'mira',
       authorIsTrusted: false,
       body: 'CSV.',
       createdAt: '2026-09-26T12:01:00.000Z',

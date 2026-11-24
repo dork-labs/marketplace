@@ -1722,7 +1722,7 @@ describe('the work order reads (contract 3.2.0)', () => {
         statusType: 'planned',
         createdAt: '2026-09-02T00:00:00.000Z',
         sortOrder: 3,
-        labels: ['owner/dorian'],
+        labels: ['owner/someone'],
         blockedBy: ['proj-1'],
       },
     ]);

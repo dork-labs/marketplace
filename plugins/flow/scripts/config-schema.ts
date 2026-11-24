@@ -541,7 +541,10 @@ export const ProjectsSchema = z
   })
   .prefault({});
 
-/** Who may move work to the top of the work order. */
+/** A `group/name` label: one slash, neither part empty or edged with space. */
+const PERSON_LABEL_PATTERN = /^[^/\s](?:[^/]*[^/\s])?\/[^/\s](?:[^/]*[^/\s])?$/;
+
+/** Who may move work to the top of the work order, and whose work stays out of it. */
 export const OrderSchema = z
   .object({
     /**
@@ -550,6 +553,15 @@ export const OrderSchema = z
      * who added it.
      */
     pinSetters: z.array(z.string().min(1)).default([]),
+    /**
+     * A `group/name` label (say `owner/someone`) that keeps an item, or every
+     * item in a project carrying it, out of the agent order: listed apart as
+     * a person's own work. No default: unset, nothing is kept out.
+     */
+    personLabel: z
+      .string()
+      .regex(PERSON_LABEL_PATTERN, 'must be a group/name label, like owner/someone')
+      .optional(),
   })
   .prefault({});
 

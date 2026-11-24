@@ -64,7 +64,7 @@ export interface MessageContexts {
     unreportedPush?: boolean;
     /** `true` when a person answered the question the run parked on. */
     answered?: boolean;
-    /** Where the answer is (e.g. "the comment by dorian on ACME-12 at ..."), when known. */
+    /** Where the answer is (e.g. "the comment by mira on ACME-12 at ..."), when known. */
     answer?: string;
   };
   /** The review came back clean at the branch head on origin. */

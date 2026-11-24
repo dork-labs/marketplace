@@ -563,7 +563,7 @@ status, priority, target date and relations.
 ```jsonc
 "dispatch": { "ladder": "v2", "orderKeys": ["dueDate", "projectRank", "unblocks", "size", "age"] },
 "projects": { "startedCap": 6 },
-"order": { "pinSetters": ["<tracker account id>"] }
+"order": { "pinSetters": ["<tracker account id>"], "personLabel": "owner/someone" }
 ```
 
 - `dispatch.ladder` is which list `flow next` picks from. `v1`, the default,
@@ -583,6 +583,10 @@ status, priority, target date and relations.
 - `order.pinSetters` lists the tracker accounts allowed to add the `pin` label.
   The audit (GRM-17) flags a pin added by anyone else, and a pin with no comment
   starting `pin:` that says why. The default `[]` checks only the reason.
+- `order.personLabel` is a `group/name` label, like `owner/someone`, for work a
+  person keeps for themself. An item with it, or in a project with it, stays
+  out of the agent order and is listed apart, under "Out of the agent order".
+  It has no default: unset, nothing is kept out.
 
 ## `fleet`: the account setup reminder
 

@@ -189,6 +189,34 @@ describe('flow order', () => {
     expect(lines.every((line) => line === line.trimEnd())).toBe(true);
   });
 
+  it('lists items with order.personLabel apart, under that label, in JSON and text', async () => {
+    temp = tempProject({ order: { personLabel: 'owner/someone' } });
+    const backlog = {
+      items: [...items(), readyItem('ABC-9', { project: billing, labels: ['owner/someone'] })],
+      projectInfo: PROJECTS,
+    };
+    const out = JSON.parse((await runFlow(['order', '--json'], backlog)).stdout);
+    expect(out.personal).toEqual([{ identifier: 'ABC-9', title: 'Title of ABC-9' }]);
+    const { stdout } = await runFlow(['order'], backlog);
+    expect(stdout).toContain('Out of the agent order (label owner/someone) (1)');
+    expect((await runFlow(['order', '--rank-of', 'ABC-9'], backlog)).stdout.trim()).toBe(
+      'unranked: out of the agent order (label owner/someone)'
+    );
+  });
+
+  it('with no order.personLabel, the same item ranks like any other', async () => {
+    const out = JSON.parse(
+      (
+        await runFlow(['order', '--json'], {
+          items: [...items(), readyItem('ABC-9', { project: billing, labels: ['owner/someone'] })],
+          projectInfo: PROJECTS,
+        })
+      ).stdout
+    );
+    expect(out.personal).toEqual([]);
+    expect(out.issues.map((i: { identifier: string }) => i.identifier)).toContain('ABC-9');
+  });
+
   it('ranks from the snapshot projects when the adapter reads no project fields', async () => {
     const out = JSON.parse(
       (await runFlow(['order', '--json'], { items: items(), projects: [billing, mobile] })).stdout

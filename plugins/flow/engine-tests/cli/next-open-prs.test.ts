@@ -65,7 +65,7 @@ function forgeWith(prs: OpenPr[] | Error): CliDeps['createForge'] {
 function config(extra: Record<string, unknown> = {}) {
   return {
     tracker: 'fake',
-    identity: { agent: AGENT, reviewer: 'dorian' },
+    identity: { agent: AGENT, reviewer: 'mira' },
     autonomy: { wipCap: { global: 2, perProject: 2 } },
     ...extra,
   };
