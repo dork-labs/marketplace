@@ -63,7 +63,7 @@ const HOST_REF = /^dork:host:[0-9a-f]{32}$/;
  * be a kind word, so `dork:chat/owl` is never read as an org called "chat".
  */
 const ADDRESS =
-  /^dork:(?!(?:space|person|agent|host|room|entry|chat|turn)\/)[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\/[a-z0-9][a-z0-9_-]{0,30}[a-z0-9](?:\/[a-z0-9](?:[a-z0-9-]{0,21}[a-z0-9])?)?$/;
+  /^dork:(?!(?:space|person|agent|host|room|entry|chat|turn|todo|run|project)\/)[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\/[a-z0-9][a-z0-9_-]{0,30}[a-z0-9](?:\/[a-z0-9](?:[a-z0-9-]{0,21}[a-z0-9])?)?$/;
 
 /** A harness: `claude-code`, `codex`, `opencode`, or `other:<name>` for any other. */
 const HARNESS = /^(?:claude-code|codex|opencode|other:[a-z0-9][a-z0-9._-]{0,31})$/;
