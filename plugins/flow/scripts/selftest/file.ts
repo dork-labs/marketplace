@@ -31,7 +31,13 @@
 
 import os from 'node:os';
 
-import { buildProvenance, readInstallId, signBody, unsignedBody } from '../cli/provenance.ts';
+import {
+  buildProvenance,
+  readInstallId,
+  signBody,
+  trackerVisibility,
+  unsignedBody,
+} from '../cli/provenance.ts';
 import { findConfigRoots } from '../config-files.ts';
 import { redact } from '../journal.ts';
 import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
@@ -580,6 +586,10 @@ export async function filingSetup(input: FilingSetupInput): Promise<{
   });
   return {
     retro: config.selfImprovement.retro,
-    deps: { adapter, sign: (body) => signBody(body, marker, provenance), unsign: unsignedBody },
+    deps: {
+      adapter,
+      sign: (body) => signBody(body, marker, provenance, trackerVisibility(adapter)),
+      unsign: unsignedBody,
+    },
   };
 }

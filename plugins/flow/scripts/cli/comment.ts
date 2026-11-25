@@ -13,7 +13,7 @@
 
 import { UsageError } from '../errors.ts';
 import type { VerbContext, VerbResult } from './context.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
 import { runFor, sessionProvenance, setupWrite } from './work-write.ts';
 
@@ -40,7 +40,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const body = signBody(
     text,
     loaded.config.identity.marker,
-    sessionProvenance(ctx, runFor(store, item)?.host)
+    sessionProvenance(ctx, runFor(store, item)?.host),
+    trackerVisibility(adapter)
   );
   const last = (item.comments ?? []).at(-1);
   const posted = last === undefined || unsignedBody(last.body) !== unsignedBody(body);

@@ -40,6 +40,7 @@ import type {
   InboxRead,
   ItemWithComments,
   TrackerAccount,
+  TrackerVisibility,
   NewItem,
   WorkItem,
   WorkItemProject,
@@ -110,6 +111,8 @@ export interface FakeBacklog {
   team?: { key: string | null; id: string | null };
   /** The capabilities to declare. Default: all five. */
   capabilities?: Capability[];
+  /** The visibility to declare (`CodeAdapter.visibility`). Default: none, which signs as public. */
+  visibility?: TrackerVisibility;
   /** The account the adapter acts as. */
   user?: TrackerAccount;
   /** Every item the tracker holds, open or closed. */
@@ -384,6 +387,7 @@ export class FakeTracker {
   private buildAdapter(): CodeAdapter {
     return {
       capabilities: this.backlog.capabilities ?? [...ALL_CAPABILITIES],
+      ...(this.backlog.visibility === undefined ? {} : { visibility: this.backlog.visibility }),
       getCurrentUser: async () => {
         this.read();
         return { ...this.user };

@@ -197,7 +197,7 @@ describe('flow create', () => {
     );
     expect(description.startsWith(checked)).toBe(true);
     expect(description.slice(checked.length)).toMatch(
-      /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":2,"harness":"claude-code","surface":"bare-cli","account":"claude-work","chat":"dork:chat:session-abc"\} -->$/
+      /^\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":2,"harness":"claude-code","surface":"bare-cli","account":"claude-work","chat":"dork:chat:session-"\} -->$/
     );
   });
 

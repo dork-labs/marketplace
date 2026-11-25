@@ -10,10 +10,8 @@
 
 ## 1. Why
 
-An outward write is a dead end today. A human reads an agent's comment, replies
-with a question, and nothing in the thread says _which session_ could answer it —
-so the reply either waits for a human, or a fresh session picks it up and rebuilds
-the context from scratch.
+Without a signature, a reply to an agent's comment cannot say _which session_ could
+answer it, so it waits for a human or a fresh session rebuilds the context.
 
 One machine-readable line fixes that: a later reader can **route a follow-up back
 to the session that wrote the thing they are replying to**.
@@ -206,8 +204,9 @@ treat the repository as public.** That is the fail-safe direction: the cost of
 being wrong toward "public" is one degraded resume, and the cost of being wrong
 toward "private" is a permanent leak.
 
-Flow's signer reads no visibility: it signs PR text as public and tracker text as
-private.
+Flow signs PR text as public. Tracker text follows the tracker adapter's declared
+`visibility`: `private` keeps the whole chat id and `host`; `public`, or nothing
+declared, gets the public cut.
 
 ## 9. Which writes carry it
 
@@ -285,8 +284,9 @@ Five reader rules:
   characters or more also counts as your own when it is the start of your id (a
   public body's cut id); a shorter one only when it is your whole id.
 - **A local run record outranks a thread signature.** When the reader holds a
-  durable run record for the item (`flow-state.json`), that record's `sessionId` is
-  authoritative and the thread signature is the fallback for items with no record.
+  durable run record for the item (`flow-state.json`), the record's `chat`, else its
+  `sessionId`, is authoritative and the thread signature is the fallback for items
+  with no record.
 - **A chat id that matches no local chat, or more than one, degrades like a missing
   one.** A reader that holds a re-key alias table checks it before giving up;
   flow's reader holds none yet.

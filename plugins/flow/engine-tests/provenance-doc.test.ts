@@ -261,11 +261,21 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/not privacy, it is theatre/);
   });
 
-  it('says how flow itself signs without reading a visibility', () => {
+  it('says flow signs tracker text by the adapter declared visibility, unknown as public', () => {
     // The signer's choice is documented where the rule is, so it can be checked.
     expect(specFlat).toMatch(
-      /Flow's signer reads no visibility: it signs PR text as public and tracker text as private/
+      /Tracker text follows the tracker adapter's declared `visibility`: `private` keeps the whole chat id and `host`; `public`, or nothing declared, gets the public cut/
     );
+    // The adapter contract and the authoring checklist carry the declaration.
+    expect(contractFlat).toMatch(/\*\*Visibility \(signature\)\.\*\* The adapter declares/);
+    expect(contractFlat).toMatch(/Not declared is public/);
+    expect(buildingAdaptersFlat).toMatch(/\*\*Visibility declared\.\*\*/);
+    expect(buildingAdaptersFlat).toMatch(/`visibility: 'public'` if items can be world-readable/);
+    expect(adapterFlat).toMatch(/It declares `visibility: 'private'`/);
+  });
+
+  it('gives the run record precedence by its chat, else its session id', () => {
+    expect(specFlat).toMatch(/the record's `chat`, else its `sessionId`, is authoritative/);
   });
 
   it('names a decidable visibility check, and fails SAFE when undeterminable', () => {

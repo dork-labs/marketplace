@@ -48,7 +48,7 @@ import {
 import { claimAnswer, releaseAnswer } from './question-write.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
-import { signBody } from './provenance.ts';
+import { signBody, trackerVisibility } from './provenance.ts';
 import { tokenHash } from './report.ts';
 import { runFor, sessionProvenance, setupWrite } from './work-write.ts';
 
@@ -207,7 +207,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       question,
       by === 'reviewer-agent' ? 'reviewer-agent' : 'agent-default'
     );
-    body = signBody(comment, loaded.config.identity.marker, sessionProvenance(ctx, existing.host));
+    body = signBody(
+      comment,
+      loaded.config.identity.marker,
+      sessionProvenance(ctx, existing.host),
+      trackerVisibility(adapter)
+    );
     answer = comment;
   }
 

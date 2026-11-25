@@ -16,6 +16,7 @@ import {
   provenanceLine,
   readInstallId,
   signBody,
+  trackerVisibility,
   unsignedBody,
 } from '../../scripts/cli/provenance.ts';
 import { withoutAgent } from '../../scripts/runtime-detect.ts';
@@ -275,6 +276,28 @@ describe('provenanceLine', () => {
     );
   });
 
+  it.each([
+    ['U+2028', '\u2028'],
+    ['U+2029', '\u2029'],
+  ])('drops only the field holding a %s, not the whole line', (_name, separator) => {
+    // Purpose: a line separator inside a value breaks the whole line for a
+    // reader, so each field is checked on its own and only that one goes.
+    const provenance = buildProvenance({
+      env: {
+        CLAUDECODE: '1',
+        DORKOS_SESSION_ID: CHAT,
+        DORKOS_AGENT_ID: `${AGENT_ID}${separator}`,
+        DORKOS_SPACE_ID: `01JD3F1W2KQ8Z0YV9N6B5T4RMA${separator}`,
+      },
+    });
+    const line = provenanceLine(provenance, 'private');
+    expect(line).toBe(
+      `<!-- agent:provenance {"v":2,"harness":"claude-code","surface":"dorkos","account":"claude","chat":"dork:chat:${CHAT}"} -->`
+    );
+    expect(line).not.toContain(separator);
+    expect(readSignature(`Done.\n${line}`)?.chat).toBe(CHAT);
+  });
+
   it('never puts a hostname on the wire, only an install reference', () => {
     // Purpose: an older run record may still hold a hostname in `host`; the
     // line drops it (DOR-5047). An install reference goes out as it is.
@@ -324,21 +347,36 @@ describe('signBody and unsignedBody', () => {
     const body = signBody(
       'Done.',
       '— 🤖 /flow',
-      buildProvenance({ env: { CLAUDECODE: '1' }, installId: INSTALL_ID })
+      buildProvenance({ env: { CLAUDECODE: '1' }, installId: INSTALL_ID }),
+      'private'
     );
     expect(body).toContain(HOST_REF);
     expect(body).not.toContain(INSTALL_ID);
   });
 
-  it('signs tracker text as private: the whole chat and the install', () => {
-    // Purpose: tracker text keeps what flow has always signed there.
-    expect(signBody('Done.', '— 🤖 /flow', RECORD)).toBe(`Done.\n\n— 🤖 /flow\n${PRIVATE_LINE}`);
+  it('signs a tracker declared private with the whole chat and the install', () => {
+    // Purpose: a private tracker keeps what flow has always signed there.
+    const visibility = trackerVisibility({ visibility: 'private' });
+    expect(signBody('Done.', '— 🤖 /flow', RECORD, visibility)).toBe(
+      `Done.\n\n— 🤖 /flow\n${PRIVATE_LINE}`
+    );
+  });
+
+  it.each<[string, { visibility?: unknown }]>([
+    ['declared public', { visibility: 'public' }],
+    ['not declared', {}],
+    ['declared as something else', { visibility: 'Private' }],
+  ])('signs a tracker %s with the public cut: chat to 8, no host', (_name, adapter) => {
+    // Purpose: unknown is public; an issue on a public repository is world-readable.
+    expect(signBody('Done.', '— 🤖 /flow', RECORD, trackerVisibility(adapter))).toBe(
+      `Done.\n\n— 🤖 /flow\n${PUBLIC_LINE}`
+    );
   });
 
   it('ends with the marker and the line, and strips back to the same text', () => {
     // Purpose: two posts of one summary from different sessions compare equal.
-    const a = signBody('Done.\n', '— 🤖 /flow', { v: 1, sessionId: 'one' });
-    const b = signBody('Done.', '— 🤖 /flow', { v: 1, sessionId: 'two' });
+    const a = signBody('Done.\n', '— 🤖 /flow', { v: 1, sessionId: 'one' }, 'private');
+    const b = signBody('Done.', '— 🤖 /flow', { v: 1, sessionId: 'two' }, 'private');
     expect(a).toBe('Done.\n\n— 🤖 /flow\n<!-- agent:provenance {"v":2,"chat":"dork:chat:one"} -->');
     expect(unsignedBody(a)).toBe(unsignedBody(b));
     expect(unsignedBody(a)).toBe('Done.\n\n— 🤖 /flow');
@@ -350,7 +388,7 @@ describe('signBody and unsignedBody', () => {
   });
 
   it('strips a v1 line, so a summary an older flow posted compares equal', () => {
-    const v2 = signBody('Done.', '— 🤖 /flow', { v: 2, sessionId: 'one' });
+    const v2 = signBody('Done.', '— 🤖 /flow', { v: 2, sessionId: 'one' }, 'private');
     const v1 = 'Done.\n\n— 🤖 /flow\n<!-- agent:provenance {"v":1,"sessionId":"two"} -->';
     expect(unsignedBody(v1)).toBe(unsignedBody(v2));
   });

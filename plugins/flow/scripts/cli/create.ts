@@ -57,7 +57,7 @@ import { AGENT_FROM_OUTSIDE, labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { missingFields, notDuplicateOf, priorityOf, refusal, sizeOf } from './create-fields.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
-import { signBody } from './provenance.ts';
+import { signBody, trackerVisibility } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
 
 /** The first contract version whose `createItem` takes a size. */
@@ -299,7 +299,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const body = parts.join('\n\n');
   const spec: NewItem = {
     title,
-    description: signBody(body, config.identity.marker, sessionProvenance(ctx)),
+    description: signBody(
+      body,
+      config.identity.marker,
+      sessionProvenance(ctx),
+      trackerVisibility(adapter)
+    ),
     labels,
     project,
     priority,

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.1.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.2.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -404,6 +404,11 @@ can comment reaches a model with tools otherwise.
   that wrote it. The two are not substitutes: the marker is visible and answers
   "did I write this?", the signature is hidden and answers "which runtime, session,
   account and machine wrote this?".
+- **Visibility (signature).** The adapter declares who can read the tracker's
+  items: `private` only when every item is its team's alone, `public` when an item
+  can be world-readable (issues on a public repository). Not declared is public.
+  Flow signs a `private` tracker's text with the whole chat id and `host`, any
+  other with the public cut ([`../docs/provenance.md`](../docs/provenance.md) §8).
 - **Degradation (signature).** A tracker that mangles or strips HTML comments
   cannot carry the signature. Such an adapter **says so in its skill** and posts
   the comment unsigned — routing degrades to "unsigned thread", which readers
@@ -669,6 +674,7 @@ type Capability =
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
+  visibility?: 'public' | 'private'; // since 3.2.0: who can read the items; not declared = public
   getCurrentUser(): Promise<{ id: string; name?: string }>;
   getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
   getItem(
@@ -900,6 +906,10 @@ declaration.
 
 ### What each version added
 
+- **3.2.0** - additive (MINOR, DOR-5047): the code adapter may declare
+  `visibility`, `public` or `private`. Flow signs tracker text in full only for
+  `private`; an adapter at 3.1.0, which declares nothing, still loads and its
+  tracker text is signed as public.
 - **3.1.0** - additive (MINOR, DOR-4546): `NewItem` gains an optional `size`,
   which `createItem` writes as the tracker's estimate (and refuses when the
   tracker cannot hold its shape), and `WorkItem` gains an optional

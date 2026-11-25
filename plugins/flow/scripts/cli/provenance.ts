@@ -86,11 +86,24 @@ export const PUBLIC_CHAT_ID_LENGTH = 8;
  * Where a signed body is posted. `unknown` is treated as `public`: the
  * fail-safe direction is to carry less (`docs/provenance.md` §8).
  *
- * Flow reads no target's visibility. It signs forge text (a PR body, a PR
- * comment) as `public`, since a forge repository can be public, and tracker
- * text as `private`, as the reference tracker's workspaces are.
+ * Flow reads no forge's visibility, so it signs forge text (a PR body, a PR
+ * comment) as `public`. Tracker text takes the visibility the tracker's
+ * adapter declares ({@link trackerVisibility}).
  */
 export type ProvenanceVisibility = 'public' | 'private' | 'unknown';
+
+/**
+ * The visibility to sign tracker text with: what the adapter declares, and
+ * `unknown` (signed as public) when it declares nothing or anything else.
+ *
+ * @param adapter - The tracker adapter, or anything carrying its declaration.
+ * @returns The visibility for {@link signBody}.
+ */
+export function trackerVisibility(adapter: { visibility?: unknown }): ProvenanceVisibility {
+  return adapter.visibility === 'private' || adapter.visibility === 'public'
+    ? adapter.visibility
+    : 'unknown';
+}
 
 /** What {@link buildProvenance} reads. */
 export interface ProvenanceInput {
@@ -271,9 +284,10 @@ function lineFor(wire: Readonly<Record<string, string>>): string {
  *   {@link PUBLIC_CHAT_ID_LENGTH} characters and no `host`.
  * - `host` goes out only as an install reference ({@link isHostRef}), so a
  *   hostname an older run record holds never leaves the machine.
- * - Every field is checked by reading the line back through flow's own reader
- *   (`../signature-line.ts`): one that would not read back as written (an
- *   account holding `@`, a malformed reference) is dropped, never repaired.
+ * - Every field is checked on its own by reading it back through flow's own
+ *   reader (`../signature-line.ts`): one that would not read back as written
+ *   (an account holding `@`, a malformed reference, a line separator) is
+ *   dropped alone, never repaired.
  * - The local-only fields (worktree, branch, worker id) and `sessionId`,
  *   `instanceId` and `resumeUrl` are never written.
  *
@@ -308,34 +322,39 @@ export function provenanceLine(
   };
   // What each field must read back as: the chat reads back as its bare id.
   const readsAs = { ...candidate, chat: cutChat };
-  const written: Record<string, string> = {};
+  const wire: Record<string, string> = {};
   for (const field of LINE_FIELDS) {
     const value = candidate[field];
     if (typeof value !== 'string' || value === '') continue;
     if (!isPrivate && PRIVATE_ONLY.has(field)) continue;
-    written[field] = value;
-  }
-  const read = parseSignatureLine(lineFor(written));
-  const wire: Record<string, string> = {};
-  for (const field of LINE_FIELDS) {
-    if (field in written && read?.[field] === readsAs[field]) wire[field] = written[field];
+    // Each field on its own, as DorkOS's builder checks them: one bad value
+    // (a line separator breaks the whole line for a reader) drops only itself.
+    if (parseSignatureLine(lineFor({ [field]: value }))?.[field] === readsAs[field]) {
+      wire[field] = value;
+    }
   }
   return Object.keys(wire).length === 0 ? undefined : lineFor(wire);
 }
 
 /**
  * Sign a body for the tracker: the body, a blank line, the identity marker,
- * and the provenance line as the last line when there is one. Tracker text is
- * signed as `private` ({@link ProvenanceVisibility}): the whole chat id and the
- * install reference, as flow has always signed it there.
+ * and the provenance line as the last line when there is one. Only a tracker
+ * declared `private` gets the whole chat id and the install reference; any
+ * other gets the public cut ({@link trackerVisibility}).
  *
  * @param body - The text to post.
  * @param marker - `identity.marker`.
  * @param provenance - The signing session's provenance.
+ * @param visibility - The tracker's, from {@link trackerVisibility}.
  * @returns The signed body.
  */
-export function signBody(body: string, marker: string, provenance: FlowRunProvenance): string {
-  const line = provenanceLine(provenance, 'private');
+export function signBody(
+  body: string,
+  marker: string,
+  provenance: FlowRunProvenance,
+  visibility: ProvenanceVisibility
+): string {
+  const line = provenanceLine(provenance, visibility);
   const signed = `${body.trimEnd()}\n\n${marker}`;
   return line === undefined ? signed : `${signed}\n${line}`;
 }

@@ -49,7 +49,7 @@ import { resolveMainCheckout } from '../main-checkout.ts';
 import { AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain } from './drain-run.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import { tokenHash } from './report.ts';
 import {
   applyAndVerify,
@@ -245,7 +245,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const body = signBody(
     questionComment(question),
     config.identity.marker,
-    sessionProvenance(ctx, existing?.host)
+    sessionProvenance(ctx, existing?.host),
+    trackerVisibility(adapter)
   );
   // Skip only a retry of this same question (still the item's latest comment).
   const last = (item.comments ?? []).at(-1);

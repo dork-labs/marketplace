@@ -63,7 +63,7 @@ import {
   type AssignmentRefresh,
   type NextConfig,
 } from './next.ts';
-import { signBody } from './provenance.ts';
+import { signBody, type ProvenanceVisibility } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
 
 /** Where a synthesized checkpoint's body is staged, relative to the worktree. */
@@ -81,6 +81,8 @@ export interface HandoffWiringInput {
   flow: string;
   /** Post a signed comment on an item (the ask-mode notice); absent for the verb. */
   comment?: (identifier: string, body: string) => Promise<void>;
+  /** The tracker's visibility, to sign {@link comment}'s notice with; absent: unknown (public). */
+  visibility?: ProvenanceVisibility;
   /** The drain's stale-reading refresh (DOR-3704); absent: none. */
   refresh?: AssignmentRefresh;
 }
@@ -364,7 +366,12 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
       });
       await wiring.comment(
         run.identifier,
-        signBody(text, config.identity.marker, sessionProvenance(ctx, undefined))
+        signBody(
+          text,
+          config.identity.marker,
+          sessionProvenance(ctx, undefined),
+          wiring.visibility ?? 'unknown'
+        )
       );
     },
   };

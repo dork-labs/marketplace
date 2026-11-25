@@ -22,7 +22,7 @@
  * @module @dorkos/flow/selftest/scenarios/lifecycle
  */
 
-import { PROVENANCE_MARKER } from '../../cli/provenance.ts';
+import { PROVENANCE_MARKER, PUBLIC_CHAT_ID_LENGTH } from '../../cli/provenance.ts';
 import { journalFor, read as readJournal, runtimeOf } from '../../journal.ts';
 import { detectRuntime } from '../../runtime-detect.ts';
 import { readSignature } from '../../signature-line.ts';
@@ -235,9 +235,11 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
       'the completion comment has no provenance line as its last line'
     );
     checkEqual(provenance.harness, recorded.harness, `the ${runtime} provenance harness`);
+    // The fake tracker declares no visibility, so the comment gets the public
+    // cut: the session id's first characters.
     checkEqual(
       provenance.chat,
-      recorded.sessionId === '' ? undefined : recorded.sessionId,
+      recorded.sessionId === '' ? undefined : recorded.sessionId.slice(0, PUBLIC_CHAT_ID_LENGTH),
       `the ${runtime} provenance session id`
     );
     checkEqual(provenance.account, recorded.account, `the ${runtime} provenance account`);
