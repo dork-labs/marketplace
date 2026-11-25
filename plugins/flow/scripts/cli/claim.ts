@@ -79,11 +79,19 @@ const CLAIM_LOCK_WAIT_MS = 60_000;
 /**
  * The worker pid a DorkOS session records when its shell cannot read the
  * harness process: flow's "no local process" value, as a drain run records
- * while queued. Every liveness check reads a pid of 0 or less as unknown,
- * never as a dead worker, so recovery leaves the run to DorkOS, which
- * supervises the session itself.
+ * while queued. No check ever reads it as a dead worker (status and run-ended
+ * read it as unknown; fleet and the extension, through `kill(-1, 0)`, as
+ * alive), so recovery never reclaims the run. The flip side: flow cannot tell
+ * when that chat ends. The run carries the chat's `dorkosSessionId` for a
+ * check that asks DorkOS, and a closed item still reports the run as ended.
  */
 const NO_LOCAL_PROCESS = -1;
+
+/** The DorkOS chat this shell belongs to (`DORKOS_SESSION_ID`), or `undefined`. */
+function dorkosSession(ctx: VerbContext): string | undefined {
+  const id = (ctx.env.DORKOS_SESSION_ID ?? '').trim();
+  return id === '' ? undefined : id;
+}
 
 /**
  * `--pid`, else the parent of the shell that ran flow (the harness), read with
@@ -101,7 +109,7 @@ async function workerPid(ctx: VerbContext): Promise<number> {
     }
     return pid;
   }
-  const inDorkos = (ctx.env.DORKOS_SESSION_ID ?? '').trim() !== '';
+  const inDorkos = dorkosSession(ctx) !== undefined;
   const fail = () => {
     if (inDorkos) return NO_LOCAL_PROCESS;
     throw new PreconditionError(
@@ -156,8 +164,13 @@ export interface ClaimInput {
   identifier: string;
   /** The session the run names: the claiming session, or the id the drain minted. */
   sessionId: string;
-  /** The worker's pid, or `-1` while no local process is known (a queued drain run). */
+  /**
+   * The worker's pid, or `-1` while no local process is known: a queued drain
+   * run, or a DorkOS session whose sandbox blocks `ps`.
+   */
   workerPid: number;
+  /** The DorkOS chat that claims (`DORKOS_SESSION_ID`), when one does. */
+  dorkosSessionId?: string;
   /** The worktree the work happens in. */
   worktreePath: string;
   /** Its branch. */
@@ -241,6 +254,7 @@ export async function claimItem(
         provenance: { ...input.provenance, worktree: input.worktreePath, branch: input.branch },
         ...(input.account === undefined ? {} : { account: input.account }),
         ...(input.host === undefined ? {} : { host: input.host }),
+        ...(input.dorkosSessionId === undefined ? {} : { dorkosSessionId: input.dorkosSessionId }),
         ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
         ...(input.drain === undefined ? {} : { drain: input.drain }),
         ...(input.dispatchedBy === undefined ? {} : { dispatchedBy: input.dispatchedBy }),
@@ -331,6 +345,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ...(typeof launcher === 'string' ? { host: launcher } : {}),
       ...(runtime === null ? {} : { runtime }),
       ...(typeof dispatchedBy === 'string' ? { dispatchedBy } : {}),
+      ...(dorkosSession(ctx) === undefined ? {} : { dorkosSessionId: dorkosSession(ctx) }),
     }
   );
   const journalRuntime = (runtime ?? undefined) as Runtime | undefined;

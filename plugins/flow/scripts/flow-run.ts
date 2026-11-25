@@ -444,9 +444,17 @@ export interface FlowRun {
   /**
    * OS process id of the worker driving the run — the **v1** single-machine
    * liveness signal. A claimed, In-Progress, not-`needs-input` item whose
-   * `workerPid` is not alive on a fresh tick is orphaned by definition.
+   * `workerPid` is not alive on a fresh tick is orphaned by definition. `-1`
+   * means no local process is known: a queued drain run, or a claim from a
+   * DorkOS session whose sandbox blocks `ps` (see {@link dorkosSessionId}).
    */
   workerPid: number;
+  /**
+   * The DorkOS chat that claimed the run (`DORKOS_SESSION_ID`), when a DorkOS
+   * session did. Recorded so a later check can ask DorkOS whether that chat
+   * still exists; flow itself cannot read its process inside a sandbox.
+   */
+  dorkosSessionId?: string;
   /**
    * **v2 (concurrent) field — not used by the v1 single-machine WIP-1 path.**
    * Last heartbeat timestamp (ISO-8601) for the concurrent stall-detector

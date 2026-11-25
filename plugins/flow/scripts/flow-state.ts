@@ -199,6 +199,8 @@ export const FlowRunSchema = z.looseObject({
   status: FlowRunStatusSchema,
   attemptCount: z.number().int().nonnegative(),
   workerPid: z.number().int(),
+  // The DorkOS chat that claimed it (DORKOS_SESSION_ID), when one did (DOR-4378).
+  dorkosSessionId: z.string().optional(),
   heartbeatAt: z.string().optional(),
   startedAt: z.string(),
   completedAt: z.string().optional(),
