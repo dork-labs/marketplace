@@ -373,6 +373,40 @@ describe('flow claim refuses what it must not claim (exit 5)', () => {
     expect(result.tracker.writes).toEqual([]);
   });
 
+  it('claims in a DorkOS session whose sandbox blocks ps, recording no local process (DOR-4378)', async () => {
+    // Purpose: inside Codex's macOS sandbox `ps` fails ("Operation not
+    // permitted"), so the harness pid cannot be read. DorkOS hands every
+    // shell its session id and supervises that session itself, so the claim
+    // records -1, flow's "no local process" (as a drain run does), which every
+    // liveness check reads as unknown, never as a dead worker.
+    const claim = ['claim', 'FAKE-1', '--worktree', '/work/tree', '--branch', 'work'];
+    const env = { CODEX_THREAD_ID: 'thread-4378', DORKOS_SESSION_ID: 'dork-session-1' };
+    const result = await runFlow(project, { items: [item('FAKE-1')] }, claim, {
+      runProcess: async () => ({ code: 1, stdout: '', stderr: 'ps: Operation not permitted' }),
+      env,
+    });
+    expect(result.code, JSON.stringify(result.json)).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1']).toMatchObject({
+      sessionId: 'thread-4378',
+      workerPid: -1,
+    });
+
+    // A runner that cannot even start ps is the same answer.
+    const other = makeProject();
+    try {
+      const thrown = await runFlow(other, { items: [item('FAKE-1')] }, claim, {
+        runProcess: async () => {
+          throw new Error('spawn ps EPERM');
+        },
+        env,
+      });
+      expect(thrown.code).toBe(EXIT.ok);
+      expect(other.runs()['id-FAKE-1'].workerPid).toBe(-1);
+    } finally {
+      other.cleanup();
+    }
+  });
+
   it('rejects an unknown --host as a usage error', async () => {
     // Purpose: the launcher vocabulary is pinned (cli, dorkos, cmux).
     const result = await runFlow(project, { items: [item('FAKE-1')] }, [

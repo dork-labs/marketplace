@@ -76,7 +76,22 @@ async function resolveIdentity(adapter: CodeAdapter, config: FlowConfig): Promis
  */
 const CLAIM_LOCK_WAIT_MS = 60_000;
 
-/** `--pid`, else the parent of the shell that ran flow (the harness). */
+/**
+ * The worker pid a DorkOS session records when its shell cannot read the
+ * harness process: flow's "no local process" value, as a drain run records
+ * while queued. Every liveness check reads a pid of 0 or less as unknown,
+ * never as a dead worker, so recovery leaves the run to DorkOS, which
+ * supervises the session itself.
+ */
+const NO_LOCAL_PROCESS = -1;
+
+/**
+ * `--pid`, else the parent of the shell that ran flow (the harness), read with
+ * `ps`. When `ps` is unavailable (Codex's macOS sandbox refuses it, DOR-4378)
+ * and the shell belongs to a DorkOS session (`DORKOS_SESSION_ID`, which DorkOS
+ * sets in every shell it starts), the run records {@link NO_LOCAL_PROCESS};
+ * anywhere else the claim stops and asks for `--pid`.
+ */
 async function workerPid(ctx: VerbContext): Promise<number> {
   const flag = ctx.args.flags.pid;
   if (typeof flag === 'string') {
@@ -86,18 +101,21 @@ async function workerPid(ctx: VerbContext): Promise<number> {
     }
     return pid;
   }
-  const fail = () =>
-    new PreconditionError(
+  const inDorkos = (ctx.env.DORKOS_SESSION_ID ?? '').trim() !== '';
+  const fail = () => {
+    if (inDorkos) return NO_LOCAL_PROCESS;
+    throw new PreconditionError(
       'could not find the process that runs this session; pass --pid <the harness process id>'
     );
+  };
   let result;
   try {
     result = await ctx.runProcess('ps', ['-o', 'ppid=', '-p', String(process.ppid)]);
   } catch {
-    throw fail();
+    return fail();
   }
   const pid = Number(result.stdout.trim());
-  if (result.code !== 0 || !Number.isInteger(pid) || pid <= 0) throw fail();
+  if (result.code !== 0 || !Number.isInteger(pid) || pid <= 0) return fail();
   return pid;
 }
 
@@ -322,6 +340,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   return {
     runtime: journalRuntime,
     json: { ok: true, dryRun: ctx.dryRun, identifier, change, run: record },
-    text: `${ctx.dryRun ? 'Would claim' : 'Claimed'} ${identifier} at stage ${record.stage} (worker ${pid}, ${branch}).`,
+    text: `${ctx.dryRun ? 'Would claim' : 'Claimed'} ${identifier} at stage ${record.stage} (${pid === NO_LOCAL_PROCESS ? 'worker: this DorkOS session' : `worker ${pid}`}, ${branch}).`,
   };
 }
