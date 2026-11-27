@@ -24,7 +24,7 @@ import {
   type Ask,
   type AskProject,
 } from '../lib/asks.ts';
-import { clip, startRefusal, startWords } from '../lib/start-words.ts';
+import { clip, isStartRefusal, startRefusal, startWords } from '../lib/start-words.ts';
 
 const PROJECT: AskProject = {
   name: 'dorkos',
@@ -453,5 +453,15 @@ describe('the words that start work', () => {
     ).toBe("No account may work in dorkos. Choose accounts in dorkos's Flow settings.");
     expect(startRefusal('start_limit', '', 'dorkos')).toMatch(/Try again/);
     expect(startRefusal('weird', 'x', 'dorkos')).toBe("Flow couldn't start that. Try again.");
+  });
+
+  it('says a paused agent is paused, and counts it as a refused start (contract 2.1.0)', () => {
+    expect(startRefusal('agent_paused', '', 'dorkos')).toBe(
+      "dorkos's agent is paused. Resume it, then try again."
+    );
+    expect(
+      startRefusal('agent_paused', 'The agent is paused. Resume it, then try again.', 'dorkos')
+    ).toBe('The agent is paused. Resume it, then try again.');
+    expect(isStartRefusal({ code: 'agent_paused', message: 'x' })).toBe(true);
   });
 });

@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.102.1
+
+**Reinstall Flow to get this message.**
+
+- When a Flow button can't start a chat because the project's agent is paused, it now says so ("…'s agent is paused. Resume it, then try again.") instead of "Flow couldn't start that."
+
 ## 0.102.0
 
 **Reinstall Flow to get readiness in the work order. What the drain picks changes only when `dispatch.ladder` is `v2`.**

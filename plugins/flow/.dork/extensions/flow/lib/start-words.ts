@@ -130,6 +130,8 @@ export function startRefusal(code: unknown, message: unknown, name: string): str
     return said ?? 'Flow started a lot of chats in the last hour. Try again in a few minutes.';
   }
   if (code === 'not_a_project') return said ?? `${name} is no longer a project on this computer.`;
+  if (code === 'agent_paused')
+    return said ?? `${name}'s agent is paused. Resume it, then try again.`;
   return "Flow couldn't start that. Try again.";
 }
 
@@ -139,7 +141,7 @@ export function isStartRefusal(error: unknown): error is { code: string; message
     typeof error === 'object' &&
     error !== null &&
     typeof (error as { code?: unknown }).code === 'string' &&
-    ['not_a_project', 'account_not_allowed_here', 'start_limit'].includes(
+    ['not_a_project', 'account_not_allowed_here', 'start_limit', 'agent_paused'].includes(
       (error as { code: string }).code
     )
   );

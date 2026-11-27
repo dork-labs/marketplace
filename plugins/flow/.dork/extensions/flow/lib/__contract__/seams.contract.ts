@@ -93,25 +93,36 @@ export interface StartWorkInput {
   reason: string;
 }
 
-/** Codes: 'not_a_project' | 'account_not_allowed_here' | 'start_limit'. `message` is plain words. */
+/** A new chat, answered when the start is saved. */
+export interface StartWorkResponse {
+  sessionId: string;
+}
+
+/**
+ * Codes: 'not_a_project' | 'account_not_allowed_here' | 'start_limit' |
+ * 'agent_paused' (the agent is paused; nothing is kept). `message` is plain words.
+ */
 export declare class StartWorkError extends Error {
   /** Which rule refused the start. */
-  readonly code: 'not_a_project' | 'account_not_allowed_here' | 'start_limit';
+  readonly code: 'not_a_project' | 'account_not_allowed_here' | 'start_limit' | 'agent_paused';
   /** Refuse a start. */
-  constructor(code: 'not_a_project' | 'account_not_allowed_here' | 'start_limit', message: string);
+  constructor(
+    code: 'not_a_project' | 'account_not_allowed_here' | 'start_limit' | 'agent_paused',
+    message: string
+  );
 }
 
 /** `ctx.sessions`. */
 export interface SessionsApi {
   /** Start work in a new chat in a project, without a person. */
-  start(input: StartWorkInput): Promise<{ sessionId: string }>;
+  start(input: StartWorkInput): Promise<StartWorkResponse>;
 }
 
 /** The `SessionInfo` / `LimitedSessionInfo` members this contract covers. */
 export interface SessionInfoSeams {
   /** Every tracker item the session works on, newest first. */
   trackerItems: { id: string; via: 'this-chat' | 'own-chat' }[];
-  /** @deprecated The newest `this-chat` item. */
+  /** @deprecated since 0.135, remove in 0.200. The newest `this-chat` item. */
   trackerItem?: { id: string };
 }
 
@@ -499,7 +510,7 @@ export interface ExtensionAPISeams {
   /** This extension's open decisions. */
   listDecisions(): Promise<ExtensionDecisionView[]>;
   /** Start work in a NEW chat; never touches the current one. */
-  startWork(input: StartWorkInput): Promise<{ sessionId: string }>;
+  startWork(input: StartWorkInput): Promise<StartWorkResponse>;
   /** Per-project settings core holds for this extension. */
   readonly projectSettings: {
     /** The stored value for a project, or null. */
