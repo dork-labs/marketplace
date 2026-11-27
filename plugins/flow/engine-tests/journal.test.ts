@@ -213,7 +213,7 @@ describe('redact', () => {
   });
 
   it('replaces an email address with [email]', () => {
-    expect(redact('ask dorian.collier@example.com today')).toBe('ask [email] today');
+    expect(redact('ask mira.fictional@example.com today')).toBe('ask [email] today');
   });
 
   it('shortens the home folder to ~', () => {
@@ -261,7 +261,7 @@ describe('buildLine', () => {
   it.each<[string, JournalEvent, string, number]>([
     [
       'item',
-      { kind: 'note', noteKind: 'friction', text: 'x', item: 'dorian@example.com' },
+      { kind: 'note', noteKind: 'friction', text: 'x', item: 'mira@example.com' },
       'item',
       64,
     ],

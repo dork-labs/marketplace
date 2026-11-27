@@ -896,7 +896,7 @@ describe('drainStep: parked runs', () => {
   // Answered (needs-input gone, still claimed and open): back to its phase with a continue.
   it('an answered parked run goes back to its phase and gets a continue', () => {
     const d = drain('parked', { parkedReason: 'q', parkedFrom: 'fixing', nudges: 2 });
-    const answer = 'the comment by dorian at 2026-09-26T12:05:00.000Z';
+    const answer = 'the comment by mira at 2026-09-26T12:05:00.000Z';
     const out = step(d, {
       worker: { kind: 'exited', code: 0 },
       item: { closed: false, claimed: true, needsInput: false, title: 't', answer },
@@ -932,7 +932,7 @@ describe('drainStep: parked runs', () => {
       parkedFrom: 'watching',
       pr: PR,
     });
-    const answer = 'the comment by dorian at 2026-09-26T12:05:00.000Z';
+    const answer = 'the comment by mira at 2026-09-26T12:05:00.000Z';
     const out = step(d, {
       worker: { kind: 'exited', code: 0 },
       pr: prStatus({ failing }),

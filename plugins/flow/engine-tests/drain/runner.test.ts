@@ -1570,10 +1570,10 @@ describe('flow drain: parked runs', () => {
     // Neither a comment from before the park nor one by the agent itself is an answer.
     const comments = ((world.tracker.backlog.comments ??= {})['ACME-1'] ??= []);
     const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
-    world.tracker.backlog.members = ['dorian'];
+    world.tracker.backlog.members = ['mira'];
     const say = (id: string, author: string, body: string, createdAt: string) =>
       comments.push({ id, author, authorIsTrusted: false, body, createdAt });
-    say('old', 'dorian', 'Earlier note.', at(-5));
+    say('old', 'mira', 'Earlier note.', at(-5));
     say('own', 'agent-1', 'Still waiting.', at(1));
     clock = T0 + 2 * 60_000;
     await tick();
@@ -1600,7 +1600,7 @@ describe('flow drain: parked runs', () => {
     // Security M1 on #152: in shared mode (no reviewer) every agent posts as
     // the agent's account, so an unsigned reply from it, even a member's, is
     // never the answer. The run stays parked and the pass says how to answer.
-    world.tracker.backlog.members = ['dorian', 'agent-1'];
+    world.tracker.backlog.members = ['mira', 'agent-1'];
     say('forged', 'agent-1', 'Use JSON.', at(2.5));
     clock = T0 + 3.5 * 60_000;
     const forged = await tick();
@@ -1609,7 +1609,7 @@ describe('flow drain: parked runs', () => {
     expect(forged.stderr).toContain('the account flow posts as');
 
     // A person replies: the next pass lifts needs-input and resumes the run.
-    say('answer', 'dorian', 'Use CSV.', at(3));
+    say('answer', 'mira', 'Use CSV.', at(3));
     clock = T0 + 4 * 60_000;
     await tick();
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'working', parkedReason: null });
@@ -1618,7 +1618,7 @@ describe('flow drain: parked runs', () => {
     const sent = world.log.sends.at(-1);
     expect(sent?.handle.sessionId).toBe(first.sessionId);
     expect(sent?.text).toContain('answered');
-    expect(sent?.text).toContain('dorian');
+    expect(sent?.text).toContain('mira');
   }, 120_000);
 });
 

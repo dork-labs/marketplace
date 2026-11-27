@@ -373,6 +373,11 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
       }
       case 'FlowProjects':
         return okEnvelope({ projects: { nodes: [] } });
+      case 'FlowProjectInfo':
+        // The simulated team has no project with work order fields.
+        return okEnvelope({
+          team: { projects: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        });
       default:
         throw new Error(`the Linear simulator does not answer ${operation}`);
     }

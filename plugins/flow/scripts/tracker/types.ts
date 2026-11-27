@@ -17,7 +17,13 @@
  */
 
 import type { FlowConfig } from '../config-schema.ts';
-import type { StateCategory, WorkItem, WorkItemProject } from '../work-item.ts';
+import type {
+  PinInfo,
+  ProjectInfo,
+  StateCategory,
+  WorkItem,
+  WorkItemProject,
+} from '../work-item.ts';
 import type { WorkStateChange } from '../work-state.ts';
 
 export type { WorkStateChange } from '../work-state.ts';
@@ -118,6 +124,14 @@ export interface BacklogSnapshot {
   closed: ClosedItem[];
   /** Only the projects the items reference, with their state category when known. */
   projects: WorkItemProject[];
+  /**
+   * Every open project of the team with the fields the work order's project
+   * layer reads: status, priority, target date, labels and the projects each
+   * waits on (contract 3.2.0). Absent when the adapter does not read them (or
+   * the read failed); `flow order` then ranks the referenced {@link projects}
+   * by status alone.
+   */
+  projectInfo?: ProjectInfo[];
 }
 
 /** One comment on an item, oldest first in any list. */
@@ -309,4 +323,4 @@ export interface CodeAdapterModule {
 }
 
 /** Re-exported so an adapter can name the category type without reaching zod. */
-export type { StateCategory, WorkItem, WorkItemProject };
+export type { PinInfo, ProjectInfo, StateCategory, WorkItem, WorkItemProject };

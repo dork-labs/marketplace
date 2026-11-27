@@ -29,6 +29,8 @@ import {
   issueNode,
   LABEL,
   okEnvelope,
+  PIN_READ,
+  PROJECT_INFO_PAGE,
   PROJECTS,
   RELATIONS_PAGE,
   spilledEnvelope,
@@ -90,6 +92,10 @@ function snapshotRoute(call: Call): Answer {
       return okEnvelope(RELATIONS_PAGE);
     case 'FlowProjects':
       return okEnvelope(PROJECTS);
+    case 'FlowProjectInfo':
+      return okEnvelope(PROJECT_INFO_PAGE);
+    case 'FlowPin':
+      return okEnvelope(PIN_READ);
     case 'FlowSnapshotClosed':
       return okEnvelope(CLOSED_PAGE);
     case 'FlowViewer':
@@ -140,10 +146,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.1.0 and all seven capabilities', () => {
+  it('declares contract 3.2.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('3.1.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.2.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -322,7 +328,9 @@ describe('getBacklogSnapshot', () => {
     const { adapter, warnings } = build(snapshotRoute);
     const snapshot = await adapter.getBacklogSnapshot();
     const triaged = snapshot.items.find((item) => item.identifier === 'DOR-103');
-    expect(triaged).toMatchObject({ stateCategory: 'backlog', stateName: 'Triage' });
+    // Contract 3.2.0: the item says it is in triage, so the work order can hold it.
+    expect(triaged).toMatchObject({ stateCategory: 'backlog', stateName: 'Triage', triage: true });
+    expect(snapshot.items.find((item) => item.identifier === 'DOR-101')?.triage).toBeUndefined();
     expect(snapshot.items.some((item) => item.identifier === 'DOR-104')).toBe(false);
     expect(warnings.join('\n')).toMatch(
       /DOR-104 is in a Linear state flow cannot represent \(duplicate\)/
@@ -1682,5 +1690,167 @@ describe('panel transport limits and reset headers', () => {
     await expect(adapter.getPanelSnapshot!(base)).rejects.toMatchObject({ kind: 'read-limit' });
     expect(calls).toHaveLength(1);
     await expect(adapter.getCurrentUser()).resolves.toMatchObject({ id: VIEWER.viewer.id });
+  });
+});
+
+describe('the work order reads (contract 3.2.0)', () => {
+  it('reads every open project of the team, 25 a page, with priority, target date, labels and blockers', async () => {
+    const { adapter, calls } = build(snapshotRoute);
+    const snapshot = await adapter.getBacklogSnapshot();
+    const pages = calls.filter((call) => call.operation === 'FlowProjectInfo');
+    expect(pages.map((call) => call.variables)).toEqual([
+      { teamId: TEAM.id, first: 25, after: null },
+    ]);
+    expect(pages[0].query).toMatch(/team\(id: \$teamId\) \{\s*projects\(/);
+    expect(snapshot.projectInfo).toEqual([
+      {
+        id: 'proj-1',
+        name: 'Example project',
+        slugId: 'aaa111',
+        statusType: 'started',
+        priority: 2,
+        targetDate: '2026-12-15',
+        createdAt: '2026-09-01T00:00:00.000Z',
+        sortOrder: -10.5,
+        labels: ['pin'],
+        blockedBy: [],
+      },
+      {
+        id: 'proj-2',
+        name: 'Another project',
+        slugId: 'bbb222',
+        statusType: 'planned',
+        createdAt: '2026-09-02T00:00:00.000Z',
+        sortOrder: 3,
+        labels: ['owner/someone'],
+        blockedBy: ['proj-1'],
+      },
+    ]);
+  });
+
+  it('reads who pinned an item only for items with the pin label', async () => {
+    const pinnedCore = structuredClone(CORE_PAGE_1) as typeof CORE_PAGE_1;
+    (pinnedCore.team.issues.nodes[0].labels as { nodes: unknown[] }).nodes.push({
+      id: 'lbl-pin',
+      name: 'pin',
+      parent: null,
+    });
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowSnapshotCore' && call.variables.after === null
+        ? okEnvelope(pinnedCore)
+        : snapshotRoute(call)
+    );
+    const snapshot = await adapter.getBacklogSnapshot();
+    const pinReads = calls.filter((call) => call.operation === 'FlowPin');
+    expect(pinReads.map((call) => call.variables)).toEqual([{ id: 'uuid-DOR-101' }]);
+    expect(snapshot.items.find((item) => item.identifier === 'DOR-101')?.pin).toEqual({
+      actor: 'user-lead',
+      actorName: 'Lee Example',
+      at: '2026-11-22T15:00:00.000Z',
+      reason: 'ships with the next release',
+    });
+    expect(snapshot.items.filter((item) => item.pin !== undefined)).toHaveLength(1);
+  });
+
+  it('a failed project or pin read leaves those fields out with a warning, never failing the snapshot', async () => {
+    const pinnedCore = structuredClone(CORE_PAGE_1) as typeof CORE_PAGE_1;
+    (pinnedCore.team.issues.nodes[0].labels as { nodes: unknown[] }).nodes.push({
+      id: 'lbl-pin',
+      name: 'pin',
+      parent: null,
+    });
+    for (const broken of [
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo' ? failedEnvelope('Query too complex') : null,
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo'
+          ? okEnvelope({ team: { projects: null } })
+          : call.operation === 'FlowPin'
+            ? okEnvelope({
+                errors: [{ message: 'RATELIMITED', extensions: { code: 'RATELIMITED' } }],
+              })
+            : null,
+    ]) {
+      const { adapter, warnings } = build(
+        (call) =>
+          broken(call) ??
+          (call.operation === 'FlowSnapshotCore' && call.variables.after === null
+            ? okEnvelope(pinnedCore)
+            : snapshotRoute(call))
+      );
+      const snapshot = await adapter.getBacklogSnapshot();
+      expect(snapshot.items.length).toBeGreaterThan(0);
+      expect(snapshot.projectInfo).toBeUndefined();
+      expect(warnings.join('\n')).toMatch(/project fields could not be read/);
+    }
+    const { adapter, warnings } = build((call) =>
+      call.operation === 'FlowPin'
+        ? failedEnvelope('Entity not found')
+        : call.operation === 'FlowSnapshotCore' && call.variables.after === null
+          ? okEnvelope(pinnedCore)
+          : snapshotRoute(call)
+    );
+    const snapshot = await adapter.getBacklogSnapshot();
+    expect(snapshot.projectInfo).toHaveLength(2);
+    expect(snapshot.items.find((i) => i.identifier === 'DOR-101')?.pin).toBeUndefined();
+    expect(warnings.join('\n')).toMatch(/who pinned DOR-101 could not be read/);
+  });
+
+  it('reads a due date as given, and leaves a malformed one out', () => {
+    const due = linear.normalizeIssue(
+      issueNode('DOR-7', { dueDate: '2026-11-27' }) as never,
+      undefined,
+      undefined
+    );
+    expect(due?.dueDate).toBe('2026-11-27');
+    const bad = linear.normalizeIssue(
+      issueNode('DOR-8', { dueDate: 'soon' }) as never,
+      undefined,
+      undefined
+    );
+    expect(bad?.dueDate).toBeUndefined();
+  });
+
+  it('a pin with no pin: comment and no history event has no reason and no actor', () => {
+    expect(linear.pinInfoOf({ history: { nodes: [] }, comments: { nodes: [] } })).toEqual({});
+    expect(linear.pinInfoOf(null)).toEqual({});
+  });
+
+  it('reads blockers from either side, and ignores relations that do not say who waits', () => {
+    const edge = (anchorType: string, relatedAnchorType: string, type = 'dependency') => ({
+      type,
+      anchorType,
+      relatedAnchorType,
+      project: { id: 'a' },
+      relatedProject: { id: 'b' },
+    });
+    expect(
+      linear.projectBlockers({ id: 'b', inverseRelations: { nodes: [edge('end', 'start')] } })
+    ).toEqual(['a']);
+    expect(
+      linear.projectBlockers({ id: 'a', relations: { nodes: [edge('start', 'end')] } })
+    ).toEqual(['b']);
+    expect(
+      linear.projectBlockers({ id: 'a', relations: { nodes: [edge('end', 'start')] } })
+    ).toEqual([]);
+    expect(
+      linear.projectBlockers({ id: 'b', inverseRelations: { nodes: [edge('start', 'start')] } })
+    ).toEqual([]);
+    expect(
+      linear.projectBlockers({
+        id: 'b',
+        inverseRelations: { nodes: [edge('end', 'start', 'related')] },
+      })
+    ).toEqual([]);
+  });
+
+  it('a panel read is display-only and skips the work order reads', async () => {
+    const { adapter, calls } = build(snapshotRoute);
+    const panel = await adapter.getPanelSnapshot!(base);
+    expect(calls.some((call) => call.operation === 'FlowSnapshotCore')).toBe(true);
+    expect(calls.some((call) => ['FlowProjectInfo', 'FlowPin'].includes(call.operation))).toBe(
+      false
+    );
+    expect(panel.projectInfo).toBeUndefined();
   });
 });

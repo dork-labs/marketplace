@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.1.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.2.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -72,6 +72,9 @@ native representation into these fields is the adapter's core job.
 | `agentDisposition` | `'ready' \| 'claimed' \| 'completed' \| 'needs-input'` (optional)                   | Derived from the `agent/*` label family (the durable state machine).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `createdAt`        | `string` (optional)                                                                 | ISO-8601 creation timestamp. Feeds the dispatch age tier (oldest first). Missing is `undefined` (neutral).                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `updatedAt`        | `string` (optional)                                                                 | ISO-8601 time of the last change (since 3.1.0). The groom's Could expiry (GRM-16) reads it, falling back to `createdAt`. Missing is `undefined` (neutral).                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `dueDate`          | `string` (optional)                                                                 | `YYYY-MM-DD` the item is due (since 3.2.0). The work order's first key inside a band, earliest first. Missing is `undefined`.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `triage`           | `boolean` (optional)                                                                | `true` when the tracker holds the item in its triage inbox, a state folded into `backlog` (since 3.2.0). The work order lists it under "needs triage". Absent means not in triage.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `pin`              | `PinInfo` (optional)                                                                | `{ reason?, actor?, actorName?, at? }`, read only for an item with the `pin` label (since 3.2.0): the text after `pin:` in the latest comment starting with it, and who added the label and when. GRM-17 reads it.                                                                                                                                                                                                                                                                                                                                                 |
 
 `WorkItemProject = { id: string, name: string, stateCategory?: StateCategory, lead?: string }`.
 
@@ -742,7 +745,14 @@ interface WorkStateChange {
   the tracker can say when it closed), plus only the projects those items
   reference. It is scoped to the configured team and never returns
   another team's item: an identifier outside the team is dropped with a warning.
-  It is also what the backlog groom reads.
+  It is also what the backlog groom reads. Since 3.2.0 it may carry
+  `projectInfo`: every open project of the team as `{ id, name, slugId,
+  statusType, priority?, targetDate?, labels, blockedBy, createdAt?,
+  sortOrder? }`, where `statusType` is `started`, `planned`, `paused`,
+  `backlog`, `completed` or `canceled`, `labels` are re-namespaced like an
+  item's, and `blockedBy` lists the ids of the projects this one waits on. The
+  work order (`flow order`) ranks projects from it; without it, flow ranks the
+  referenced projects by status alone.
 - `getItem(identifier, opts)` returns one item, normalized the same way, with its
   latest `opts.comments` comments oldest first when asked. An item that does not
   exist, or belongs to another team, is a precondition failure (exit 5), not an
@@ -828,7 +838,8 @@ the seven `WorkItemType` values), `stateCategory` (one of the five categories),
 `stateName` (`string`), `parent` (`string | null`), `relations` (an object whose
 `blocks`/`blockedBy`/`children`/`relatedTo` are `string[]` and whose `duplicateOf`
 is an optional `string`), and `labels` (`string[]`). Optional fields (`priority`,
-`size`, `project`, `assignee`, `agentDisposition`, `createdAt`, `updatedAt`) are either absent
+`size`, `project`, `assignee`, `agentDisposition`, `createdAt`, `updatedAt`, `dueDate`,
+`triage`, `pin`) are either absent
 or correctly typed (`priority` in `{0,1,2,3,4}`; `size` a non-empty `string` or a
 non-negative finite `number`;
 `agentDisposition` one of its four values). A missing optional MUST be `undefined`,
@@ -900,6 +911,15 @@ declaration.
 
 ### What each version added
 
+- **3.2.0** - additive (MINOR, DOR-5063): the work order's reads. `WorkItem`
+  gains optional `dueDate`, `triage` (the tracker's triage inbox, still the
+  `backlog` category) and `pin` (who added the `pin` label, when, and the
+  reason from the latest `pin:` comment); `getBacklogSnapshot` may carry
+  `projectInfo`. `flow order` and `flow next` under `dispatch.ladder: "v2"`
+  read them, and the groom's GRM-17 flags a pin with no reason or one added by
+  an account outside `order.pinSetters`. An adapter at 3.1 still loads: its
+  items rank with no due date, nothing reads as in triage, its pins carry no
+  reason (GRM-17 flags them) and its projects rank by status alone.
 - **3.1.0** - additive (MINOR, DOR-4546): `NewItem` gains an optional `size`,
   which `createItem` writes as the tracker's estimate (and refuses when the
   tracker cannot hold its shape), and `WorkItem` gains an optional

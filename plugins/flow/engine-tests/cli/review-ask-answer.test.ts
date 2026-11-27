@@ -1116,7 +1116,7 @@ describe('flow answer', () => {
   // so the comment rules count it as the reply, and recorded on the run.
   it("posts a person's answer the comment rules count as the reply", async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
-    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()], user: { id: 'dorian' } });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()], user: { id: 'mira' } });
     const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
       tracker,
       env: person(),
@@ -1127,11 +1127,11 @@ describe('flow answer', () => {
     expect(body).not.toContain(MARKER);
     const config = FlowConfigSchema.parse({});
     const decision = shouldRespondToComment(
-      { author: 'dorian', authorIsTrusted: true, mentions: [], body },
+      { author: 'mira', authorIsTrusted: true, mentions: [], body },
       {
         item: parked(),
         ownership: 'unassigned',
-        identity: { agent: 'agent-1', reviewer: 'dorian', marker: config.identity.marker },
+        identity: { agent: 'agent-1', reviewer: 'mira', marker: config.identity.marker },
       },
       config.comments
     );

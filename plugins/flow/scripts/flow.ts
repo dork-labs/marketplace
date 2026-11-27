@@ -124,7 +124,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'next',
     summary: 'Show the next item to work on, ranked by the dispatch policy.',
     description:
-      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. With dispatch.ladder set to v2, picks come from the work order (flow order): each pick carries its place, band and why, and ranked items that cannot start now are listed in "held" with the reason (PR cap, WIP cap, not ready). Exits 7 while flow is paused, unless --manual.',
     common: ['project', 'snapshot', 'manual'],
     flags: [
       {
@@ -147,6 +147,45 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     load: () => import('./cli/next.ts'),
+  },
+  {
+    name: 'order',
+    summary: 'Show the work order: projects in rank, then issues best first, each with why.',
+    description:
+      'Read-only. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and items with the order.personLabel label are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2.',
+    common: ['project', 'snapshot'],
+    flags: [
+      {
+        name: 'count',
+        kind: 'string',
+        short: 'n',
+        value: 'N',
+        description: 'How many issues to show. Default: 15 in text, all in --json.',
+      },
+      {
+        name: 'projects',
+        kind: 'boolean',
+        description: 'Show only the project order.',
+      },
+      {
+        name: 'all',
+        kind: 'boolean',
+        description: 'Also show Paused and Backlog projects.',
+      },
+      {
+        name: 'why',
+        kind: 'string',
+        value: 'identifier',
+        description: "Explain one item's place, and which field would move it up.",
+      },
+      {
+        name: 'rank-of',
+        kind: 'string',
+        value: 'identifier',
+        description: 'Print the item\'s place number, or "unranked: <reason>".',
+      },
+    ],
+    load: () => import('./cli/order.ts'),
   },
   {
     name: 'prs',
