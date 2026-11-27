@@ -585,7 +585,8 @@ export function sessionState(input: StateInput): string {
   } else if (input.runOnly !== undefined) {
     if (input.runOnly.status === 'waiting_for_review') return 'parked';
     const pid = input.runOnly.workerPid;
-    return pid !== null && !input.pidAlive(pid) ? 'stale' : 'unseen';
+    // A pid of 0 or less is "no local process" (-1): unknown, never stale, never signalled.
+    return pid !== null && pid > 0 && !input.pidAlive(pid) ? 'stale' : 'unseen';
   } else {
     state = 'unknown';
   }

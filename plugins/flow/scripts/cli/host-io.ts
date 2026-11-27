@@ -181,11 +181,16 @@ export const realSpawnStream: StreamRunner = (cmd, args, opts) =>
 
 /**
  * Whether a process exists: `kill(pid, 0)` succeeds, or fails with `EPERM`.
+ * A pid that is not a positive whole number names no single process and is
+ * never signalled: `kill(-1, 0)` reaches every process this user owns and
+ * `kill(0, 0)` the whole group, and a run records `-1` for "no local
+ * process" (a queued drain run, a sandboxed DorkOS claim). It reads as `false`.
  *
  * @param pid - A process id.
  * @returns True when the process exists.
  */
 export function pidExists(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;

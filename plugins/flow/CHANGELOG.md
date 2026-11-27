@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.102.2
+
+**Reinstall Flow to receive this fix if you run Codex agents in DorkOS.**
+
+- A Codex agent in DorkOS can now claim work. Codex's sandbox blocks the command Flow used to find the agent's process, so `flow claim` stopped with "could not find the process that runs this session". In a DorkOS session it now records the DorkOS chat instead of a process, and the claim goes through. Outside DorkOS it still asks for `--pid`.
+- One limit for such a claim: Flow can't see when that chat ends, so `flow status` won't say "worker gone". It does list the run as ended once its item is closed; until then, `flow release` frees an item whose chat is gone.
+
 ## 0.102.1
 
 **Reinstall Flow to get this message.**

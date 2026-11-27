@@ -41,6 +41,8 @@ export type RunEndReason = 'item-closed' | 'worker-gone' | 'session-gone';
 export interface RunEndInput {
   status?: unknown;
   workerPid?: unknown;
+  /** The DorkOS chat that claimed the run, when one did (DOR-4378). */
+  dorkosSessionId?: unknown;
   drain?: unknown;
   limit?: unknown;
 }
@@ -129,7 +131,11 @@ export function runEnded(
   }
   const running = run.status === 'running';
   const alive = running ? pidAlive(run.workerPid) : null;
-  if (closed && !(running && alive !== false)) return 'item-closed';
+  // A worker that may still be writing keeps a closed item open, except a
+  // DorkOS-session claim with no readable pid: flow can never see that worker,
+  // so the closed item is the only end it will get (DOR-4378).
+  const unseen = alive === null && typeof run.dorkosSessionId === 'string';
+  if (closed && (!(running && alive !== false) || unseen)) return 'item-closed';
   if (running && alive === false) return 'worker-gone';
   return null;
 }
