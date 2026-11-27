@@ -71,7 +71,7 @@ import {
   sessionsThatWorked,
   type PersonCaller,
 } from './person-gate.ts';
-import { signBody } from './provenance.ts';
+import { signBody, trackerVisibility } from './provenance.ts';
 import {
   applyAndVerify,
   requireOpen,
@@ -642,7 +642,8 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         : signBody(
             `Shipped: the reviewer agent approved it (clean review at ${short(sha)}).`,
             marker,
-            sessionProvenance(ctx, existing.host)
+            sessionProvenance(ctx, existing.host),
+            trackerVisibility(adapter)
           );
     let forgeReview: ReviewOutcome | null = null;
     let armed = false;

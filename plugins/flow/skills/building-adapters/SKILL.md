@@ -75,6 +75,7 @@ node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixt
 - [ ] Native fields mapped; missing optionals `undefined`.
 - [ ] Every required verb implemented (`getInbox` as code), with durability and degradation; reads throw when unreachable, writes never fake success.
 - [ ] **Outward writes are signed.** `comment`, the `needsInput` question and the description `createSubIssue` writes end with the `agent:provenance` line ([`<flow-root>/docs/provenance.md`](../../docs/provenance.md)) beside the identity marker. The adapter says whether its tracker preserves HTML comments byte-for-byte; if not, it posts unsigned rather than a mangled line.
+- [ ] **Visibility declared.** `visibility: 'public'` if items can be world-readable, `'private'` only if team-only; undeclared is public.
 - [ ] Every optional verb declared.
 - [ ] No tracker API string outside the adapter.
 - [ ] Contract version declared: the SPEC's current one; code below 3.0.0 never loads.

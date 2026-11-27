@@ -3,12 +3,14 @@
  * idempotent retry, the done projection and the completed run record.
  */
 
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { hostRefFor } from '../../scripts/cli/provenance.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
+import { readSignature } from '../../scripts/signature-line.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
 let project: WriteProject;
@@ -20,6 +22,9 @@ beforeEach(() => {
 afterEach(() => {
   project.cleanup();
 });
+
+/** A made-up DorkOS install id. */
+const INSTALL_ID = '4f7c2c6e-1b0a-4c2a-9a1e-8d3b7f6e5c21';
 
 const DONE_CHANGE = { stateCategory: 'completed', agentLabel: 'agent/completed', stageLabel: null };
 
@@ -56,14 +61,36 @@ describe('flow done', () => {
     expect(result.tracker.writes.map((call) => call.method)).toEqual(['comment', 'applyWorkState']);
     const [comment, write] = result.tracker.writes;
     expect((comment as { body: string }).body).toMatch(
-      /^Shipped the fix\.\n\nPR: https:\/\/example\.test\/pr\/1\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc",.*\} -->$/
+      /^Shipped the fix\.\n\nPR: https:\/\/example\.test\/pr\/1\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":2,"harness":"claude-code",.*"chat":"dork:chat:session-"\} -->$/
     );
+    // The fake tracker declares no visibility: signed as public, so no `host`.
+    expect((comment as { body: string }).body).not.toContain('"host"');
     expect(write).toEqual({ method: 'applyWorkState', identifier: 'FAKE-1', change: DONE_CHANGE });
     expect(project.runs()['id-FAKE-1']).toMatchObject({
       status: 'complete',
       completedAt: '2026-09-26T12:00:00.000Z',
     });
     expect(result.tracker.backlog.items[0].labels).toEqual(['type/task', 'agent/completed']);
+  });
+
+  it('signs in full, with the install, on a tracker that declares itself private', async () => {
+    // Purpose: only a declared private tracker gets the whole chat id and `host`.
+    project.writeRuns({ 'id-FAKE-1': run });
+    const dorkHome = path.join(project.dir, 'dork-home');
+    mkdirSync(dorkHome);
+    writeFileSync(path.join(dorkHome, 'telemetry-install-id'), INSTALL_ID);
+    const result = await runFlow(
+      project,
+      { items: [claimed()], visibility: 'private' },
+      ['done', 'FAKE-1', '--summary', 'Shipped the fix.'],
+      { env: { DORK_HOME: dorkHome, FLOW_SESSION_ID: 'session-abc', CLAUDECODE: '1' } }
+    );
+    expect(result.code).toBe(EXIT.ok);
+    const body = (result.tracker.writes[0] as { body: string }).body;
+    expect(readSignature(body)).toMatchObject({
+      chat: 'session-abc',
+      host: hostRefFor(INSTALL_ID),
+    });
   });
 
   it('does not post the summary twice', async () => {

@@ -203,15 +203,10 @@ export function securityReviewerFor(ctx: VerbContext): string | null {
   }
 }
 
-/** A comment signed as flow signs PR text (public: session cut, no host). */
+/** A comment signed as flow signs PR text (public: chat cut, no host). */
 export function signer(ctx: VerbContext, launcher: string | undefined): (body: string) => string {
   return (body) => {
-    const provenance = sessionProvenance(ctx, launcher);
-    const line = provenanceLine({
-      ...provenance,
-      sessionId: provenance.sessionId?.slice(0, 8),
-      host: undefined,
-    });
+    const line = provenanceLine(sessionProvenance(ctx, launcher), 'public');
     return line === undefined ? body : `${body}\n\n${line}\n`;
   };
 }

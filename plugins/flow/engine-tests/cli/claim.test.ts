@@ -63,7 +63,7 @@ describe('flow claim writes the claim projection and records the run', () => {
         workerPid: FAKE_PPID,
         startedAt: '2026-09-26T12:00:00.000Z',
         provenance: {
-          v: 1,
+          v: 2,
           harness: 'claude-code',
           sessionId: 'session-abc',
           account: 'claude-work',

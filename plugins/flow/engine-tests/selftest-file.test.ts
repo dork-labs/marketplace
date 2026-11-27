@@ -154,7 +154,7 @@ describe('filing redacts what it copies into the tracker', () => {
     };
     const fake = new FakeTracker({ items: [] }, { now: () => NOW });
     const sign = (body: string) =>
-      signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' });
+      signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' }, 'private');
     const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
 
     const first = await fileFailures([check], META, deps);
@@ -222,7 +222,8 @@ describe('planFindings under a cap', () => {
 
 describe('fileFailures against the fake tracker', () => {
   const check = failing('scenarios/lifecycle/codex');
-  const sign = (body: string) => signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' });
+  const sign = (body: string) =>
+    signBody(body, '— 🤖 /flow', { v: 1, sessionId: 'test-session' }, 'private');
 
   function tracker(backlog: FakeBacklog, now = () => NOW): FakeTracker {
     return new FakeTracker(backlog, { now });

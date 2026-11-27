@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.4.0. `adapter.ts` beside this file is the code `flow` runs.
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.5.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 
@@ -113,7 +113,7 @@ Write `PROJ-157 - Title` (or a 3-6 word summary), never a bare key. Link only th
 
 ## Provenance
 
-The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md); do not redefine it here. Linear keeps HTML comments byte-for-byte in descriptions and comments. A person in the rich-text editor can strip the line without noticing; readers treat that as unsigned.
+The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md); do not redefine it here. It declares `visibility: 'private'` (workspace-only issues). Linear keeps HTML comments byte-for-byte. A person in the rich-text editor can strip the line; readers then see it unsigned.
 
 ## `InboxEntry`
 

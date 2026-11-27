@@ -70,6 +70,7 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
   const { adapter } = tracker;
   return {
     capabilities: adapter.capabilities,
+    ...(adapter.visibility === undefined ? {} : { visibility: adapter.visibility }),
     getCurrentUser: async () => {
       refresh();
       return adapter.getCurrentUser();

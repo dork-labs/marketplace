@@ -31,7 +31,7 @@ import {
   planReviewWorktree,
   type ReviewWorktreeOutcome,
 } from './release-worktree.ts';
-import { signBody } from './provenance.ts';
+import { signBody, trackerVisibility } from './provenance.ts';
 import {
   applyAndVerify,
   currentStageLabel,
@@ -95,7 +95,8 @@ export async function releaseItem(
       : signBody(
           input.reason,
           loaded.config.identity.marker,
-          sessionProvenance(ctx, existing?.host)
+          sessionProvenance(ctx, existing?.host),
+          trackerVisibility(adapter)
         );
 
   if (!ctx.dryRun) {

@@ -72,7 +72,7 @@ import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '3.4.0';
+export const CONTRACT_VERSION = '3.5.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -1601,6 +1601,8 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   }
 
   return {
+    // A Linear workspace's issues are readable by its members only.
+    visibility: 'private',
     capabilities: [
       'getCurrentUser',
       'getBacklogSnapshot',

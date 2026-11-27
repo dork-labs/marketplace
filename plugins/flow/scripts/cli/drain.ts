@@ -109,7 +109,7 @@ import {
   restartRank,
   type NextConfig,
 } from './next.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import { renderSweep, sweepOpenPrs, type SweepResult } from './sweep.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
@@ -202,7 +202,8 @@ export function parker(
     const body = signBody(
       `flow drain parked this item: ${reason}. Reply to this comment to resume the work.`,
       config.identity.marker,
-      sessionProvenance(ctx, undefined)
+      sessionProvenance(ctx, undefined),
+      trackerVisibility(adapter)
     );
     const unsigned = unsignedBody(body);
     // Skip only a retry of this same park: the identical comment is still the
@@ -414,6 +415,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     dorkHome,
     flow: flowCommand,
     ...(refresh === undefined ? {} : { refresh }),
+    visibility: trackerVisibility(adapter),
     async comment(identifier, body) {
       const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
       // A retry of the same notice (the same words are the latest comment) posts nothing.
@@ -635,7 +637,12 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
           try {
             await adapter.comment(
               item,
-              signBody(text, config.identity.marker, sessionProvenance(ctx, undefined))
+              signBody(
+                text,
+                config.identity.marker,
+                sessionProvenance(ctx, undefined),
+                trackerVisibility(adapter)
+              )
             );
           } catch (error) {
             await releaseAnswer(store, item.id, question.askedAt, recorded);

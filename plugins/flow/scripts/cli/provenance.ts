@@ -4,12 +4,17 @@
  *
  * - {@link buildProvenance} works out what THIS process can determine about
  *   itself: the harness, the session id, the harness account, the DorkOS
- *   install and the surface. Anything it cannot determine is left out, never
- *   guessed. The machine's hostname is never one of them (DOR-5047): `host` is
- *   the install reference `dork:host:<hash>`, a one-way hash of the DorkOS
- *   install id ({@link hostRefFor}), or absent.
- * - {@link provenanceLine} turns that into the one hidden line a signed body
- *   ends with, carrying only the eight wire fields.
+ *   install, the surface, and under DorkOS the chat, the agent and the space.
+ *   Anything it cannot determine is left out, never guessed. The machine's
+ *   hostname is never one of them (DOR-5047): `host` is the install reference
+ *   `dork:host:<hash>`, a one-way hash of the DorkOS install id
+ *   ({@link hostRefFor}), or absent.
+ * - {@link provenanceLine} turns that into the one hidden version 2 line a
+ *   signed body ends with, cut for where it is posted
+ *   ({@link ProvenanceVisibility}). It follows DorkOS's own builder
+ *   (`buildProvenanceV2` in DorkOS's `@dorkos/shared/provenance`) rule for
+ *   rule: the same field order, the same public cut, and a field that would
+ *   not read back is dropped (`docs/provenance.md` §2, §8).
  * - {@link signBody} and {@link unsignedBody} add and strip the marker and the
  *   line, so `flow done` can tell whether a summary is already posted.
  *
@@ -23,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { FlowRunProvenance } from '../flow-run.ts';
+import { parseSignatureLine, type Signature } from '../signature-line.ts';
 import { runtimeSession } from './session-id.ts';
 
 /** The marker name every signature is emitted under. */
@@ -49,21 +55,63 @@ export const LAUNCHERS = ['cli', 'dorkos', 'cmux'] as const;
 /** One of {@link LAUNCHERS}. */
 export type Launcher = (typeof LAUNCHERS)[number];
 
-/** The fields that go on the wire (`docs/provenance.md` §4), in emit order. */
-const WIRE_FIELDS = [
-  'v',
+/** The signature version {@link provenanceLine} writes. */
+const PROVENANCE_VERSION = 2;
+
+/**
+ * The version 2 fields flow writes, in the fixed order every emitter uses
+ * (`v`, then these; `docs/provenance.md` §4). Flow knows no turn and no
+ * address, so it writes neither.
+ */
+const LINE_FIELDS = [
   'harness',
-  'sessionId',
-  'account',
-  'host',
   'surface',
-  'instanceId',
-  'resumeUrl',
-] as const satisfies readonly (keyof FlowRunProvenance)[];
+  'account',
+  'agent',
+  'chat',
+  'space',
+  'host',
+] as const satisfies readonly (keyof Signature)[];
+
+/** Fields a public (or unknown) target never carries. */
+const PRIVATE_ONLY: ReadonlySet<(typeof LINE_FIELDS)[number]> = new Set(['host']);
+
+/** A bare chat id, as the `dork:` grammar spells an id. */
+const CHAT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** How many characters of a chat id a public target carries. */
+export const PUBLIC_CHAT_ID_LENGTH = 8;
+
+/**
+ * Where a signed body is posted. `unknown` is treated as `public`: the
+ * fail-safe direction is to carry less (`docs/provenance.md` §8).
+ *
+ * Flow reads no forge's visibility, so it signs forge text (a PR body, a PR
+ * comment) as `public`. Tracker text takes the visibility the tracker's
+ * adapter declares ({@link trackerVisibility}).
+ */
+export type ProvenanceVisibility = 'public' | 'private' | 'unknown';
+
+/**
+ * The visibility to sign tracker text with: what the adapter declares, and
+ * `unknown` (signed as public) when it declares nothing or anything else.
+ *
+ * @param adapter - The tracker adapter, or anything carrying its declaration.
+ * @returns The visibility for {@link signBody}.
+ */
+export function trackerVisibility(adapter: { visibility?: unknown }): ProvenanceVisibility {
+  return adapter.visibility === 'private' || adapter.visibility === 'public'
+    ? adapter.visibility
+    : 'unknown';
+}
 
 /** What {@link buildProvenance} reads. */
 export interface ProvenanceInput {
-  /** Environment variables (`CLAUDECODE`, `CLAUDE_CONFIG_DIR`, `CI`). */
+  /**
+   * Environment variables (`CLAUDECODE`, `CLAUDE_CONFIG_DIR`, `CI`, and the
+   * `DORKOS_SESSION_ID`, `DORKOS_AGENT_ID` and `DORKOS_SPACE_ID` DorkOS sets in
+   * every turn).
+   */
   env: Readonly<Record<string, string | undefined>>;
   /** `--session`, else `FLOW_SESSION_ID`, else the runtime's own id; absent when none was given. */
   sessionId?: string;
@@ -163,19 +211,38 @@ function accountFrom(harness: string | undefined, env: ProvenanceInput['env']): 
   return handle === '' || handle.includes('@') ? undefined : handle;
 }
 
+/** An environment variable's value, with an empty one treated as unset. */
+function envValue(env: ProvenanceInput['env'], name: string): string | undefined {
+  const value = env[name];
+  return value === undefined || value === '' ? undefined : value;
+}
+
 /**
- * Where the run is driven from: `ci` when `CI` is set, `dorkos` under the
- * DorkOS launcher, `bare-cli` under the other two, else unknown.
+ * Where the run is driven from, as DorkOS's builder decides it: `dorkos`
+ * inside a DorkOS turn (DorkOS sets `DORKOS_SESSION_ID`) or under the DorkOS
+ * launcher, `ci` when `CI` is `true`, and otherwise `bare-cli`.
  *
  * @param env - Environment variables.
  * @param launcher - The launcher, when known.
- * @returns The surface, or `undefined` when it cannot be told.
+ * @returns The surface.
  */
-function surfaceFrom(env: ProvenanceInput['env'], launcher?: string): string | undefined {
-  if (env.CI !== undefined && env.CI !== '' && env.CI !== 'false') return 'ci';
-  if (launcher === 'dorkos') return 'dorkos';
-  if (launcher === 'cli' || launcher === 'cmux') return 'bare-cli';
-  return undefined;
+function surfaceFrom(env: ProvenanceInput['env'], launcher?: string): string {
+  if (envValue(env, 'DORKOS_SESSION_ID') !== undefined || launcher === 'dorkos') return 'dorkos';
+  if (env.CI === 'true') return 'ci';
+  return 'bare-cli';
+}
+
+/**
+ * A bare id as `dork:<kind>:<id>`; a value already in `dork:` form is kept as
+ * given. Not checked here: {@link provenanceLine} drops what would not read back.
+ *
+ * @param kind - The reference kind.
+ * @param value - A bare id or a whole reference, when set.
+ * @returns The reference, or `undefined`.
+ */
+function asReference(kind: 'agent' | 'space', value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value.startsWith('dork:') ? value : `dork:${kind}:${value}`;
 }
 
 /**
@@ -188,54 +255,106 @@ function surfaceFrom(env: ProvenanceInput['env'], launcher?: string): string | u
 export function buildProvenance(input: ProvenanceInput): FlowRunProvenance {
   const harness = harnessFrom(input.env);
   const block: FlowRunProvenance = {
-    v: 1,
+    v: PROVENANCE_VERSION,
     harness,
     sessionId: input.sessionId,
     account: accountFrom(harness, input.env),
     host: hostRefFor(input.installId),
     surface: surfaceFrom(input.env, input.launcher),
+    chat: envValue(input.env, 'DORKOS_SESSION_ID'),
+    agent: asReference('agent', envValue(input.env, 'DORKOS_AGENT_ID')),
+    space: asReference('space', envValue(input.env, 'DORKOS_SPACE_ID')),
   };
   return Object.fromEntries(
     Object.entries(block).filter(([, value]) => value !== undefined)
   ) as FlowRunProvenance;
 }
 
+/** The line for a set of wire fields, `v` first. */
+function lineFor(wire: Readonly<Record<string, string>>): string {
+  return `<!-- ${PROVENANCE_MARKER} ${JSON.stringify({ v: PROVENANCE_VERSION, ...wire })} -->`;
+}
+
 /**
- * The hidden signature line for a provenance block: the wire fields only (the
- * local-only worktree, branch and worker id never go out), as valid JSON. A
- * `host` that is not an install reference ({@link isHostRef}) is left out, and
- * so is `instanceId`.
+ * The hidden version 2 signature line for a provenance block, as valid JSON
+ * in the fixed order `v, harness, surface, account, agent, chat, space, host`.
+ *
+ * - The chat is the block's DorkOS chat, else its session id, written as
+ *   `dork:chat:<id>`. A public or unknown target carries only its first
+ *   {@link PUBLIC_CHAT_ID_LENGTH} characters and no `host`.
+ * - `host` goes out only as an install reference ({@link isHostRef}), so a
+ *   hostname an older run record holds never leaves the machine.
+ * - Every field is checked on its own by reading it back through flow's own
+ *   reader (`../signature-line.ts`): one that would not read back as written
+ *   (an account holding `@`, a malformed reference, a line separator) is
+ *   dropped alone, never repaired.
+ * - The local-only fields (worktree, branch, worker id) and `sessionId`,
+ *   `instanceId` and `resumeUrl` are never written.
+ *
+ * Whatever `v` the block holds, the line is version 2, built from the fields
+ * this module knows.
  *
  * @param provenance - The block to sign with.
+ * @param visibility - Where the body is posted.
  * @returns The line, or `undefined` when nothing but the version is known
  *   (an empty stamp is worse than none).
  */
-export function provenanceLine(provenance: FlowRunProvenance): string | undefined {
-  const wire: Record<string, unknown> = {};
-  for (const field of WIRE_FIELDS) {
-    const value = provenance[field];
-    if (field === 'host' && !isHostRef(provenance.host)) continue;
-    // The only install UUID DorkOS has is its anonymous usage id (DOR-5047).
-    if (field === 'instanceId') continue;
-    if (value !== undefined && value !== '') wire[field] = value;
+export function provenanceLine(
+  provenance: FlowRunProvenance,
+  visibility: ProvenanceVisibility
+): string | undefined {
+  const isPrivate = visibility === 'private';
+  const chatId = provenance.chat ?? provenance.sessionId;
+  const cutChat =
+    chatId !== undefined && CHAT_ID.test(chatId)
+      ? isPrivate
+        ? chatId
+        : chatId.slice(0, PUBLIC_CHAT_ID_LENGTH)
+      : undefined;
+  const candidate: Partial<Record<(typeof LINE_FIELDS)[number], string>> = {
+    harness: provenance.harness,
+    surface: provenance.surface,
+    account: provenance.account,
+    agent: provenance.agent,
+    chat: cutChat === undefined ? undefined : `dork:chat:${cutChat}`,
+    space: provenance.space,
+    host: isHostRef(provenance.host) ? provenance.host : undefined,
+  };
+  // What each field must read back as: the chat reads back as its bare id.
+  const readsAs = { ...candidate, chat: cutChat };
+  const wire: Record<string, string> = {};
+  for (const field of LINE_FIELDS) {
+    const value = candidate[field];
+    if (typeof value !== 'string' || value === '') continue;
+    if (!isPrivate && PRIVATE_ONLY.has(field)) continue;
+    // Each field on its own, as DorkOS's builder checks them: one bad value
+    // (a line separator breaks the whole line for a reader) drops only itself.
+    if (parseSignatureLine(lineFor({ [field]: value }))?.[field] === readsAs[field]) {
+      wire[field] = value;
+    }
   }
-  if (Object.keys(wire).every((key) => key === 'v')) return undefined;
-  if (wire.v === undefined) wire.v = 1;
-  const ordered = Object.fromEntries(WIRE_FIELDS.filter((f) => f in wire).map((f) => [f, wire[f]]));
-  return `<!-- ${PROVENANCE_MARKER} ${JSON.stringify(ordered)} -->`;
+  return Object.keys(wire).length === 0 ? undefined : lineFor(wire);
 }
 
 /**
  * Sign a body for the tracker: the body, a blank line, the identity marker,
- * and the provenance line as the last line when there is one.
+ * and the provenance line as the last line when there is one. Only a tracker
+ * declared `private` gets the whole chat id and the install reference; any
+ * other gets the public cut ({@link trackerVisibility}).
  *
  * @param body - The text to post.
  * @param marker - `identity.marker`.
  * @param provenance - The signing session's provenance.
+ * @param visibility - The tracker's, from {@link trackerVisibility}.
  * @returns The signed body.
  */
-export function signBody(body: string, marker: string, provenance: FlowRunProvenance): string {
-  const line = provenanceLine(provenance);
+export function signBody(
+  body: string,
+  marker: string,
+  provenance: FlowRunProvenance,
+  visibility: ProvenanceVisibility
+): string {
+  const line = provenanceLine(provenance, visibility);
   const signed = `${body.trimEnd()}\n\n${marker}`;
   return line === undefined ? signed : `${signed}\n${line}`;
 }

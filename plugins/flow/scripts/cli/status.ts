@@ -64,10 +64,12 @@ import type { DrainWorkerHandle } from '../drain/state.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
 import { runEnded, waitedOnSession, type RunEndReason } from '../run-ended.ts';
+import { endsWithSignature } from '../signature-line.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { CodeAdapter, ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
 import { loadProjectConfig, readSnapshotFile } from './backlog.ts';
+import { unsignedBody } from './provenance.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { readHealth, renderHealth, type Health } from './health-read.ts';
@@ -279,9 +281,10 @@ function readDrain(checkouts: readonly string[], now: Date): DrainStatus | null 
 }
 
 /**
- * The last comment the agent posted (from its account, with a provenance
- * line), or `null`. Anyone can copy the line, so the author is checked too:
- * a guest's signed comment is never shown as the agent's question (DOR-3677).
+ * The last comment the agent posted (from its account, ending in a
+ * provenance line of either version that parses), or `null`. Anyone can copy
+ * the line, so the author is checked too: a guest's signed comment is never
+ * shown as the agent's question (DOR-3677).
  */
 function lastQuestion(
   comments: readonly ItemComment[] | undefined,
@@ -289,14 +292,11 @@ function lastQuestion(
 ): ParkedEntry['question'] {
   const signed = (comments ?? []).filter(
     (comment) =>
-      comment.author !== '' &&
-      comment.author === agentId &&
-      /<!--\s*(agent|flow):provenance/.test(comment.body)
+      comment.author !== '' && comment.author === agentId && endsWithSignature(comment.body)
   );
   const last = signed.at(-1);
   if (last === undefined) return null;
-  const body = last.body.replace(/\n?<!--\s*(agent|flow):provenance[\s\S]*?-->\s*$/, '').trim();
-  return { body, askedAt: last.createdAt };
+  return { body: unsignedBody(last.body).trim(), askedAt: last.createdAt };
 }
 
 /**

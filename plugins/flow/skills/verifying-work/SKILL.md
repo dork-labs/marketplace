@@ -105,10 +105,8 @@ A `"none"` capture has nothing to attach; say so.
 ### Provenance
 
 The signature is defined in [`<flow-root>/docs/provenance.md`](../../docs/provenance.md);
-do not redefine it here. It carries `harness`, `sessionId`, `account`, `surface`,
-and (DorkOS only) `resumeUrl`, from the run's `flow-state.json` record;
-never `host` or `instanceId`. Emit `agent:provenance`; `flow:provenance` is the legacy name
-readers still accept.
+do not redefine it here. Version 2 carries `harness`, `surface`, `account`, `chat`
+and (DorkOS only) `agent` and `space`; never `host`, `turn` or `instanceId`. Emit `agent:provenance`, never the legacy name `flow:provenance`.
 
 **The signature itself is per-write: every body written outward carries it, every
 time.** The once-per-run cadence applies to **the PR-body stamp only**: its last line,
@@ -118,7 +116,7 @@ Add an `attachEvidence` link only for a resumable session URL.
 
 It must be valid JSON (spec §6). With no provenance from EXECUTE, stamp what this
 session knows (spec §5). If the repository is public, follow the spec's
-public-repository rules: truncate `sessionId` and omit `resumeUrl`.
+public-repository rules: cut the chat id to 8 characters and omit `host`.
 
 ### Closing form
 

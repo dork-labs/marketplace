@@ -259,7 +259,7 @@ describe('flow triage --park', () => {
     expect(writes(result).map((call) => call.method)).toEqual(['comment', 'applyWorkState']);
     const [comment, write] = writes(result);
     expect((comment as { body: string }).body).toMatch(
-      /^Which report: the monthly one or all of them\?\n\nReply to this comment to go on\.\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc",.*\} -->$/
+      /^Which report: the monthly one or all of them\?\n\nReply to this comment to go on\.\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":2,"harness":"claude-code",.*"chat":"dork:chat:session-"\} -->$/
     );
     expect(write).toEqual({
       method: 'applyWorkState',

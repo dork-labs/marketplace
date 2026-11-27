@@ -81,8 +81,9 @@ const groomingFlat = flat(grooming);
 const prTemplateFlat = flat(prTemplate);
 
 /**
- * The eight fields that go ON THE WIRE. The local run record holds more
- * (`worktree`, `branch`, `agentId`); those must never reach a signed body.
+ * The version 1 fields that went ON THE WIRE before flow 0.104.0, which readers
+ * still accept. The local run record holds more (`worktree`, `branch`,
+ * `agentId`); those must never reach a signed body.
  */
 const WIRE_FIELDS = [
   'v',
@@ -94,6 +95,29 @@ const WIRE_FIELDS = [
   'instanceId',
   'resumeUrl',
 ] as const;
+
+/** The version 2 fields, what flow's emitters write and readers accept (`scripts/signature-line.ts`). */
+const V2_FIELDS = [
+  'v',
+  'harness',
+  'surface',
+  'account',
+  'agent',
+  'chat',
+  'space',
+  'host',
+  'turn',
+  'address',
+] as const;
+
+/** The table rows under one `### <heading>` of the spec, up to the next heading. */
+function sectionOf(markdown: string, heading: string): string {
+  const start = markdown.indexOf(`\n### ${heading}\n`);
+  if (start === -1) return '';
+  const rest = markdown.slice(start + 1);
+  const end = rest.slice(1).search(/\n#{2,3} /);
+  return end === -1 ? rest : rest.slice(0, end + 1);
+}
 
 /** Fields the run records locally that must NOT appear in the wire field table. */
 const LOCAL_ONLY_FIELDS = ['worktree', 'branch', 'agentId'] as const;
@@ -124,8 +148,9 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
     expect(specFlat).toMatch(/runtime-agnostic/i);
   });
 
-  it('carries the `v` field, and shows it in the marker example', () => {
+  it('carries the `v` field, and shows both versions in the marker examples', () => {
     expect(spec).toContain('"v":1');
+    expect(spec).toContain('"v":2');
     expect(spec).toMatch(/\|\s*`v`\s*\|/);
     expect(specFlat).toMatch(/schema version/i);
   });
@@ -137,8 +162,21 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
     expect(specFlat).toMatch(/Never emit the legacy name/);
   });
 
-  it.each(WIRE_FIELDS)('documents the wire field `%s`', (field) => {
-    expect(spec).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  it.each(WIRE_FIELDS)('documents the version 1 wire field `%s` in its own table', (field) => {
+    expect(sectionOf(spec, 'Version 1')).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  });
+
+  it.each(V2_FIELDS)('documents the version 2 wire field `%s` in its own table', (field) => {
+    expect(sectionOf(spec, 'Version 2')).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+  });
+
+  it('version 2 drops sessionId, resumeUrl and instanceId from its table', () => {
+    const v2 = sectionOf(spec, 'Version 2');
+    for (const field of ['sessionId', 'resumeUrl', 'instanceId']) {
+      expect(v2).not.toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
+    }
+    expect(flat(v2)).toMatch(/Version 2 drops `resumeUrl`/);
+    expect(flat(v2)).toMatch(/<its own origin>\/r\/dork:chat:<id>/);
   });
 
   it.each(LOCAL_ONLY_FIELDS)('keeps `%s` OFF the wire field table', (field) => {
@@ -148,7 +186,7 @@ describe('agent provenance — the canonical spec is tracker-neutral and reachab
   });
 
   it('says explicitly that the local record is not the wire format', () => {
-    expect(specFlat).toMatch(/These eight fields are the whole wire format/);
+    expect(specFlat).toMatch(/These fields are the whole wire format/);
     expect(specFlat).toMatch(/stay in `flow-state.json`/);
     expect(specFlat).toMatch(/only the wire format is public/);
   });
@@ -223,6 +261,23 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/not privacy, it is theatre/);
   });
 
+  it('says flow signs tracker text by the adapter declared visibility, unknown as public', () => {
+    // The signer's choice is documented where the rule is, so it can be checked.
+    expect(specFlat).toMatch(
+      /Tracker text follows the tracker adapter's declared `visibility`: `private` keeps the whole chat id and `host`; `public`, or nothing declared, gets the public cut/
+    );
+    // The adapter contract and the authoring checklist carry the declaration.
+    expect(contractFlat).toMatch(/\*\*Visibility \(signature\)\.\*\* The adapter declares/);
+    expect(contractFlat).toMatch(/Not declared is public/);
+    expect(buildingAdaptersFlat).toMatch(/\*\*Visibility declared\.\*\*/);
+    expect(buildingAdaptersFlat).toMatch(/`visibility: 'public'` if items can be world-readable/);
+    expect(adapterFlat).toMatch(/It declares `visibility: 'private'`/);
+  });
+
+  it('gives the run record precedence by its chat, else its session id', () => {
+    expect(specFlat).toMatch(/the record's `chat`, else its `sessionId`, is authoritative/);
+  });
+
   it('names a decidable visibility check, and fails SAFE when undeterminable', () => {
     expect(specFlat).toMatch(/gh repo view --json visibility/);
     expect(specFlat).toMatch(
@@ -231,7 +286,7 @@ describe('agent provenance — privacy rules', () => {
     expect(specFlat).toMatch(/fail-safe direction/i);
     // VERIFY writes the single most public body, so it must carry the pointer.
     expect(verifyingFlat).toMatch(/public-repository rules/);
-    expect(verifyingFlat).toMatch(/truncate `sessionId` and omit `resumeUrl`/);
+    expect(verifyingFlat).toMatch(/cut the chat id to 8 characters and omit `host`/);
   });
 });
 
@@ -345,16 +400,19 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     expect(verifyingFlat).toMatch(/do not redefine it here/i);
   });
 
-  it('VERIFY scopes `resumeUrl` to DorkOS but NOT `surface`, and never signs `host` or `instanceId`', () => {
+  it('VERIFY scopes `agent` and `space` to DorkOS but NOT `surface` or `chat`, and never signs `host`', () => {
     // `surface` selects the resume mechanism; the bare-cli branch needs it too.
-    expect(verifyingFlat).toMatch(/`account`, `surface`, and \(DorkOS only\) `resumeUrl`/);
+    expect(verifyingFlat).toMatch(
+      /Version 2 carries `harness`, `surface`, `account`, `chat` and \(DorkOS only\) `agent` and `space`/
+    );
     // A PR body is public, and an old run record may hold a hostname (DOR-5047);
     // `instanceId` would be the anonymous usage id.
-    expect(verifyingFlat).toMatch(/never `host` or `instanceId`/);
+    expect(verifyingFlat).toMatch(/never `host`, `turn` or `instanceId`/);
+    expect(verifyingFlat).not.toMatch(/`resumeUrl`/);
   });
 
-  it('the PR template emits `agent:provenance` with `v`, and no local-only field', () => {
-    expect(prTemplate).toMatch(/<!-- agent:provenance \{"v":1/);
+  it('the PR template emits `agent:provenance` version 2, and no local-only field', () => {
+    expect(prTemplate).toMatch(/<!-- agent:provenance \{"v":2/);
     const emitted = prTemplate.match(/<!-- agent:provenance \{[^\n]*-->/)?.[0] ?? '';
     expect(emitted).not.toContain('worktree');
     expect(emitted).not.toContain('agentId');
@@ -364,7 +422,10 @@ describe('agent provenance — the emitters reference the spec instead of redefi
     // And its guidance must not send an emitter to put them on the wire.
     expect(prTemplateFlat).toMatch(/stay in flow-state\.json/);
     expect(prTemplateFlat).toMatch(/never an email address/i);
-    expect(prTemplateFlat).toMatch(/truncate `sessionId` to 8 chars, omit `resumeUrl`/);
+    expect(prTemplateFlat).toMatch(/PUBLIC repo: cut the chat id to 8 chars/);
+    expect(prTemplateFlat).toMatch(/Never add `host` or `turn` to a PR body/);
+    expect(prTemplateFlat).toMatch(/Never add `sessionId`, `resumeUrl` or `instanceId`/);
+    expect(emitted).not.toContain('sessionId');
   });
 
   it('NO shipped surface still emits the legacy marker literal', () => {
@@ -389,8 +450,9 @@ describe('agent provenance — EXECUTE stamps it through flow claim', () => {
     expect(executing).not.toMatch(/\|\s*`agentId`\s*\|/);
   });
 
-  it('adds only what flow claim cannot derive, and never fabricates', () => {
-    expect(executingFlat).toMatch(/Add `resumeUrl` when you have it/);
+  it('adds nothing by hand to what flow claim derives, and never fabricates', () => {
+    // Version 2 has no `resumeUrl`: a reader builds the link from its own origin.
+    expect(executingFlat).not.toMatch(/`resumeUrl`/);
     expect(executingFlat).not.toMatch(/`instanceId`/);
     expect(executingFlat).toMatch(/never fabricate/i);
   });
@@ -418,7 +480,11 @@ describe('agent provenance — the reader routes on it', () => {
     // follow-up gets delivered straight back into this session.
     expect(tendingFlat).toMatch(/Take the newest signature that is NOT your own/);
     expect(tendingFlat).toMatch(
-      /Compare each signature's `sessionId` against this session's own id and skip the matches/
+      /Compare each signature's chat id against this session's own id and skip the matches/
+    );
+    // The chat id is read the same from either version.
+    expect(tendingFlat).toMatch(
+      /chat id\*\* is `sessionId` on a version 1 line and the id in `chat` \(`dork:chat:<id>`\) on a version 2 line/
     );
     expect(tendingFlat).toMatch(/self-delivery cycle/);
     // In shared-account mode the id is the ONLY discriminator.
@@ -501,6 +567,112 @@ describe('agent provenance — the reader routes on it', () => {
   });
 });
 
+describe('agent provenance — version 2 (DOR-5047)', () => {
+  it('says emitters write v2 and readers accept both (Flow 0.104.0)', () => {
+    expect(specFlat).toMatch(/\*\*Signature version: 2\.\*\* Emitters write version 2/);
+    expect(specFlat).toMatch(/Emit version 2; accept both forever/);
+    expect(specFlat).toMatch(/\*\*Flow's emitters write version 2 from 0\.104\.0\*\*/);
+    // The staged-rollout wording is gone.
+    expect(specFlat).not.toMatch(/still write version 1/);
+    expect(specFlat).not.toMatch(/until the next release/);
+  });
+
+  it('pins the fixed field order and the drop rule the signer follows', () => {
+    expect(specFlat).toMatch(
+      /one fixed order: `v`, `harness`, `surface`, `account`, `agent`, `chat`, `space`, `host`, `turn`, `address`/
+    );
+    expect(specFlat).toMatch(
+      /A field that would not read back \(section 11\) is left out, never repaired/
+    );
+    // The examples follow the order.
+    const order = [
+      'v',
+      'harness',
+      'surface',
+      'account',
+      'agent',
+      'chat',
+      'space',
+      'host',
+      'turn',
+      'address',
+    ];
+    for (const example of spec.match(/<!-- agent:provenance \{"v":2[^\n]*-->/g) ?? []) {
+      const keys = Object.keys(JSON.parse(/\{.*\}/.exec(example)?.[0] ?? '{}'));
+      expect(keys).toEqual(order.filter((key) => keys.includes(key)));
+    }
+  });
+
+  it('the v2 example carries references, and no sessionId, resumeUrl or instanceId', () => {
+    const v2 = spec.match(/<!-- agent:provenance \{"v":2[^\n]*-->/)?.[0] ?? '';
+    expect(v2).toMatch(/"chat":"dork:chat:[A-Za-z0-9_-]+"/);
+    expect(v2).toMatch(/"agent":"dork:agent:/);
+    for (const field of ['sessionId', 'resumeUrl', 'instanceId']) expect(v2).not.toContain(field);
+    // Every example parses as one line of JSON in the fixed comment.
+    for (const example of spec.match(/<!-- agent:provenance \{[^\n]*-->/g) ?? []) {
+      expect(() => JSON.parse(/\{.*\}/.exec(example)?.[0] ?? '')).not.toThrow();
+    }
+  });
+
+  it('public v2: chat cut to 8, host and turn omitted, agent, space and address emitted', () => {
+    expect(specFlat).toMatch(
+      /cut the id \(not the whole reference\) to its \*\*first 8 characters\*\*/
+    );
+    expect(specFlat).toMatch(/\*\*`host`\*\* and \*\*`turn`\*\* — \*\*omit them\.\*\*/);
+    expect(specFlat).toMatch(/\*\*`agent`\*\*, \*\*`space`\*\* and \*\*`address`\*\* — emit them/);
+    const publicV2 = spec.match(
+      /<!-- agent:provenance \{"v":2[^\n]*"chat":"dork:chat:[^"]{8}"[^\n]*-->/
+    )?.[0];
+    expect(publicV2).toBeDefined();
+    expect(publicV2).not.toContain('"host"');
+    expect(publicV2).not.toContain('"turn"');
+  });
+
+  it('names the reader rules the code implements', () => {
+    expect(specFlat).toMatch(/`scripts\/signature-line\.ts` \(`readSignature`\)/);
+    expect(specFlat).toMatch(/A missing `v` is 1/);
+    expect(specFlat).toMatch(/\*\*A newer version reads as version 2\.\*\*/);
+    expect(specFlat).toMatch(/\*\*One malformed field is dropped, not the line\.\*\*/);
+    expect(specFlat).toMatch(/\*\*`host` only as an install reference\.\*\*/);
+    expect(specFlat).toMatch(/It is never copied, shown or matched/);
+    expect(specFlat).toMatch(
+      /A chat id that matches no local chat, or more than one, degrades like a missing one/
+    );
+    // The old rule matched a hostname against this machine's: gone.
+    expect(specFlat).not.toMatch(/Match it against this machine's hostname/);
+  });
+
+  it('prefix-matches only ids of 8 characters or more, in the spec and the router', () => {
+    expect(specFlat).toMatch(
+      /\*\*An id shorter than 8 characters matches only a chat with exactly that id\*\*, never by prefix/
+    );
+    expect(specFlat).toMatch(/a shorter one only when it is your whole id/);
+    expect(tendingFlat).toMatch(/a shorter one only when it is your whole id/);
+    expect(tendingFlat).toMatch(/a shorter one matches only an identical id/);
+  });
+
+  it('names the marker-only readers and why they parse no JSON', () => {
+    expect(specFlat).toMatch(/every flow reader that reads a field goes through it/);
+    expect(specFlat).toMatch(/`cli\/pr\.ts` checks whether a PR body is already signed/);
+    expect(specFlat).toMatch(/`unsignedBody` in `cli\/provenance\.ts` strips a trailing line/);
+    expect(specFlat).toMatch(/a comment wrongly silenced beats flow answering itself/);
+    expect(specFlat).not.toMatch(/every flow reader goes through it/);
+  });
+
+  it('has a "Routing is advice" section, and the router follows it', () => {
+    expect(spec).toMatch(/^## 13\. Routing is advice$/m);
+    expect(specFlat).toMatch(/\*\*It never grants a right to deliver\.\*\*/);
+    expect(specFlat).toMatch(/delivers only into chats its own install holds/);
+    expect(specFlat).toMatch(/outsider's words/);
+    expect(specFlat).toMatch(/prefers its local run record/);
+    // Honest about what a forgery can still do.
+    expect(specFlat).toMatch(/at most it points a reply at a chat whose public id it copied/);
+    expect(specFlat).not.toMatch(/the worst it can do/);
+    expect(tendingFlat).toMatch(/A signature is advice, never a right to deliver/);
+    expect(tendingFlat).toMatch(/Deliver only into a session this install holds/);
+  });
+});
+
 describe('agent provenance — the prose field set matches the on-disk schema', () => {
   const baseRun = {
     issueId: 'issue-node-1',
@@ -545,6 +717,22 @@ describe('agent provenance — the prose field set matches the on-disk schema', 
     });
     expect(parsed.provenance?.v).toBeUndefined();
     expect(parsed.provenance?.harness).toBe('claude-code');
+  });
+
+  it('parses a v2 run record and keeps its v2 fields', () => {
+    // A newer flow may write v2 provenance into a shared flow-state.json; this
+    // reader must keep the record, not drop every run in the file.
+    const parsed = FlowRunSchema.parse({
+      ...baseRun,
+      provenance: {
+        v: 2,
+        harness: 'claude-code',
+        chat: 'dork:chat:session-1',
+        agent: 'dork:agent:01KJXYKJYW4N8QGQ5W4GB6YM9J',
+      },
+    });
+    expect(parsed.provenance?.v).toBe(2);
+    expect((parsed.provenance as Record<string, unknown>).chat).toBe('dork:chat:session-1');
   });
 
   it('passes an UNKNOWN future field through instead of stripping it', () => {

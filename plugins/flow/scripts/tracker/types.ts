@@ -300,6 +300,9 @@ export type ItemWithComments = WorkItem & {
   comments?: ItemComment[];
 };
 
+/** Who can read a tracker's items, as its adapter declares it ({@link CodeAdapter.visibility}). */
+export type TrackerVisibility = 'public' | 'private';
+
 /**
  * The code realization of the adapter contract (since contract 1.4.0). An
  * adapter lists the methods it implements in `capabilities`; a verb that needs
@@ -312,6 +315,14 @@ export type ItemWithComments = WorkItem & {
 export interface CodeAdapter {
   /** The methods this adapter implements. */
   capabilities: readonly Capability[];
+  /**
+   * Who can read what flow writes on this tracker (`docs/provenance.md` §8):
+   * `private` only when every item is readable by its team alone, `public`
+   * when an item can be world-readable (an issue tracker on a public
+   * repository). Not declared is treated as public, so a signature carries
+   * less, never more.
+   */
+  visibility?: TrackerVisibility;
   /**
    * The contract version the adapter's code declares (`CONTRACT_VERSION`). Set
    * by flow's loader, never by the adapter; absent for an adapter flow did not

@@ -23,7 +23,7 @@ import { resolveMainCheckout } from '../main-checkout.ts';
 import { retireChecker } from './checker.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { recordEvent } from './auto-journal.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import {
   applyAndVerify,
   requireStored,
@@ -74,7 +74,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const body = signBody(
     summary,
     loaded.config.identity.marker,
-    sessionProvenance(ctx, existing?.host)
+    sessionProvenance(ctx, existing?.host),
+    trackerVisibility(adapter)
   );
   const unsigned = unsignedBody(body);
   const alreadyPosted = (item.comments ?? [])

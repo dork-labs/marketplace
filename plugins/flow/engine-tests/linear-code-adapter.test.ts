@@ -146,10 +146,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.4.0 and every capability', () => {
+  it('declares contract 3.5.0 and every capability', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('3.4.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.5.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -191,6 +191,9 @@ describe('the module', () => {
     });
     expect(await adapter.getCurrentUser()).toEqual({ id: 'user-agent', name: 'Flow bot' });
     expect(calls[0].account).toBe('flow-bot');
+    // Linear's issues are its workspace's alone, and the loader keeps the
+    // declaration, so tracker text signs in full (`docs/provenance.md` §8).
+    expect(adapter.visibility).toBe('private');
   });
 
   it('refuses to build without an account to act as', () => {

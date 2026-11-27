@@ -56,7 +56,7 @@ import {
 } from './drain-run.ts';
 import { requireOtherSession } from './caller.ts';
 import { reviewLaunch } from './review-launch.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import { applyAndVerify, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The report kinds, in help order. */
@@ -284,7 +284,8 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
   const body = signBody(
     `${question}\n\nReply to this comment to resume the work.`,
     loaded.config.identity.marker,
-    sessionProvenance(ctx, run.host)
+    sessionProvenance(ctx, run.host),
+    trackerVisibility(adapter)
   );
   const unsigned = unsignedBody(body);
   // Skip only a retry of this same question (still the item's latest comment):

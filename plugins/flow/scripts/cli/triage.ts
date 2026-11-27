@@ -54,7 +54,7 @@ import { readinessOf } from '../readiness.ts';
 import { FLOW_TYPES, typeChange } from '../type-labels.ts';
 import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
-import { signBody, unsignedBody } from './provenance.ts';
+import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
 import {
   applyAndVerify,
@@ -159,7 +159,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     const body = signBody(
       `${park}\n\nReply to this comment to go on.`,
       loaded.config.identity.marker,
-      sessionProvenance(ctx)
+      sessionProvenance(ctx),
+      trackerVisibility(adapter)
     );
     const last = (item.comments ?? []).at(-1);
     commented = last === undefined || unsignedBody(last.body) !== unsignedBody(body);

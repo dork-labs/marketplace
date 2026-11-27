@@ -213,6 +213,11 @@ function checkShape(adapter: unknown, tracker: string, file: string): CodeAdapte
  */
 function guardAdapter(adapter: CodeAdapter, tracker: string): CodeAdapter {
   const guarded: Record<string, unknown> = { capabilities: [...adapter.capabilities] };
+  // Only a declared `public` or `private` is kept: anything else reads as
+  // undeclared, which signs as public (`docs/provenance.md` §8).
+  if (adapter.visibility === 'public' || adapter.visibility === 'private') {
+    guarded.visibility = adapter.visibility;
+  }
   for (const capability of adapter.capabilities) {
     const method = adapter[capability] as (...args: unknown[]) => Promise<unknown>;
     guarded[capability] = async (...args: unknown[]) => {

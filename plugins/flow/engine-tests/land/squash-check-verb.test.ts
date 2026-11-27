@@ -16,6 +16,7 @@ import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import type { Forge, MergeInfo } from '../../scripts/forge/types.ts';
+import { readSignature } from '../../scripts/signature-line.ts';
 import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { makeProject, type WriteProject } from '../cli/write-harness.ts';
 import { squashSettled } from '../../scripts/cli/squash-check.ts';
@@ -85,11 +86,11 @@ const runner: ProcessRunner = async (cmd, args, opts) => {
   return realProcessRunner(cmd, args, opts);
 };
 
-async function flow(argv: string[], forge: Forge) {
+async function flow(argv: string[], forge: Forge, env: Record<string, string> = {}) {
   let out = '';
   let err = '';
   const code = await main([...argv, '--json'], {
-    env: { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1' },
+    env: { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1', ...env },
     cwd: project.dir,
     now: () => new Date('2026-10-24T12:00:00.000Z'),
     stdout: { write: (c: string) => (out += c) },
@@ -190,6 +191,28 @@ describe('flow squash-check', () => {
     expect(comments[0][0]).toBe(7);
     expect(comments[0][1]).toMatch(/^@octocat @acme-security: \*\*Squash check failed\.\*\*/);
     expect(comments[0][1]).toContain('```text\nextra.txt\n');
+  });
+
+  it('signs its report as public: the chat cut to 8 and no host', async () => {
+    // Purpose: a PR comment can be world-readable, so the squash-check signer
+    // never signs as private, even on a machine with a DorkOS install.
+    const dorkHome = path.join(project.dir, 'dork-home');
+    mkdirSync(dorkHome);
+    writeFileSync(
+      path.join(dorkHome, 'telemetry-install-id'),
+      '4f7c2c6e-1b0a-4c2a-9a1e-8d3b7f6e5c21'
+    );
+    const sha = squash('slipped in\n');
+    writeRun({});
+    const { forge, comments } = fakeForge({ state: 'merged', mergeCommit: sha, author: 'octocat' });
+    const r = await flow(['squash-check', 'ACME-12'], forge, { DORK_HOME: dorkHome });
+    expect(r.code).toBe(1);
+    expect(comments).toHaveLength(1);
+    const signature = readSignature(comments[0][1]);
+    expect(signature).toMatchObject({ v: 2, harness: 'claude-code', chat: 'session-' });
+    expect(signature?.host).toBeUndefined();
+    expect(comments[0][1]).not.toContain('dork:host:');
+    expect(comments[0][1]).not.toContain('session-abcdef123456');
   });
 
   it('a dry run reports nothing', async () => {

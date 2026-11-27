@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.4.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.5.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -407,6 +407,11 @@ can comment reaches a model with tools otherwise.
   that wrote it. The two are not substitutes: the marker is visible and answers
   "did I write this?", the signature is hidden and answers "which runtime, session,
   account and machine wrote this?".
+- **Visibility (signature).** The adapter declares who can read the tracker's
+  items: `private` only when every item is its team's alone, `public` when an item
+  can be world-readable (issues on a public repository). Not declared is public.
+  Flow signs a `private` tracker's text with the whole chat id and `host`, any
+  other with the public cut ([`../docs/provenance.md`](../docs/provenance.md) §8).
 - **Degradation (signature).** A tracker that mangles or strips HTML comments
   cannot carry the signature. Such an adapter **says so in its skill** and posts
   the comment unsigned — routing degrades to "unsigned thread", which readers
@@ -674,6 +679,7 @@ type Capability =
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
+  visibility?: 'public' | 'private'; // since 3.5.0: who can read the items; not declared = public
   getCurrentUser(): Promise<{ id: string; name?: string }>;
   getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
   getItem(
@@ -974,6 +980,10 @@ declaration.
 
 ### What each version added
 
+- **3.5.0** - additive (MINOR, DOR-5047): the code adapter may declare
+  `visibility`, `public` or `private`. Flow signs tracker text in full only for
+  `private`; an older adapter, which declares nothing, still loads and its
+  tracker text is signed as public.
 - **3.4.0** - additive (MINOR, DOR-5068): a saved view's manual order. Two
   optional methods, `getViewOrder` and `setPositions` (rules under the code
   realization). `flow order --write-order` and `--check-order` refuse an adapter

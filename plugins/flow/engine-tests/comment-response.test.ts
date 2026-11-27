@@ -207,13 +207,23 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
     });
   });
 
-  it("silences the agent's own comment whose marker the tracker garbled, by its signature line", () => {
-    const c = comment({ author: 'agent-account', body: `Picked this up.\n\n— /flow\n${LINE}` });
-    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
-      action: 'ignore',
-      rule: 1,
-    });
-  });
+  it.each([
+    ['a v1 line', LINE],
+    ['a v2 line', '<!-- agent:provenance {"v":2,"chat":"dork:chat:s-1"} -->'],
+    // A bad `v` reads no fields, but still silences: wrongly silenced beats
+    // flow answering itself.
+    ['a line whose v is not a number', '<!-- agent:provenance {"v":"2"} -->'],
+    ['a legacy line whose v is null', '<!-- flow:provenance {"v":null} -->'],
+  ])(
+    "silences the agent's own comment whose marker the tracker garbled, by its signature line (%s)",
+    (_name, line) => {
+      const c = comment({ author: 'agent-account', body: `Picked this up.\n\n— /flow\n${line}` });
+      expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+        action: 'ignore',
+        rule: 1,
+      });
+    }
+  );
 
   it.each([['Shipped from DorkOS.'], ['Sent back: rerun /flow verify with the fixture']])(
     "takes flow's record of a review for flow's own, signed or not: %s",
