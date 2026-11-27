@@ -91,9 +91,9 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete
    problem with a clear done; (b) executable unsupervised, no
    operator decision embedded; (c) unblocked; (d) not a question, decision or tracker;
-   (e) needs no real-world credentials, live third-party accounts or a person at a
-   keyboard; (f) sized, with both engine-read sections (`## Validation criteria`,
-   `## On Completion`) written from the item, not boilerplate. Too thin: `needs-input`
+   (e) needs no credentials, third-party accounts or a person at a keyboard; (f) sized,
+   with `## Done when` (or `## Validation criteria`) and `## On Completion` from the
+   item, not boilerplate. Too thin: `needs-input`
    plus one question. Readying a whole set means the bar wasn't applied.
 6. Missing `blockedBy`/`blocks` edges. An item whose tracked blockers are closed may
    still wait on something untracked (an unaccepted decision): park it with a comment.

@@ -199,6 +199,10 @@
     "baseline": 395,
     "target": 395
   },
+  "skills/flow-drain/unready-top.md": {
+    "baseline": 305,
+    "target": 305
+  },
   "skills/flow-drain/SKILL.md": {
     "baseline": 716,
     "target": 716

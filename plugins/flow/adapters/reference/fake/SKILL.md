@@ -19,3 +19,8 @@ verbs.
 A comment's `authorIsTrusted` (contract 3.0.0) comes only from the file's
 `members` list, the fake's membership data: an author on it is a team member,
 anyone else (a guest, an integration, no author) is not.
+
+Since contract 3.3.0 a write's `optionalLabels` (on `createItem` and
+`applyWorkState`) are added only when the team has the label, and skipped
+otherwise. The fake team leaves out the bare `Bug`, `Improvement` and
+`Feature` labels, so a test that wants them lists them in the file's `labels`.

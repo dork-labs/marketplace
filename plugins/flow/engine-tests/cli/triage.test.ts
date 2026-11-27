@@ -9,6 +9,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import type { Capability } from '../../scripts/tracker/types.ts';
 import { defaultRunner, item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
@@ -22,7 +23,7 @@ afterEach(() => {
   project.cleanup();
 });
 
-/** A captured idea, untriaged: in triage, no agent/* label. */
+/** A captured idea, untriaged: in triage, no agent/* label, sized and with a done-when. */
 const untriaged = () =>
   item('FAKE-1', {
     type: 'idea',
@@ -30,6 +31,8 @@ const untriaged = () =>
     stateName: 'Triage',
     labels: ['type/idea', 'origin/human'],
     agentDisposition: undefined,
+    size: 2,
+    description: 'Export the report.\n\n## Done when\n\n- It downloads as CSV.',
   });
 
 /** The writes a run made (reads are not recorded). */
@@ -106,6 +109,140 @@ describe('flow triage --ready', () => {
       dryRun: true,
       change: { agentLabel: 'agent/ready', stageLabel: 'stage/execute' },
     });
+  });
+});
+
+describe('flow triage --ready refuses an item that is not ready (DOR-5069)', () => {
+  it.each([
+    ['no size', { size: undefined }, 'needs a size'],
+    ['no done-when', { description: 'Export the report.' }, 'needs a done-when'],
+  ] as const)(
+    'refuses one with %s, naming what is missing, and writes nothing',
+    async (_what, over, reason) => {
+      const result = await runFlow(project, { items: [{ ...untriaged(), ...over }] }, [
+        'triage',
+        'FAKE-1',
+        '--ready',
+        '--stage',
+        'execute',
+      ]);
+      expect(result.code).toBe(EXIT.precondition);
+      expect(JSON.stringify(result.json)).toContain(reason);
+      expect(writes(result)).toEqual([]);
+    }
+  );
+
+  it('agrees with readinessOf at every stage: a decomposed item is readied only once DECOMPOSE made it ready', async () => {
+    const decomposed = {
+      ...untriaged(),
+      size: undefined,
+      description: 'Spec: specs/x/02-specification.md',
+      labels: ['type/task', 'stage/decompose'],
+    };
+    const argv = ['triage', 'FAKE-1', '--ready', '--stage', 'execute'];
+    const bare = await runFlow(project, { items: [decomposed] }, argv);
+    expect(bare.code).toBe(EXIT.precondition);
+    expect(JSON.stringify(bare.json)).toContain('needs a size, needs a done-when');
+    // What the decomposing-work skill writes before it hands the item on.
+    const handedOn = {
+      ...decomposed,
+      size: 5,
+      description:
+        'Spec: specs/x/02-specification.md\n\n## Done when\n\n- The acceptance criteria in specs/x/02-specification.md pass, and every task in specs/x/03-tasks.json is done.',
+    };
+    const ready = await runFlow(project, { items: [handedOn] }, argv);
+    expect(ready.code, ready.stderr).toBe(EXIT.ok);
+  });
+
+  it('still parks an unready item: asking a person is how it gets ready', async () => {
+    const result = await runFlow(project, { items: [{ ...untriaged(), size: undefined }] }, [
+      'triage',
+      'FAKE-1',
+      '--park',
+      'How big is it?',
+    ]);
+    expect(result.code).toBe(EXIT.ok);
+  });
+});
+
+describe('flow triage --type (DOR-5069)', () => {
+  const BARE = ['Bug', 'Improvement', 'Feature'];
+  /** Ready FAKE-1 as type <kind> on an item with these labels. */
+  async function retype(labels: string[], kind: string, teamLabels: string[] = BARE) {
+    return runFlow(project, { items: [{ ...untriaged(), labels }], labels: teamLabels }, [
+      'triage',
+      'FAKE-1',
+      '--type',
+      kind,
+      '--ready',
+      '--stage',
+      'execute',
+    ]);
+  }
+
+  it('replaces type/* and adds the bare label it implies when the team has it', async () => {
+    const result = await retype(['type/idea', 'origin/human'], 'task');
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(result.tracker.backlog.items[0].labels).toEqual([
+      'origin/human',
+      'agent/ready',
+      'stage/execute',
+      'type/task',
+      'Improvement',
+    ]);
+  });
+
+  it('adds no bare label for a team that deleted them', async () => {
+    const result = await retype(['type/idea', 'origin/human'], 'task', []);
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(result.tracker.backlog.items[0].labels).not.toContain('Improvement');
+    expect(result.tracker.backlog.items[0].labels).toContain('type/task');
+  });
+
+  it('drops the bare label flow implied for the old type', async () => {
+    const result = await retype(['type/task', 'Improvement'], 'idea');
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(result.tracker.backlog.items[0].labels).toEqual([
+      'agent/ready',
+      'stage/execute',
+      'type/idea',
+    ]);
+  });
+
+  it('leaves a bare label a person set that disagrees, and says so', async () => {
+    const result = await retype(['type/task', 'Bug'], 'idea');
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(result.tracker.backlog.items[0].labels).toContain('Bug');
+    expect(result.json).toMatchObject({
+      note: 'left "Bug" on it: a person set it, and it names a different type than type/idea',
+    });
+  });
+
+  it('refuses before any write when the adapter targets a contract older than 3.3.0', async () => {
+    // Purpose: an older adapter would drop typeLabel, dropLabels and optionalLabels
+    // silently; flow names the contract instead (exit 3).
+    const argv = ['triage', 'FAKE-1', '--type', 'task', '--ready', '--stage', 'execute'];
+    const old = new FakeTracker({ items: [untriaged()], labels: BARE });
+    old.adapter.contractVersion = '3.2.0';
+    const refused = await runFlow(project, old, argv);
+    expect(refused.code).toBe(EXIT.config);
+    expect(JSON.stringify(refused.json)).toContain('contract 3.2.0');
+    expect(refused.tracker.writes).toEqual([]);
+    const current = new FakeTracker({ items: [untriaged()], labels: BARE });
+    current.adapter.contractVersion = '3.3.0';
+    expect((await runFlow(project, current, argv)).code).toBe(EXIT.ok);
+    // Without --type, an older adapter still triages.
+    const plain = new FakeTracker({ items: [untriaged()] });
+    plain.adapter.contractVersion = '3.2.0';
+    expect(
+      (await runFlow(project, plain, ['triage', 'FAKE-1', '--ready', '--stage', 'execute'])).code
+    ).toBe(EXIT.ok);
+  });
+
+  it('refuses a type flow does not know, before any write', async () => {
+    const result = await retype(['type/idea'], 'bug');
+    expect(result.code).toBe(EXIT.usage);
+    expect(writes(result)).toEqual([]);
   });
 });
 

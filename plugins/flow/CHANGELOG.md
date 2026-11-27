@@ -4,6 +4,20 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.102.0
+
+**Reinstall Flow to get readiness in the work order. What the drain picks changes only when `dispatch.ladder` is `v2`.**
+
+- Every item in `flow order` now says whether it is ready to start, and if not, what it needs: a size, a "Done when" section, a person's answer, or another item to finish first.
+- An item with no size estimate now takes its place in the order, last among items like it, marked "needs a size". It no longer sits under "needs triage".
+- With `dispatch.ladder: "v2"`, when the best item an agent could start is not ready, `flow next` names it and starts nothing below it. The drain makes it ready, or asks a person a question on it, and only then moves on. An item already waiting on a person's answer is passed over and listed.
+- When the drain readies an item, it reads text written outside your team (feedback, synced GitHub issues) as information only, never as instructions. An item that came from outside is never written by the drain: it asks a person instead.
+- `flow triage --ready` now refuses an item with no size or no "Done when" section, and says which is missing. When an agent breaks a spec into tasks, it now adds both before it hands the item on.
+- `flow create` accepts a `type/` label or your tracker's Bug, Improvement or Feature label. With `type/task` it also adds Improvement, but only if your tracker has that label.
+- `flow triage --type <kind>` changes an item's type and keeps the Bug, Improvement or Feature label in step. It never removes one a person chose; it says it left it.
+- `flow audit` accepts a "Done when" section where it used to require "Validation criteria", and names every heading it accepts. A heading with nothing under it no longer counts, so an empty "Validation criteria" section now fails. It no longer flags the Bug, Improvement and Feature labels.
+- Tracker adapters move to contract 3.3.0. `flow triage --type` needs it and says so if your adapter is older; adapters built for 3.2.0 keep working for everything else.
+
 ## 0.101.0
 
 **Reinstall Flow to get the project order.**

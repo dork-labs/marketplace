@@ -275,12 +275,14 @@ export const LIVE_CASES: readonly LiveCase[] = [
         title: 'Let people export the monthly report as a CSV file',
         description:
           'People download the monthly report as a PDF and retype the numbers into a ' +
-          'spreadsheet. Offer the same report as a CSV file.',
+          'spreadsheet. Offer the same report as a CSV file.\n\n## Done when\n\n' +
+          '- The monthly report downloads as a CSV file.',
         type: 'idea',
         stateCategory: 'backlog',
         stateName: 'Triage',
         // A Should already in its project: triaged as it was filed.
         priority: 3,
+        size: 2,
         project: PROJECT,
         labels: ['type/idea', 'origin/human'],
       }),

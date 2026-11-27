@@ -62,7 +62,20 @@ export interface WorkStateChange {
   agentLabel?: string | null;
   /** The one `stage/*` label; `null` = remove all; absent = leave. */
   stageLabel?: string | null;
+  /** The one `type/*` label (`flow triage --type`); absent = leave. */
+  typeLabel?: string;
+  /** Labels to remove, whatever their family; absent = none. */
+  dropLabels?: readonly string[];
+  /**
+   * Labels to add only when the team has them: an adapter skips one the team
+   * lacks instead of refusing, and the read-back never asks for one. Used for
+   * the bare type label a `type/*` label implies (`type-labels.ts`).
+   */
+  optionalLabels?: readonly string[];
 }
+
+/** The `type/*` family prefix. */
+export const TYPE_LABEL_PREFIX = 'type/';
 
 /** The label prefix of the one-per-item ownership family. */
 export const AGENT_LABEL_PREFIX = 'agent/';
@@ -82,7 +95,9 @@ export function labelGroup(label: string): string | null {
 /**
  * The label set an item carries after a {@link WorkStateChange}: for each
  * family the change names, every label of that family is dropped and the
- * change's label (when a string) added; every other label is kept in order.
+ * change's label (when a string) added; then `dropLabels` go and
+ * `optionalLabels` are added (an adapter later skips an optional label its team
+ * lacks); every other label is kept in order.
  * Adapters compute their write from this, and `verifyWrite` checks against it,
  * so "replace the family" is written once.
  *
@@ -94,6 +109,7 @@ export function labelsAfterChange(labels: readonly string[], change: WorkStateCh
   const families: [string, string | null | undefined][] = [
     [AGENT_LABEL_PREFIX, change.agentLabel],
     [STAGE_LABEL_PREFIX, change.stageLabel],
+    [TYPE_LABEL_PREFIX, change.typeLabel],
   ];
   let next = [...new Set(labels)];
   for (const [prefix, label] of families) {
@@ -101,6 +117,9 @@ export function labelsAfterChange(labels: readonly string[], change: WorkStateCh
     next = next.filter((existing) => !existing.startsWith(prefix));
     if (label !== null) next.push(label);
   }
+  const drop = new Set(change.dropLabels ?? []);
+  next = next.filter((existing) => !drop.has(existing));
+  for (const label of change.optionalLabels ?? []) if (!next.includes(label)) next.push(label);
   return next;
 }
 

@@ -136,11 +136,15 @@ describe('flow audit', () => {
     const allowed = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract']));
     expect(allowed.code).toBe(EXIT.ok);
 
-    const other = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract', 'Bug']));
+    const other = await runFlow(
+      ['audit', '--json'],
+      temp,
+      withBare(['cloud-contract', 'Frontend'])
+    );
     expect(other.code).toBe(EXIT.findings);
     const [failure] = JSON.parse(other.stdout).failures;
     expect(failure).toMatchObject({ invariant: 'GRM-12' });
-    expect(failure.detail).toContain('Bug');
+    expect(failure.detail).toContain('Frontend');
     expect(failure.detail).not.toContain('cloud-contract');
   });
 

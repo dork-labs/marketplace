@@ -570,7 +570,11 @@ status, priority, target date and relations.
   is the older ranking, and only items labelled `agent/ready` count. `v2` picks
   from the work order. The open-PR cap, the WIP cap, readiness and the
   `agent/ready` label then only decide what may start now. An item they stop
-  stays in the order, listed under `held` with the reason.
+  stays in the order, listed under `held` with the reason. An item with no
+  estimate still ranks, last on size, and is not ready. When the best item the
+  agent may start is not ready, `flow next` names it in `makeReady` and starts
+  nothing below it: the drain readies it through triage, or parks it with a
+  question (`agent/needs-input`), and only then moves on.
 - `dispatch.orderKeys` orders items inside one band (pinned, Urgent, release
   gate, Must, Should, Could). The keys are `dueDate` (earliest first),
   `projectRank`, `unblocks` (more first), `type` (Bug, then Improvement, then

@@ -184,6 +184,13 @@ export interface NewItem {
    * must be a label the team already has: an adapter never creates labels.
    */
   labels: string[];
+  /**
+   * Labels to add only when the team has them; one it lacks is skipped, never
+   * refused (DOR-5069: the bare type label a `type/*` label implies, for a team
+   * that deleted the bare labels). Absent = none. An adapter that ignores this
+   * field files the item without them, which is the safe reading.
+   */
+  optionalLabels?: string[];
   /** A project of the team, by id or exact name. */
   project?: string;
   /** The parent item's identifier (it must be the team's own). */

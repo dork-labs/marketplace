@@ -1120,6 +1120,14 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     expect(
       await judge('decompose', (s) => {
         flow(s, 'stage', 'FAKE-1', 'decompose');
+        // The skill makes the item ready before it hands it on (DOR-5069):
+        // a done-when pointing at the spec, and a size.
+        plant(s, (store) => {
+          const handed = store.items.find((i) => i.identifier === 'FAKE-1') as WorkItem;
+          handed.size = 3;
+          handed.description +=
+            '\n\n## Done when\n\n- Every task in specs/fixture/03-tasks.json is done.';
+        });
         flow(s, 'triage', 'FAKE-1', '--ready', '--stage', 'execute');
         writeTasks(s.dir, good);
       })
@@ -1387,15 +1395,16 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
       })
     ).toMatch(/FAKE-3 was readied, but only a Must is \(priority 3\)/);
-    // A Must readied although it has no engine-read sections: the readiness
-    // rules say no, whatever the label says.
+    // A Must readied although it has no "## On Completion": the readiness
+    // rules say no, whatever the label says. Its "## Done when", which flow
+    // create demands, already satisfies GRM-5 (DOR-5069).
     expect(
       await judge('done/follow-up', (s) => {
         close(s);
         file(s, 'must');
         flow(s, 'triage', 'FAKE-3', '--ready', '--stage', 'execute');
       })
-    ).toMatch(/FAKE-3 is ready but fails the readiness rules \(GRM-5, GRM-6\)/);
+    ).toMatch(/FAKE-3 is ready but fails the readiness rules \(GRM-6\)/);
     // The same follow-up, made ready-worthy by hand, passes: the oracle does not
     // refuse readiness itself.
     expect(

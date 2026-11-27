@@ -464,6 +464,7 @@ describe('flow create', () => {
     ],
     ['an agent/* label', [...CAPTURE, '--label', 'agent/ready']],
     ['two labels in one group', [...CAPTURE, '--label', 'type/task']],
+    ['two bare type labels', createArgs({}, ['Bug', 'Feature'])],
     ['a priority above 4', createArgs({ priority: '5' })],
     ['a priority that is not a number', createArgs({ priority: 'high' })],
     ['priority 0 (none)', createArgs({ priority: '0' })],
@@ -491,6 +492,49 @@ describe('flow create', () => {
     expect(run.code).toBe(EXIT.usage);
     expect(t.calls).toEqual([]);
     expect(t.fake.writes).toEqual([]);
+  });
+
+  /** The bare type labels, for a fake team that kept them (the default fake team deleted them). */
+  const BARE = ['Bug', 'Improvement', 'Feature'];
+
+  it.each([
+    ['a bare Bug', ['Bug', 'origin/human'], ['Bug', 'origin/human', 'type/task'], 'task'],
+    ['a bare improvement, any case', ['improvement'], ['Improvement', 'type/task'], 'task'],
+    ['a bare Feature', ['Feature'], ['Feature', 'type/idea'], 'idea'],
+    ['the same bare label twice', ['Bug', 'bug'], ['Bug', 'type/task'], 'task'],
+    [
+      'type/task, on a team with the bare labels',
+      ['type/task'],
+      ['type/task', 'Improvement'],
+      'task',
+    ],
+    ['type/idea, capture’s placeholder: no bare label', ['type/idea'], ['type/idea'], 'idea'],
+    ['type/research, which has no bare name', ['type/research'], ['type/research'], 'research'],
+    ['both, agreeing', ['type/task', 'Bug'], ['type/task', 'Bug'], 'task'],
+  ])('takes %s as the type (DOR-5069)', async (_what, labels, written, type) => {
+    // Purpose: people use the bare tracker labels, flow's engine reads type/*.
+    const t = tracker({ items: [existing('FAKE-1')], labels: BARE });
+    const run = await flow(createArgs({}, labels), t);
+    expect(run.code, run.err).toBe(EXIT.ok);
+    expect(added(t, ['FAKE-1'])[0]).toMatchObject({ labels: written, type });
+  });
+
+  it('files type/task without Improvement for a team that deleted the bare labels', async () => {
+    // Purpose: the implied bare label is optional; a team without it still files.
+    const t = tracker({ items: [existing('FAKE-1')] });
+    const run = await flow(createArgs({}, ['type/task', 'origin/human']), t);
+    expect(run.code, run.err).toBe(EXIT.ok);
+    expect(added(t, ['FAKE-1'])[0].labels).toEqual(['type/task', 'origin/human']);
+  });
+
+  it('refuses a bare label and a type/* label that name different types, naming both', async () => {
+    const t = tracker({ items: [], failReads: 'the tracker must not be reached', labels: BARE });
+    const run = await flow(createArgs({}, ['type/idea', 'Bug']), t);
+    expect(run.code).toBe(EXIT.usage);
+    expect(JSON.stringify(run.json)).toContain(
+      '\\"type/idea\\" and \\"Bug\\" name different types'
+    );
+    expect(t.calls).toEqual([]);
   });
 
   it('files an item captured from outside with agent/from-outside, the one agent/* label it takes', async () => {

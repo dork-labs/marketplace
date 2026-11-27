@@ -146,10 +146,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.2.0 and all seven capabilities', () => {
+  it('declares contract 3.3.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('3.2.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.3.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -902,6 +902,27 @@ describe('applyWorkState', () => {
     });
   });
 
+  it('reclassifies: replaces type/*, drops a label, and adds an optional one only when the team has it (DOR-5069)', async () => {
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowWriteRead'
+        ? writeRead(call, ['type/idea', 'Feature', 'agent/ready', 'stage/execute'])
+        : okEnvelope({ issueUpdate: { success: true } })
+    );
+    await adapter.applyWorkState(STALE_ITEM, {
+      typeLabel: 'type/task',
+      dropLabels: ['Feature'],
+      optionalLabels: ['Improvement', 'NotATeamLabel'],
+    });
+    expect(calls[1].variables.input).toEqual({
+      labelIds: [
+        labelId('agent/ready'),
+        labelId('stage/execute'),
+        labelId('type/task'),
+        labelId('Improvement'),
+      ],
+    });
+  });
+
   it('works on the recorded answer exactly as Linear gave it', async () => {
     // Purpose: no editing of the fixture at all: the real issue (claimed,
     // started) moves to verify, keeping every label it had but its stage.
@@ -1153,6 +1174,21 @@ describe('createItem', () => {
       projectId: 'proj-1',
       priority: 4,
     });
+  });
+
+  it('adds an optional label only when the team has it, and never refuses one it lacks (DOR-5069)', async () => {
+    const { adapter, calls } = build(routeCreate());
+    await adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: ['type/task'],
+      optionalLabels: ['Bug', 'NotATeamLabel'],
+    });
+    const create = calls.find((call) => call.operation === 'FlowCreateItem');
+    expect((create?.variables.input as Record<string, unknown>).labelIds).toEqual([
+      createLabelId('type/task'),
+      createLabelId('Bug'),
+    ]);
   });
 
   it('finds a project by id through the id-filtered read', async () => {

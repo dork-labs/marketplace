@@ -1,6 +1,6 @@
 {
   "contract": "work-order",
-  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target (null removes it; data only, it never moves a project or flags one), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap patch items (patch) and projects (projectPatch), and add projects (addProjects); a project may also give slug, and priority null removes it. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
+  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin, body (the description; default a done-when section) }; a project is { id, name, status, priority, target (null removes it; data only, it never moves a project or flags one), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap patch items (patch) and projects (projectPatch), and add projects (addProjects); a project may also give slug, and priority null removes it. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.unready maps a ranked item to its readiness reasons, and its absence means every ranked item is ready (DOR-5069: an item with no estimate ranks, last on size, and is not ready); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
   "now": "2026-11-23T12:00:00.000Z",
   "base": {
     "projects": [
@@ -168,7 +168,8 @@
           "actor": "user-ana",
           "actorName": "Ana Fictional",
           "at": "2026-11-22T15:00:00Z"
-        }
+        },
+        "body": "Ship the demo build."
       },
       {
         "id": "ABC-17",
@@ -207,17 +208,21 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "held": {
           "ABC-8": "held by ABC-9",
           "ABC-13": "waits for project Mobile"
         },
         "needsTriage": {
-          "ABC-11": ["triage state"],
-          "ABC-12": ["estimate"]
+          "ABC-11": ["triage state"]
         },
         "inFlight": ["ABC-10"],
         "personal": ["ABC-14", "ABC-15"],
@@ -264,10 +269,48 @@
           "ABC-2",
           "ABC-7",
           "ABC-4",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
-        ]
+        ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        }
+      }
+    },
+    {
+      "name": "type as a key reads flow's type/* labels too: type/task is an Improvement, type/idea a Feature",
+      "orderKeys": ["type", "size"],
+      "patch": {
+        "ABC-4": {
+          "labels": ["type/idea"]
+        },
+        "ABC-7": {
+          "labels": ["type/task"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-9",
+          "ABC-6",
+          "ABC-1",
+          "ABC-2",
+          "ABC-7",
+          "ABC-4",
+          "ABC-12",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        }
       }
     },
     {
@@ -289,10 +332,15 @@
           "ABC-4",
           "ABC-7",
           "ABC-16",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "banners": []
       }
     },
@@ -320,14 +368,19 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-99"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "held": {
+          "ABC-5": "blocking cycle: ABC-5 → ABC-100 → ABC-5",
           "ABC-8": "held by ABC-9",
           "ABC-9": "held by ABC-5",
-          "ABC-5": "blocking cycle: ABC-5 → ABC-100 → ABC-5",
-          "ABC-100": "blocking cycle: ABC-100 → ABC-5 → ABC-100; held by ABC-10",
-          "ABC-13": "waits for project Mobile"
+          "ABC-13": "waits for project Mobile",
+          "ABC-100": "blocking cycle: ABC-100 → ABC-5 → ABC-100; held by ABC-10"
         }
       }
     },
@@ -352,9 +405,14 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "inherits": {
           "ABC-99": "ABC-8"
         }
@@ -381,10 +439,15 @@
           "ABC-13",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "held": {
           "ABC-1": "held by ABC-13",
           "ABC-8": "held by ABC-9"
@@ -416,10 +479,15 @@
           "ABC-9",
           "ABC-1",
           "ABC-4",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
-        ]
+        ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        }
       }
     },
     {
@@ -442,9 +510,14 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-99",
           "ABC-100"
-        ]
+        ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        }
       }
     },
     {
@@ -467,10 +540,14 @@
           "ABC-9",
           "ABC-1",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-12": ["needs a size"]
+        },
         "inherits": {
           "ABC-4": "ABC-16"
         },
@@ -502,9 +579,14 @@
           "ABC-5",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "held": {
           "ABC-1": "held by ABC-13",
           "ABC-8": "held by ABC-9",
@@ -534,13 +616,17 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "needsTriage": {
-          "ABC-11": ["triage state"],
-          "ABC-12": ["estimate"]
+          "ABC-11": ["triage state"]
         }
       }
     },
@@ -558,10 +644,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-billing", "p-search"],
           "flags": ["over cap: 2 Started, cap 1; lowest: Search"],
@@ -594,10 +685,15 @@
           "ABC-2",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-search", "p-billing"],
           "projectFlags": {
@@ -625,10 +721,15 @@
           "ABC-2",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-search", "p-billing"],
           "why": {
@@ -655,10 +756,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "next": ["p-docs", "p-mobile"],
           "inherits": {
@@ -692,6 +798,9 @@
       },
       "expected": {
         "issues": ["ABC-16", "ABC-3", "ABC-17", "ABC-6", "ABC-9", "ABC-1"],
+        "unready": {
+          "ABC-16": ["needs a done-when"]
+        },
         "projects": {
           "now": ["p-search", "p-billing"],
           "inherits": {
@@ -707,6 +816,7 @@
           "ABC-5": "waits for project Search",
           "ABC-7": "waits for project Search",
           "ABC-8": "held by ABC-9",
+          "ABC-12": "waits for project Search",
           "ABC-13": "waits for project Mobile",
           "ABC-99": "waits for project Search",
           "ABC-100": "waits for project Search"
@@ -734,10 +844,15 @@
           "ABC-9",
           "ABC-1",
           "ABC-4",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "held": {
           "ABC-7": "waits for project Docs",
           "ABC-8": "held by ABC-9"
@@ -759,10 +874,15 @@
           "ABC-2",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-billing"],
           "personal": ["p-search", "p-ops"]
@@ -808,10 +928,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-gamma", "p-beta", "p-alpha", "p-billing", "p-search"],
           "inherits": {
@@ -859,10 +984,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-gamma", "p-beta", "p-alpha", "p-billing", "p-search"],
           "inherits": {
@@ -903,10 +1033,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-beta", "p-alpha", "p-billing", "p-search"],
           "projectFlags": {
@@ -946,10 +1081,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-billing", "p-beta", "p-alpha", "p-search"]
         }
@@ -986,10 +1126,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-alpha", "p-billing", "p-search"],
           "flags": ["over cap: 3 Started, cap 1; lowest: Alpha, Search"],
@@ -1019,10 +1164,15 @@
           "ABC-2",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-search", "p-billing"],
           "why": {
@@ -1049,10 +1199,15 @@
           "ABC-2",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-search", "p-billing"],
           "projectFlags": {
@@ -1108,10 +1263,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "next": ["p-mobile", "p-docs", "p-quince", "p-pear", "p-sage", "p-rye"]
         }
@@ -1164,10 +1324,15 @@
           "ABC-1",
           "ABC-4",
           "ABC-7",
+          "ABC-12",
           "ABC-5",
           "ABC-99",
           "ABC-100"
         ],
+        "unready": {
+          "ABC-16": ["needs a done-when"],
+          "ABC-12": ["needs a size"]
+        },
         "projects": {
           "now": ["p-alpha", "p-billing", "p-beta", "p-search", "p-gamma"],
           "flags": ["over cap: 5 Started, cap 4; lowest: Gamma"],
@@ -1250,7 +1415,7 @@
       "set": {
         "created": "2026-10-01T00:00:00Z"
       },
-      "expected": "10"
+      "expected": "11"
     },
     {
       "name": "removing the blocker relation lets the item rank itself",
@@ -1261,7 +1426,7 @@
       "expected": "6"
     },
     {
-      "name": "an estimate takes an item out of triage",
+      "name": "an item with no estimate still ranks, last on size; an estimate moves it up",
       "item": "ABC-12",
       "set": {
         "size": 1
