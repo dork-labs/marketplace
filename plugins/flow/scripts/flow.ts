@@ -152,8 +152,8 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'order',
     summary: 'Show the work order: projects in rank, then issues best first, each with why.',
     description:
-      'Read-only. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and items with the order.personLabel label are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2.',
-    common: ['project', 'snapshot'],
+      'Read-only, except --write-order. Ranks every open project and issue from tracker fields alone: Started projects feed the order; issues go in bands (pinned, Urgent, release gate, Must, Should, Could), then by the keys in dispatch.orderKeys, then issue number. A blocked item does not rank; its blocker takes its place. In-flight items, held items, items that need triage and items with the order.personLabel label are listed apart, each with its reason. The same function flow next picks from when dispatch.ladder is v2. --write-order writes the order into the saved views order.views names, only the positions that changed, and exits 7 while flow is paused unless --manual; --check-order exits 1 when a view is out of order, naming the first item in the wrong place.',
+    common: ['project', 'snapshot', 'manual'],
     flags: [
       {
         name: 'count',
@@ -183,6 +183,25 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'identifier',
         description: 'Print the item\'s place number, or "unranked: <reason>".',
+      },
+      {
+        name: 'for-project',
+        kind: 'string',
+        value: 'name|id',
+        description:
+          "Only this project's issues (its id, or its name in any case), in the same order with the same places and why.",
+      },
+      {
+        name: 'write-order',
+        kind: 'boolean',
+        description:
+          'Write the order into the views order.views names, only the positions that changed; prints how many.',
+      },
+      {
+        name: 'check-order',
+        kind: 'boolean',
+        description:
+          'Read both views; exit 1 when one is out of order, naming the first item in the wrong place.',
       },
     ],
     load: () => import('./cli/order.ts'),

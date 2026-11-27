@@ -65,6 +65,7 @@ const shipped = () => ({
   groom: read('skills/flow-groom/SKILL.md'),
   triage: read('skills/flow-triage/SKILL.md'),
   retro: read('skills/flow-retro/SKILL.md'),
+  order: read('skills/flow-order/SKILL.md'),
   tending: read('skills/tending-tracker/SKILL.md'),
 });
 
@@ -74,6 +75,7 @@ function pointers(files: ReturnType<typeof shipped>): Record<string, string> {
     'flow-groom check': between(files.groom, '0. **Pause check', '1. Pull once'),
     'flow-triage tick': between(files.triage, '0. **Pause check', '1. Take a backlog'),
     'flow-retro tick': between(files.retro, '0. **Pause check', '1. Run `flow selftest'),
+    'flow-order tick': between(files.order, '0. **Pause check', '1. Run `flow order'),
     'tending-tracker tick': between(files.tending, '**Pause check', '0. **Resolve identity'),
     '/flow auto start': between(files.drain, '1. **Pause check', '2. **Start'),
     '/flow auto iteration': between(files.drain, '3. **Each iteration', '4. End early'),
@@ -91,7 +93,7 @@ describe('every autonomous entry point checks the pause first', () => {
       pointerGaps(text).map((gap) => `${name}: ${gap}`)
     );
     expect(gaps).toEqual([]);
-    expect(Object.keys(pointers(shipped()))).toHaveLength(6);
+    expect(Object.keys(pointers(shipped()))).toHaveLength(7);
   });
 
   it('/flow continue and auto run the flow-drain tick', () => {

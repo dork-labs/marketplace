@@ -73,6 +73,7 @@ import { unsignedBody } from './provenance.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { readHealth, renderHealth, type Health } from './health-read.ts';
+import { readOrderViewsStatus } from '../order-views-status.ts';
 
 /** The parked label. */
 const AGENT_NEEDS_INPUT = 'agent/needs-input';
@@ -556,7 +557,7 @@ async function healthFor(
   } catch {
     // The rest of status reports a config problem; Health shows the plain intake.
   }
-  return readHealth({
+  const health = await readHealth({
     roots: [roots.checkout, ...(roots.mainCheckout === null ? [] : [roots.mainCheckout])],
     env: ctx.env,
     fetchImpl: ctx.io.fetch,
@@ -564,6 +565,7 @@ async function healthFor(
     intake,
     tracker,
   });
+  return { ...health, orderViews: readOrderViewsStatus(roots.mainCheckout ?? roots.checkout) };
 }
 
 /** One in-flight entry from a run record and/or a tracker item. */

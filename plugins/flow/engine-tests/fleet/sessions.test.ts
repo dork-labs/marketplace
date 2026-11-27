@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessRunner } from '../../scripts/cli/context.ts';
+import { pidExists } from '../../scripts/cli/host-io.ts';
 import { UsageError } from '../../scripts/errors.ts';
 import type { AccountIdentity } from '../../scripts/fleet/accounts.ts';
 import {
@@ -359,6 +360,34 @@ describe('sessionState', () => {
   ] as const)('%j reads %s', (input, expected) => {
     // Purpose: every row of the spec's state table.
     expect(sessionState({ ...base, ...input } as never)).toBe(expected);
+  });
+
+  it('never asks about, or signals, a run with no local process (-1 or 0)', () => {
+    // Purpose: kill(-1, 0) reaches every process this user owns. A run that
+    // records -1 (a queued drain run, a sandboxed DorkOS claim) is unknown.
+    const asked = vi.fn(() => false);
+    for (const workerPid of [-1, 0]) {
+      expect(
+        sessionState({
+          accountLimited: false,
+          pidAlive: asked,
+          runOnly: { status: 'running', workerPid },
+        })
+      ).toBe('unseen');
+    }
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it('pidExists never calls kill with a pid of 0 or less', () => {
+    // Purpose: the one place flow turns a recorded pid into a signal.
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      for (const pid of [-1, 0, -42, 1.5, Number.NaN]) expect(pidExists(pid)).toBe(false);
+      expect(kill).not.toHaveBeenCalled();
+      expect(pidExists(process.pid)).toBe(true);
+    } finally {
+      kill.mockRestore();
+    }
   });
 
   it('turns only idle into limited when the account is out', () => {

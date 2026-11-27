@@ -215,8 +215,8 @@ agent session per run — so there is no scheduler to build.
 - **One tick = one issue.** Each croner fire is a fresh run-session
   (`sessionId = run.id`) that claims and works exactly one issue to its gate, then
   ends — preserving fresh-session-per-issue.
-- **Activation** is install, then approve per project. Flow's four schedules
-  (`flow-drain`, `flow-groom`, `flow-triage`, `flow-retro`) say `scope: project` and
+- **Activation** is install, then approve per project. Flow's five schedules
+  (`flow-drain`, `flow-groom`, `flow-triage`, `flow-retro`, `flow-order`) say `scope: project` and
   `projectFile: .agents/flow/config.json`: from a global install, each project
   `/flow:init` set up gets its own copy, off, on its **Schedules** page, for a person
   to approve. None runs globally; installing never arms a cron. Switch and timing

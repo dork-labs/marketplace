@@ -1,5 +1,5 @@
 /**
- * The fake tracker's code adapter (adapter contract 3.3.0): the module the flow
+ * The fake tracker's code adapter (adapter contract 3.4.0): the module the flow
  * CLI's loader imports when a project's tracker is `fake`.
  *
  * The tracker lives in the JSON file {@link FAKE_BACKLOG_ENV} names, and every
@@ -101,6 +101,14 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
     createItem: async (spec) => {
       refresh();
       return adapter.createItem!(spec);
+    },
+    getViewOrder: async (kind, viewId) => {
+      refresh();
+      return adapter.getViewOrder!(kind, viewId);
+    },
+    setPositions: async (writes) => {
+      refresh();
+      return adapter.setPositions!(writes);
     },
   };
 }

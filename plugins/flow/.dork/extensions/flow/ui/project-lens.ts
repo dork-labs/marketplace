@@ -161,6 +161,11 @@ export function conditionLine(
         hint: `In a chat in ${project.name}, run flow drain, or check that its drain schedule is on.`,
       };
     }
+    case 'order-drift':
+      return {
+        text: `${project.name}: ${condition.detail.notice ?? 'The work order views are out of order.'}`,
+        hint: `In a chat in ${project.name}, run flow order --write-order, or check that the flow-order schedule is on.`,
+      };
     case 'agents-merge':
       return {
         text: `${project.name}: ${condition.detail.notice ?? `${AGENTS_MERGE_SHORT}.`}`,

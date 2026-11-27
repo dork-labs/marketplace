@@ -146,7 +146,7 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.5.0 and all seven capabilities', () => {
+  it('declares contract 3.5.0 and every capability', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
     expect(linear.CONTRACT_VERSION).toBe('3.5.0');
@@ -160,6 +160,8 @@ describe('the module', () => {
         'getCurrentUser',
         'getInbox',
         'getItem',
+        'getViewOrder',
+        'setPositions',
       ].sort()
     );
   });
@@ -1944,5 +1946,161 @@ describe('the work order reads (contract 3.2.0)', () => {
       false
     );
     expect(panel.projectInfo).toBeUndefined();
+  });
+});
+
+describe('the view order (contract 3.4.0)', () => {
+  const VIEW = 'view-0000';
+  /** A view page: issues or projects, in the order Linear returns them. */
+  function viewPage(
+    model: 'Issue' | 'Project',
+    nodes: Record<string, unknown>[],
+    next: string | null = null
+  ) {
+    const connection = { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes };
+    return okEnvelope({
+      customView: {
+        modelName: model,
+        ...(model === 'Issue' ? { issues: connection } : { projects: connection }),
+      },
+    });
+  }
+
+  it("reads an issue view in manual order across pages, dropping another team's issue", async () => {
+    const { adapter, calls, warnings } = build((call) => {
+      expect(call.operation).toBe('FlowViewIssues');
+      expect(call.query).toContain('sort: [{ manual: { order: Ascending } }]');
+      return call.variables.after === null
+        ? viewPage(
+            'Issue',
+            [
+              { id: 'i1', identifier: 'DOR-2', title: 'Two', sortOrder: -50.5 },
+              { id: 'i9', identifier: 'OPS-9', title: 'Other', sortOrder: -40 },
+            ],
+            'c1'
+          )
+        : viewPage('Issue', [{ id: 'i2', identifier: 'DOR-1', title: 'One', sortOrder: 10 }]);
+    });
+    expect(await adapter.getViewOrder!('issues', VIEW)).toEqual([
+      { id: 'i1', key: 'DOR-2', name: 'Two', position: -50.5 },
+      { id: 'i2', key: 'DOR-1', name: 'One', position: 10 },
+    ]);
+    expect(calls.map((c) => [c.variables.id, c.variables.first])).toEqual([
+      [VIEW, linear.VIEW_PAGE_SIZE],
+      [VIEW, linear.VIEW_PAGE_SIZE],
+    ]);
+    expect(warnings.join('\n')).toContain('OPS-9');
+  });
+
+  /** The team's projects, one page: what a project write and a project view are checked against. */
+  function teamProjects(ids: readonly string[]) {
+    return okEnvelope({
+      team: {
+        projects: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: ids.map((id) => ({ id })),
+        },
+      },
+    });
+  }
+
+  it("reads a project view by project id, dropping a project that is not the team's", async () => {
+    const { adapter, calls, warnings } = build((call) =>
+      call.operation === 'FlowTeamProjects'
+        ? teamProjects(['p1'])
+        : viewPage('Project', [
+            { id: 'p9', name: 'Their roadmap', sortOrder: 1 },
+            { id: 'p1', name: 'Billing', sortOrder: 3 },
+          ])
+    );
+    expect(await adapter.getViewOrder!('projects', VIEW)).toEqual([
+      { id: 'p1', key: 'p1', name: 'Billing', position: 3 },
+    ]);
+    // Every status: a completed project of the team is still the team's.
+    const read = calls.find((call) => call.operation === 'FlowTeamProjects');
+    expect(read?.variables.teamId).toBe(TEAM.id);
+    expect(read?.query).not.toContain('filter');
+    expect(warnings.join('\n')).toMatch(/p9.*not one of team DOR's projects/);
+  });
+
+  it('refuses a missing view or one of the other kind as a config error', async () => {
+    const missing = build(() => okEnvelope({ customView: null }));
+    expect(await rejection(missing.adapter.getViewOrder!('issues', VIEW))).toBeInstanceOf(
+      ConfigError
+    );
+    const wrong = build(() => viewPage('Project', []));
+    const error = await rejection(wrong.adapter.getViewOrder!('issues', VIEW));
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as Error).message).toContain('order.views.issues');
+  });
+
+  it('writes each position with its own mutation, sortOrder only', async () => {
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowTeamProjects'
+        ? teamProjects(['p1'])
+        : okEnvelope(
+            call.operation === 'FlowIssuePosition'
+              ? { issueUpdate: { success: true } }
+              : { projectUpdate: { success: true } }
+          )
+    );
+    await adapter.setPositions!([
+      { kind: 'issues', id: 'i1', key: 'DOR-1', position: 1.5 },
+      { kind: 'projects', id: 'p1', key: 'p1', position: -2 },
+    ]);
+    const writes = calls.filter((c) => c.operation !== 'FlowTeamProjects');
+    expect(writes.map((c) => [c.operation, c.variables])).toEqual([
+      // The issue is written by its key, the value the team check read.
+      ['FlowIssuePosition', { id: 'DOR-1', sortOrder: 1.5 }],
+      ['FlowProjectPosition', { id: 'p1', sortOrder: -2 }],
+    ]);
+    expect(writes[0].query).toContain('input: { sortOrder: $sortOrder }');
+  });
+
+  it("refuses a project that is not the team's before any write", async () => {
+    // Project.sortOrder is shared by the whole workspace: writing another
+    // team's project would renumber it in that team's lists.
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowTeamProjects'
+        ? teamProjects(['p1'])
+        : okEnvelope({ issueUpdate: { success: true }, projectUpdate: { success: true } })
+    );
+    const error = await rejection(
+      adapter.setPositions!([
+        { kind: 'issues', id: 'i1', key: 'DOR-1', position: 1 },
+        { kind: 'projects', id: 'p1', key: 'p1', position: 2 },
+        { kind: 'projects', id: 'p9', key: 'p9', position: 3 },
+      ])
+    );
+    expect(error).toBeInstanceOf(PreconditionError);
+    expect((error as Error).message).toContain('p9');
+    expect(calls.map((c) => c.operation)).toEqual(['FlowTeamProjects']);
+  });
+
+  it("refuses another team's issue and a position of 0 before any write", async () => {
+    const { adapter, calls } = build(() => okEnvelope({ issueUpdate: { success: true } }));
+    expect(
+      await rejection(
+        adapter.setPositions!([
+          { kind: 'issues', id: 'i1', key: 'DOR-1', position: 1 },
+          { kind: 'issues', id: 'i9', key: 'OPS-9', position: 2 },
+        ])
+      )
+    ).toBeInstanceOf(PreconditionError);
+    expect(
+      await rejection(
+        adapter.setPositions!([{ kind: 'issues', id: 'i', key: 'DOR-1', position: 0 }])
+      )
+    ).toBeInstanceOf(PreconditionError);
+    expect(calls).toEqual([]);
+  });
+
+  it('throws when Linear does not confirm a write', async () => {
+    const { adapter } = build(() => okEnvelope({ issueUpdate: { success: false } }));
+    expect(
+      await rejection(
+        adapter.setPositions!([{ kind: 'issues', id: 'i1', key: 'DOR-1', position: 1 }])
+      )
+    ).toBeInstanceOf(TrackerError);
   });
 });

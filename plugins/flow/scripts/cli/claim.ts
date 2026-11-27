@@ -76,7 +76,30 @@ async function resolveIdentity(adapter: CodeAdapter, config: FlowConfig): Promis
  */
 const CLAIM_LOCK_WAIT_MS = 60_000;
 
-/** `--pid`, else the parent of the shell that ran flow (the harness). */
+/**
+ * The worker pid a DorkOS session records when its shell cannot read the
+ * harness process: flow's "no local process" value, as a drain run records
+ * while queued. No check ever reads it as a dead worker or passes it to
+ * `kill` (`pidExists` refuses a pid of 0 or less; status, run-ended, fleet and
+ * the extension read it as unknown), so recovery never reclaims the run. The flip side: flow cannot tell
+ * when that chat ends. The run carries the chat's `dorkosSessionId` for a
+ * check that asks DorkOS, and a closed item still reports the run as ended.
+ */
+const NO_LOCAL_PROCESS = -1;
+
+/** The DorkOS chat this shell belongs to (`DORKOS_SESSION_ID`), or `undefined`. */
+function dorkosSession(ctx: VerbContext): string | undefined {
+  const id = (ctx.env.DORKOS_SESSION_ID ?? '').trim();
+  return id === '' ? undefined : id;
+}
+
+/**
+ * `--pid`, else the parent of the shell that ran flow (the harness), read with
+ * `ps`. When `ps` is unavailable (Codex's macOS sandbox refuses it, DOR-4378)
+ * and the shell belongs to a DorkOS session (`DORKOS_SESSION_ID`, which DorkOS
+ * sets in every shell it starts), the run records {@link NO_LOCAL_PROCESS};
+ * anywhere else the claim stops and asks for `--pid`.
+ */
 async function workerPid(ctx: VerbContext): Promise<number> {
   const flag = ctx.args.flags.pid;
   if (typeof flag === 'string') {
@@ -86,18 +109,21 @@ async function workerPid(ctx: VerbContext): Promise<number> {
     }
     return pid;
   }
-  const fail = () =>
-    new PreconditionError(
+  const inDorkos = dorkosSession(ctx) !== undefined;
+  const fail = () => {
+    if (inDorkos) return NO_LOCAL_PROCESS;
+    throw new PreconditionError(
       'could not find the process that runs this session; pass --pid <the harness process id>'
     );
+  };
   let result;
   try {
     result = await ctx.runProcess('ps', ['-o', 'ppid=', '-p', String(process.ppid)]);
   } catch {
-    throw fail();
+    return fail();
   }
   const pid = Number(result.stdout.trim());
-  if (result.code !== 0 || !Number.isInteger(pid) || pid <= 0) throw fail();
+  if (result.code !== 0 || !Number.isInteger(pid) || pid <= 0) return fail();
   return pid;
 }
 
@@ -138,8 +164,13 @@ export interface ClaimInput {
   identifier: string;
   /** The session the run names: the claiming session, or the id the drain minted. */
   sessionId: string;
-  /** The worker's pid, or `-1` while no local process is known (a queued drain run). */
+  /**
+   * The worker's pid, or `-1` while no local process is known: a queued drain
+   * run, or a DorkOS session whose sandbox blocks `ps`.
+   */
   workerPid: number;
+  /** The DorkOS chat that claims (`DORKOS_SESSION_ID`), when one does. */
+  dorkosSessionId?: string;
   /** The worktree the work happens in. */
   worktreePath: string;
   /** Its branch. */
@@ -223,6 +254,7 @@ export async function claimItem(
         provenance: { ...input.provenance, worktree: input.worktreePath, branch: input.branch },
         ...(input.account === undefined ? {} : { account: input.account }),
         ...(input.host === undefined ? {} : { host: input.host }),
+        ...(input.dorkosSessionId === undefined ? {} : { dorkosSessionId: input.dorkosSessionId }),
         ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
         ...(input.drain === undefined ? {} : { drain: input.drain }),
         ...(input.dispatchedBy === undefined ? {} : { dispatchedBy: input.dispatchedBy }),
@@ -313,6 +345,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ...(typeof launcher === 'string' ? { host: launcher } : {}),
       ...(runtime === null ? {} : { runtime }),
       ...(typeof dispatchedBy === 'string' ? { dispatchedBy } : {}),
+      ...(dorkosSession(ctx) === undefined ? {} : { dorkosSessionId: dorkosSession(ctx) }),
     }
   );
   const journalRuntime = (runtime ?? undefined) as Runtime | undefined;
@@ -322,6 +355,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   return {
     runtime: journalRuntime,
     json: { ok: true, dryRun: ctx.dryRun, identifier, change, run: record },
-    text: `${ctx.dryRun ? 'Would claim' : 'Claimed'} ${identifier} at stage ${record.stage} (worker ${pid}, ${branch}).`,
+    text: `${ctx.dryRun ? 'Would claim' : 'Claimed'} ${identifier} at stage ${record.stage} (${pid === NO_LOCAL_PROCESS ? 'worker: this DorkOS session' : `worker ${pid}`}, ${branch}).`,
   };
 }

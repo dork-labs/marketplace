@@ -116,4 +116,15 @@ describe('runEnded: a hosted drain run whose session is gone (DOR-2490)', () => 
     expect(runEnded(drainRun('parked'), closed, alive, gone)).toBe('item-closed');
     expect(runEnded(drainRun('watching'), closed, alive)).toBeNull();
   });
+
+  it('ends a DorkOS-session claim with no readable pid once its item closes (DOR-4378)', () => {
+    // Flow can never see that worker, so the closed item is its only end;
+    // any other run whose pid is unknown stays open on a closed item, as before.
+    const closed = { stateCategory: 'completed' };
+    const claim = { status: 'running', workerPid: -1, dorkosSessionId: 'chat-1' };
+    expect(runEnded(claim, closed, alive)).toBe('item-closed');
+    expect(runEnded(claim, undefined, alive)).toBeNull();
+    expect(runEnded({ status: 'running', workerPid: -1 }, closed, alive)).toBeNull();
+    expect(runEnded(claim, closed, () => true)).toBeNull();
+  });
 });

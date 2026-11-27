@@ -152,7 +152,7 @@ export interface ItemComment {
   createdAt: string;
 }
 
-/** The seven {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
+/** The {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
 export type Capability =
   | 'getCurrentUser'
   | 'getBacklogSnapshot'
@@ -160,7 +160,9 @@ export type Capability =
   | 'applyWorkState'
   | 'comment'
   | 'createItem'
-  | 'getInbox';
+  | 'getInbox'
+  | 'getViewOrder'
+  | 'setPositions';
 
 /** Every {@link Capability}, in declaration order. */
 export const ALL_CAPABILITIES: readonly Capability[] = [
@@ -171,7 +173,41 @@ export const ALL_CAPABILITIES: readonly Capability[] = [
   'comment',
   'createItem',
   'getInbox',
+  'getViewOrder',
+  'setPositions',
 ];
+
+/** What a saved tracker view lists (contract 3.4.0): issues or projects. */
+export type ViewKind = 'issues' | 'projects';
+
+/**
+ * One entry of a saved view, in the view's manual order (contract 3.4.0). The
+ * order is the tracker's own position field, lower first. A tracker may keep
+ * one position per item for every list ordered by hand, so a write can move
+ * the item in other lists too; the adapter's docs say.
+ */
+export interface ViewEntry {
+  /** Tracker-native id: what a position write takes. */
+  id: string;
+  /** The key flow knows the entry by: an issue's identifier, a project's id. */
+  key: string;
+  /** What a person sees: an issue's title, a project's name. */
+  name: string;
+  /** Its position. Lower comes first. */
+  position: number;
+}
+
+/** One position to write (contract 3.4.0). */
+export interface PositionWrite {
+  /** Whether `id` names an issue or a project. */
+  kind: ViewKind;
+  /** Tracker-native id, from a {@link ViewEntry}. */
+  id: string;
+  /** The entry's key, from the same {@link ViewEntry}: an issue's identifier is checked against the team. */
+  key: string;
+  /** The new position. Never exactly 0, which a tracker may read as "append". */
+  position: number;
+}
 
 /** What `createItem` makes (contract 2.2.0). */
 export interface NewItem {
@@ -330,6 +366,24 @@ export interface CodeAdapter {
    * `flow inbox` calls it, and it hands no untrusted comment's text onward.
    */
   getInbox?(opts?: { since?: string }): Promise<InboxRead[]>;
+  /**
+   * A saved view's entries in its manual order, lower position first
+   * (contract 3.4.0). Read-only. Throws a `ConfigError` when the view does not
+   * exist or lists the other kind; an issue or project of another team is
+   * dropped with a warning, never returned. Only `flow order --write-order` and
+   * `--check-order` call it.
+   */
+  getViewOrder?(kind: ViewKind, viewId: string): Promise<ViewEntry[]>;
+  /**
+   * Write positions, one tracker write each, in the order given (contract
+   * 3.4.0). Writes the position field and nothing else, an issue by its key,
+   * so the team check covers what is written. Refuses, writing nothing, an
+   * issue key outside the configured team or a project that is not one of
+   * the team's (`PreconditionError`), and a position of exactly 0. Throws on the first write the tracker does
+   * not confirm; the ones before it stay written, and a rerun picks up from
+   * there, because the caller writes only positions that differ.
+   */
+  setPositions?(writes: readonly PositionWrite[]): Promise<void>;
 }
 
 /** What an adapter's `adapter.ts` module exports. */

@@ -88,6 +88,7 @@ import {
 } from '../launchers/types.ts';
 import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import { loadProjectConfig } from './backlog.ts';
+import { rewriteOrderAfterClaim } from './order-views.ts';
 import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -324,6 +325,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   const planNotes: string[] = [];
 
   const mainCheckout = resolveMainCheckout(ctx.projectDir);
+  /** Whether this pass claimed anything, so the views are rewritten after it. */
+  let claimedThisPass = false;
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const origin = await ctx.runProcess('git', ['remote', 'get-url', 'origin'], {
     cwd: mainCheckout,
@@ -757,6 +760,9 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         // The chat that ran `flow drain`, so DorkOS lists the run in it too.
         ...(launchedBy === null ? {} : { dispatchedBy: launchedBy }),
       });
+      // The claimed item left the order: the views are rewritten once, after
+      // the pass (DOR-5068).
+      claimedThisPass = true;
     },
     async release(identifier) {
       await releaseItem(ctx, setup, { identifier, to: 'ready' });
@@ -818,7 +824,11 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       // Merging before starting (DOR-3341): arm what is cleared before the
       // pass advances runs and fills slots with new work.
       const sweepLines = await drainSweep(ctx, config, sweeps);
+      claimedThisPass = false;
       const report = await runPass(deps);
+      // Claims left the order: put the saved views back in step, once per
+      // pass (DOR-5068). Best-effort; a failure warns and never fails a claim.
+      if (claimedThisPass) await rewriteOrderAfterClaim(ctx, project);
       // What says a scheduled drain still watches its lanes (DOR-3263).
       if (!ctx.dryRun) writeLastPass(mainCheckout, ctx.now());
       events.push(...report.events);

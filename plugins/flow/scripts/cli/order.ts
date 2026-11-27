@@ -1,8 +1,7 @@
 /**
  * `flow order` (DOR-5063): the work order, printed. The project order and the
  * issue order, from one pull of the backlog through `computeWorkOrder`, the
- * same function `flow next` picks from under `dispatch.ladder: "v2"`. Read
- * only: it writes nothing anywhere, so it runs while flow is paused too.
+ * same function `flow next` picks from under `dispatch.ladder: "v2"`.
  *
  * - No flags: the banners, Started and Planned projects, then the issues best
  *   first (the first 15 in text; all in `--json`), then what is in flight,
@@ -15,11 +14,18 @@
  * - `--all`: also the Paused and Backlog projects.
  * - `--why <id>`: one item's reasons, and which field would move it up.
  * - `--rank-of <id>`: the item's place number, or `unranked: <reason>`.
+ * - `--for-project <name|id>`: one project's issues, each exactly as the
+ *   whole order has it (same place, same why); nothing is re-sorted.
+ * - `--write-order` / `--check-order`: keep the saved views `order.views`
+ *   names in the order (`order-views.ts`). The one write this verb makes.
+ *
+ * Read-only otherwise: it writes nothing anywhere, so it runs while flow is
+ * paused too.
  *
  * @module @dorkos/flow/cli/order
  */
 
-import { UsageError } from '../errors.ts';
+import { PreconditionError, UsageError } from '../errors.ts';
 import type { BacklogSnapshot } from '../tracker/types.ts';
 import type { ProjectInfo, ProjectStatus } from '../work-item.ts';
 import {
@@ -96,6 +102,35 @@ export function orderInputOf(
     config: orderConfigOf(config),
     now: now.toISOString(),
   };
+}
+
+/**
+ * The project `--for-project` names: by id first, else by name in any case,
+ * among the ranked projects and the items' own.
+ *
+ * @param snapshot - The backlog pull.
+ * @param wanted - The flag's value.
+ * @returns The project's id and name.
+ * @throws {PreconditionError} When none matches, or the name matches more than one.
+ */
+export function findProject(
+  snapshot: BacklogSnapshot,
+  wanted: string
+): { id: string; name: string } {
+  const known = new Map<string, string>();
+  for (const project of projectsOf(snapshot)) known.set(project.id, project.name);
+  for (const item of snapshot.items)
+    if (item.project) known.set(item.project.id, item.project.name);
+  const byId = known.get(wanted);
+  if (byId !== undefined) return { id: wanted, name: byId };
+  const byName = [...known].filter(([, name]) => name.toLowerCase() === wanted.toLowerCase());
+  if (byName.length === 1) return { id: byName[0][0], name: byName[0][1] };
+  if (byName.length > 1) {
+    throw new PreconditionError(
+      `more than one project is named "${wanted}"; pass one id: ${byName.map(([id]) => id).join(', ')}`
+    );
+  }
+  throw new PreconditionError(`no open project has the id or name "${wanted}"`);
 }
 
 /** Parse `-n`: a whole number of at least 1, or `undefined` when absent. */
@@ -267,6 +302,32 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (typeof why === 'string' && typeof rankOf === 'string') {
     throw new UsageError('--why and --rank-of each ask about one item; pass one of them');
   }
+  const forProject = ctx.args.flags['for-project'];
+  if (typeof forProject === 'string') {
+    const others = ['why', 'rank-of', 'projects', 'all'].filter(
+      (flag) => ctx.args.flags[flag] !== undefined
+    );
+    if (others.length > 0) {
+      throw new UsageError(
+        `--for-project lists one project's issues; drop --${others.join(', --')}`
+      );
+    }
+  }
+  const write = ctx.args.flags['write-order'] === true;
+  const check = ctx.args.flags['check-order'] === true;
+  if (write || check) {
+    const others = ['why', 'rank-of', 'projects', 'count', 'all', 'for-project'].filter(
+      (flag) => ctx.args.flags[flag] !== undefined
+    );
+    if (write && check) throw new UsageError('pass --write-order or --check-order, not both');
+    if (others.length > 0) {
+      throw new UsageError(
+        `--${write ? 'write-order' : 'check-order'} works on the whole order; drop --${others.join(', --')}`
+      );
+    }
+    const { runViews } = await import('./order-views.ts');
+    return runViews(ctx, loadProjectConfig(ctx), write ? 'write' : 'check');
+  }
   const project = loadProjectConfig(ctx);
   const { config } = project.loaded;
   const snapshot = await readBacklog(ctx, project.adapter);
@@ -295,6 +356,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         lines,
       },
       text: lines.join('\n'),
+    };
+  }
+
+  if (typeof forProject === 'string') {
+    const wanted = findProject(snapshot, forProject);
+    const own = order.issues.filter((issue) => issue.projectId === wanted.id);
+    const shown = count === undefined ? own : own.slice(0, count);
+    const textShown = own.slice(0, count ?? TEXT_DEFAULT_COUNT);
+    const more = own.length - textShown.length;
+    return {
+      json: { generatedAt: order.generatedAt, project: wanted, issues: shown },
+      text:
+        own.length === 0
+          ? `${wanted.name}: no ranked issues. flow order --why <id> says why one is not.`
+          : [
+              `${wanted.name}: ${own.length} ranked issue${own.length === 1 ? '' : 's'}${more > 0 ? `; first ${textShown.length}` : ''}, places from the whole order`,
+              formatColumns(textShown.map(issueRow)),
+            ].join('\n'),
     };
   }
 

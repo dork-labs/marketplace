@@ -73,11 +73,12 @@ const CONTRACT_DIR = path.resolve(
 );
 
 describe('the vendored seam contract', () => {
-  it('is the 1.x line flow was built against', () => {
+  it('is the 2.x line flow was built against', () => {
     // A major bump is a removal or a narrowing on core's side: read what
-    // changed and update the mirror before moving this line.
+    // changed and update the mirror before moving this line. 2.0.0 removed
+    // StartWorkResponse.warnings; flow reads only `sessionId` from a start.
     const version = readFileSync(path.join(CONTRACT_DIR, 'CONTRACT_VERSION'), 'utf8').trim();
-    expect(version).toMatch(/^1\.\d+\.\d+$/);
+    expect(version).toMatch(/^2\.\d+\.\d+$/);
   });
 });
 

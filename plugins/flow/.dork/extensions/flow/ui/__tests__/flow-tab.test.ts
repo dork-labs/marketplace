@@ -178,6 +178,34 @@ describe('the project lens', () => {
     ).toBeTruthy();
   });
 
+  it('shows when the work order views drifted, and how to put them back (DOR-5068)', async () => {
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          conditions: [
+            {
+              kind: 'order-drift',
+              since: '2026-09-28T09:14:00.000Z',
+              escalated: false,
+              detail: {
+                notice:
+                  "The work order's issue view is out of order at place 1: it shows ACME-9 where the order has ACME-1.",
+              },
+            },
+          ],
+        }),
+      ]),
+      host(DORKOS)
+    );
+    expect(
+      screen.getByText(
+        "dorkos: The work order's issue view is out of order at place 1: it shows ACME-9 where the order has ACME-1."
+      )
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'How to do this' }));
+    expect(screen.getByText(/run flow order --write-order/)).toBeTruthy();
+  });
+
   it('says plainly that agents may merge their own PRs, and never that it is safe (DOR-3768)', async () => {
     await renderTab(
       flowModel([

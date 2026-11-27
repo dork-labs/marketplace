@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { renderHealth } from '../../scripts/cli/health-read.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import { FakeTracker } from '../../scripts/tracker/fake.ts';
 
@@ -211,5 +212,49 @@ describe('flow status: Health', () => {
           'not tracked (triage reads this queue through the adapter; flow keeps no mark for it)',
       },
     ]);
+  });
+
+  it("shows the work order views' last result, or null when none was saved (DOR-5068)", async () => {
+    const { fetchImpl } = dorkos([]);
+    expect((await status(fetchImpl)).orderViews).toBeNull();
+    const saved = {
+      v: 1,
+      at: ago(HOUR),
+      mode: 'check',
+      inOrder: false,
+      drift: { view: 'issues', place: 2, expected: 'FAKE-1', found: 'FAKE-9' },
+      wrote: null,
+      needed: null,
+      driftSince: ago(2 * HOUR),
+    };
+    mkdirSync(path.join(project, '.dork', 'flow'), { recursive: true });
+    writeFileSync(path.join(project, '.dork', 'flow', 'order-views.json'), JSON.stringify(saved));
+    expect((await status(fetchImpl)).orderViews).toEqual(saved);
+    expect(
+      renderHealth({
+        schedules: [],
+        schedulesUnknown: null,
+        intake: [],
+        orderViews: saved as never,
+      })
+    ).toContain(
+      "Work order views: The work order's issue view is out of order at place 2: it shows FAKE-9 where the order has FAKE-1."
+    );
+    expect(
+      renderHealth({
+        schedules: [],
+        schedulesUnknown: null,
+        intake: [],
+        orderViews: { ...saved, mode: 'write', inOrder: true, drift: null, wrote: 3 } as never,
+      })
+    ).toContain(`Work order views: in order (written ${ago(HOUR)}, 3 positions).`);
+    expect(
+      renderHealth({
+        schedules: [],
+        schedulesUnknown: null,
+        intake: [],
+        orderViews: { ...saved, mode: 'write', inOrder: false, drift: null, wrote: 1 } as never,
+      })
+    ).toContain('Work order views: The last write to the work order views failed');
   });
 });

@@ -358,7 +358,8 @@ function bandOf(item: WorkItem): Band | null {
   if (has(item, RELEASE_GATE_LABEL)) return 'releaseGate';
   if (priority === 2) {
     // A Security High whose due date is a real outside deadline (e.g. a
-    // disclosure date) is a confirmed Must by that date, in any state but Triage, which still waits for triage (Security's review, DOR-5063).
+    // disclosure date) is a confirmed Must by that date, in any state but
+    // Triage, which still waits for triage (Security's review, DOR-5063).
     if (isSecurityMust(item)) return 'must';
     return item.stateCategory === 'unstarted' && item.triage !== true ? 'must' : 'should';
   }
