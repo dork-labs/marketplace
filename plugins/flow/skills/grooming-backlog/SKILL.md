@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the seventeen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog sweep that makes the team's backlog honestly dispatchable. Audits every open item against the eighteen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's programmes, classifies and gates every survivor, then verifies with the audit and dispatch oracles. Use when dispatch starves, after a big programme lands, before autonomy, or when the tracker drifts. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog
@@ -27,7 +27,7 @@ one team's identifiers: stop and fix the read first.
 go to the operator at the phase-5 gate. Labels, priorities, estimates, states,
 relations and description sections proceed under the operator's approval of the groom.
 
-**The seventeen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
+**The eighteen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
 invariant fails); `node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help`
 lists them.
 
@@ -91,9 +91,9 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete
    problem with a clear done; (b) executable unsupervised, no
    operator decision embedded; (c) unblocked; (d) not a question, decision or tracker;
-   (e) needs no real-world credentials, live third-party accounts or a person at a
-   keyboard; (f) sized, with both engine-read sections (`## Validation criteria`,
-   `## On Completion`) written from the item, not boilerplate. Too thin: `needs-input`
+   (e) needs no credentials, third-party accounts or a person at a keyboard; (f) sized,
+   with `## Done when` (or `## Validation criteria`) and `## On Completion` from the
+   item, not boilerplate. Too thin: `needs-input`
    plus one question. Readying a whole set means the bar wasn't applied.
 6. Missing `blockedBy`/`blocks` edges. An item whose tracked blockers are closed may
    still wait on something untracked (an unaccepted decision): park it with a comment.
@@ -118,7 +118,8 @@ path, then is reported, never dropped.
 ### Phase 7 — Verify and report
 
 1. `flow audit --json`: every invariant green over the groomed scope. Report items other
-   sessions made mid-groom.
+   sessions made mid-groom. GRM-18 (project flags) is the operator's call; never change a
+   project's status.
 2. `flow next -n 10 --json` against the baseline. **The top picks must be work the
    operator would want an agent doing next**; a bigger pool with a wrong top pick fails.
 3. Report the before/after numbers, closures with evidence, the project map, the ready-set

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.3.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.5.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -677,7 +677,7 @@ type Capability =
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
-  visibility?: 'public' | 'private'; // since 3.3.0: who can read the items; not declared = public
+  visibility?: 'public' | 'private'; // since 3.5.0: who can read the items; not declared = public
   getCurrentUser(): Promise<{ id: string; name?: string }>;
   getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
   getItem(
@@ -706,6 +706,7 @@ interface NewItem {
   priority?: 0 | 1 | 2 | 3 | 4;
   size?: number | string; // since 3.1.0: the estimate, in the tracker's shape (points or a t-shirt size)
   key?: string; // idempotency key: a second create with the same key returns the first item
+  optionalLabels?: string[]; // since 3.3.0: added only when the team has the label; one it lacks is skipped, never refused
 }
 
 interface BacklogSnapshot {
@@ -730,15 +731,29 @@ interface WorkStateChange {
   stateCategory?: StateCategory; // move to a state of this category; absent = leave
   agentLabel?: string | null; // the one agent/* label; null = remove all; absent = leave
   stageLabel?: string | null; // the one stage/* label; null = remove all; absent = leave
+  typeLabel?: string; // since 3.3.0: the one type/* label; absent = leave
+  dropLabels?: string[]; // since 3.3.0: labels to remove, whatever their family; absent = none
+  optionalLabels?: string[]; // since 3.3.0: added only when the team has the label; one it lacks is skipped, never refused
 }
 ```
+
+The label set a write leaves is `labelsAfterChange(current, change)` from
+`scripts/work-state.ts`: each named family (`agent/*`, `stage/*`, `type/*`) is
+replaced, then `dropLabels` go and `optionalLabels` are added. An adapter
+drops from that set any `optionalLabels` entry the team lacks (and the item
+does not already carry) instead of refusing the write; every other unknown
+label is still refused. The read-back after the write checks the named
+families and that each dropped label is gone, and never asks for an optional
+label. `flow create` uses `NewItem.optionalLabels`, and `flow triage --type`
+uses the three change fields, for the bare `Bug`, `Improvement` and `Feature`
+labels a `type/*` label implies (`scripts/type-labels.ts`).
 
 | Method               | The verb it realizes                        | Used by                                             |
 | -------------------- | ------------------------------------------- | --------------------------------------------------- |
 | `getCurrentUser`     | `getCurrentUser`                            | `flow next`, `flow audit`                           |
 | `getBacklogSnapshot` | `getBacklogSnapshot` (optional read, below) | `flow snapshot`, `next`, `audit`, `status`          |
 | `getItem`            | `getItem` (optional read, below)            | every write, to check it landed; `flow status <id>` |
-| `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`            |
+| `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`, `triage`  |
 | `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
 | `createItem`         | creating an item (capture, follow-ups)      | `flow create`, `flow selftest --file`               |
 | `getInbox`           | `getInbox` (since 3.0.0)                    | `flow inbox`, the only inbox read a model may use   |
@@ -917,10 +932,17 @@ declaration.
 
 ### What each version added
 
-- **3.3.0** - additive (MINOR, DOR-5047): the code adapter may declare
+- **3.5.0** - additive (MINOR, DOR-5047): the code adapter may declare
   `visibility`, `public` or `private`. Flow signs tracker text in full only for
   `private`; an older adapter, which declares nothing, still loads and its
   tracker text is signed as public.
+- **3.3.0** - additive (MINOR, DOR-5069): reclassifying and optional labels.
+  `NewItem` gains optional `optionalLabels`, and `WorkStateChange` gains
+  optional `typeLabel`, `dropLabels` and `optionalLabels` (rules under the
+  `WorkStateChange` shape). `flow triage --type` refuses, before any write, an
+  adapter that targets an older contract, which would drop the type change
+  without a word. An adapter at 3.2 still loads: `flow create` files without
+  the optional label, and every other verb works as before.
 - **3.2.0** - additive (MINOR, DOR-5063): the work order's reads. `WorkItem`
   gains optional `dueDate`, `triage` (the tracker's triage inbox, still the
   `backlog` category) and `pin` (who added the `pin` label, when, and the

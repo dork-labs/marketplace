@@ -28,7 +28,11 @@
  *   The open-PR cap, the WIP cap, readiness, the `agent/ready` claim gate and
  *   ownership then hold *starting*, not ranking: an item they stop stays in the
  *   order and is listed in `held` with why, and each pick carries its place,
- *   band and reasons.
+ *   band and reasons. The top item the agent may start but that is not ready
+ *   (readiness, or no `agent/ready` label) is never stepped over (DOR-5069):
+ *   `makeReady` names it, nothing below it is picked, and the drain triages
+ *   it or parks it for a person (`agent/needs-input`), which is the visible
+ *   skip the next pass walks past.
  * - Paused: exit 7 unless `--manual`. Nothing eligible is still exit 0, with
  *   `atWipCap` saying the WIP cap is what blocks, else `starved` saying whether
  *   a triage pass would help.
@@ -86,7 +90,13 @@ import {
 } from '../forge/open-prs.ts';
 import { classifyOwnership, type Identity, type OwnershipScope } from '../identity.ts';
 import type { BacklogSnapshot, WorkItem, WorkItemProject } from '../tracker/types.ts';
-import { AGENT_CLAIMED } from '../work-state.ts';
+import {
+  AGENT_CLAIMED,
+  AGENT_FROM_OUTSIDE,
+  AGENT_NEEDS_INPUT,
+  AGENT_READY,
+} from '../work-state.ts';
+import { CAPTURE_TAG } from '../duplicate-title.ts';
 import { computeWorkOrder, type HeldIssue, type OrderedIssue } from '../work-order.ts';
 import { hasLabel } from '../work-item.ts';
 import { orderInputOf } from './order.ts';
@@ -434,8 +444,12 @@ export function renderNext(summary: NextSummary): string {
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
-  const banners = summary.order?.banners ?? [];
-  if (summary.picked.length === 0) {
+  const top = summary.order?.makeReady ?? null;
+  const banners = [
+    ...(summary.order?.banners ?? []),
+    ...(top === null ? [] : [makeReadyLine(top)]),
+  ];
+  if (summary.picked.length === 0 && top === null) {
     const why = summary.prCap?.atCap
       ? 'Nothing urgent is eligible, and the open-PR cap is reached: land an open PR before starting new work.'
       : summary.atWipCap
@@ -445,6 +459,7 @@ export function renderNext(summary: NextSummary): string {
           : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
     return [...banners, why, wipLine].join('\n');
   }
+  if (summary.picked.length === 0) return [...banners, wipLine].join('\n');
   const order = summary.order;
   if (order !== undefined) {
     // The work order (v2): each pick with its place and the reasons for it.
@@ -537,19 +552,57 @@ export interface NextOrder {
   held: HeldIssue[];
   /** The work order's banners ("Urgent below pins: ..."). */
   banners: string[];
+  /**
+   * The best item the agent may start but that is not ready, or `null`. Nothing
+   * below it is picked: the drain makes it ready first (the triage stage) or
+   * parks it for a person with `agent/needs-input` (DOR-5069).
+   */
+  makeReady: MakeReady | null;
 }
 
-/** The agent/ready claim gate: the order ranks every item, but only these may be started. */
-const AGENT_READY = 'agent/ready';
+/**
+ * The one line that names the unready top item, for `flow next`'s text and
+ * `flow drain`'s pass report alike.
+ *
+ * @param top - The item to make ready.
+ * @returns The line.
+ */
+export function makeReadyLine(top: MakeReady): string {
+  const why = `${top.identifier} tops the work order but is not ready (${top.reasons.join(', ')})`;
+  return top.outside
+    ? `${why}, and its words came from outside the team: park it with a question; nothing below it starts first.`
+    : `${why}: triage it or park it with a question; nothing below it starts first.`;
+}
+
+/** The top item the drain must make ready before anything below it starts. */
+export interface MakeReady {
+  /** Human key. */
+  identifier: string;
+  /** Title. */
+  title: string;
+  /** What is missing: its readiness reasons, or `not agent/ready yet` when only the label is. */
+  reasons: string[];
+  /**
+   * Its words came from outside the team: its title carries a capture tag
+   * (`[owner/name#N]`, kept after a person clears `agent/from-outside`). The
+   * drain parks it with a question and never writes its done-when (DOR-5069).
+   */
+  outside: boolean;
+}
 
 /**
  * Pick from the work order (`dispatch.ladder: "v2"`): walk the issue order
  * best first and keep each item that may start now. An item that may not stays
  * in the order and is listed in `held` with why: it has an open PR, the
- * open-PR cap holds it (only Urgent starts at the cap), it is not ready, it
- * lacks the `agent/ready` claim gate, or its owner is not one the agent may
- * claim. The WIP cap then takes the best that fit; the rest are held as
- * `WIP cap`. Nothing here reorders: the order is `computeWorkOrder`'s.
+ * open-PR cap holds it (only Urgent starts at the cap), its owner is not one
+ * the agent may claim, it waits for a person's answer (`agent/needs-input`),
+ * or it came from outside the team and is not ready (only a person or the PM
+ * readies those). The first item past those gates that is not ready, or lacks
+ * the `agent/ready` claim gate, is {@link NextOrder.makeReady}: the walk stops
+ * there, and every item below it waits behind it, so the drain never takes a
+ * lower item instead (DOR-5069). The WIP cap then takes the best that fit; the
+ * rest are held as `WIP cap`. Nothing here reorders: the order is
+ * `computeWorkOrder`'s.
  *
  * @param order - The issue order and its banners.
  * @param byId - Every open item by identifier.
@@ -574,21 +627,34 @@ export function pickFromOrder(
   const reasons = new Map<string, string>();
   const eligible: WorkItem[] = [];
   const entries: Record<string, OrderedIssue> = {};
-  let unready = 0;
+  let makeReady: MakeReady | null = null;
   for (const issue of order.issues) {
     const item = byId.get(issue.identifier);
     if (item === undefined || !filter(item)) continue;
     const id = issue.identifier;
-    if (gate.hasOpenPr(id)) reasons.set(id, 'has an open PR');
+    const ready = issue.readiness.ready && hasLabel(item, AGENT_READY);
+    if (makeReady !== null)
+      reasons.set(id, `waits behind ${makeReady.identifier}, which is made ready first`);
+    else if (gate.hasOpenPr(id)) reasons.set(id, 'has an open PR');
     else if (gate.atPrCap && item.priority !== URGENT_PRIORITY) reasons.set(id, 'PR cap');
-    else if (!issue.readiness.ready) {
-      unready += 1;
-      reasons.set(id, `not ready: ${issue.readiness.reasons.join(', ')}`);
-    } else if (!hasLabel(item, AGENT_READY)) {
-      unready += 1;
-      reasons.set(id, 'not agent/ready yet');
-    } else if (!gate.claimable(item)) {
+    else if (!gate.claimable(item)) {
       reasons.set(id, 'owned by someone the agent may not claim for');
+    } else if (hasLabel(item, AGENT_NEEDS_INPUT)) {
+      reasons.set(id, 'waits for a person (agent/needs-input)');
+    } else if (!ready && hasLabel(item, AGENT_FROM_OUTSIDE)) {
+      reasons.set(id, 'from outside the team: a person or the PM readies it');
+    } else if (!ready) {
+      const missing = issue.readiness.ready ? [] : issue.readiness.reasons;
+      makeReady = {
+        identifier: id,
+        title: issue.title,
+        reasons: missing.length > 0 ? missing : ['not agent/ready yet'],
+        outside: typeof item.title === 'string' && CAPTURE_TAG.test(item.title),
+      };
+      reasons.set(
+        id,
+        missing.length > 0 ? `not ready: ${missing.join(', ')}` : 'not agent/ready yet'
+      );
     } else eligible.push(item);
   }
   const admitted = truncateRankedToWipCap(eligible, wipCap, load);
@@ -608,11 +674,11 @@ export function pickFromOrder(
     outcome: {
       picked: admitted,
       eligibleCount: admitted.length,
-      starved: admitted.length === 0 && unready > 0,
-      shapeableCount: unready,
+      starved: admitted.length === 0 && makeReady !== null,
+      shapeableCount: makeReady === null ? 0 : 1,
     },
     eligible,
-    order: { entries, held, banners: order.banners },
+    order: { entries, held, banners: order.banners, makeReady },
   };
 }
 
@@ -857,7 +923,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         ...(order === undefined ? {} : orderFields(order.entries[item.identifier])),
         ...(accounts === undefined ? {} : { account: jsonAccount(accounts[i]) }),
       })),
-      ...(order === undefined ? {} : { ladder: 'v2', banners: order.banners, held: order.held }),
+      ...(order === undefined
+        ? {}
+        : { ladder: 'v2', banners: order.banners, held: order.held, makeReady: order.makeReady }),
       eligibleCount: outcome.eligibleCount,
       starved: outcome.starved,
       shapeableCount: outcome.shapeableCount,

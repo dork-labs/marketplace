@@ -570,7 +570,11 @@ status, priority, target date and relations.
   is the older ranking, and only items labelled `agent/ready` count. `v2` picks
   from the work order. The open-PR cap, the WIP cap, readiness and the
   `agent/ready` label then only decide what may start now. An item they stop
-  stays in the order, listed under `held` with the reason.
+  stays in the order, listed under `held` with the reason. An item with no
+  estimate still ranks, last on size, and is not ready. When the best item the
+  agent may start is not ready, `flow next` names it in `makeReady` and starts
+  nothing below it: the drain readies it through triage, or parks it with a
+  question (`agent/needs-input`), and only then moves on.
 - `dispatch.orderKeys` orders items inside one band (pinned, Urgent, release
   gate, Must, Should, Could). The keys are `dueDate` (earliest first),
   `projectRank`, `unblocks` (more first), `type` (Bug, then Improvement, then
@@ -579,7 +583,17 @@ status, priority, target date and relations.
   `projectRank`.
 - `projects.startedCap` is how many projects may be Started at once; the default
   is `6`. flow never changes a project's status. Over the cap, it names the
-  lowest-ranked Started projects so a person can pause or finish one.
+  lowest-ranked Started projects so a person can pause or finish one, and the
+  audit (GRM-18) reports it with each Started project's flags. Projects
+  with the `order.personLabel` label don't count toward the cap.
+- Projects rank by, first to last: the `pin` label, priority (none last,
+  flagged `needs a priority`), what waits on them, the estimates left on their
+  open issues (an unsized issue counts as the largest size), then age. A
+  project's target date never moves it and is never required; a real outside
+  deadline goes on the issues as a due date. A project
+  that waits on an unfinished project is flagged `can't start: waits on <P>`,
+  its issues wait too, and the project in its way moves up to its place.
+  `flow order --projects` prints only this list.
 - `order.pinSetters` lists the tracker accounts allowed to add the `pin` label.
   The audit (GRM-17) flags a pin added by anyone else, and a pin with no comment
   starting `pin:` that says why. The default `[]` checks only the reason.

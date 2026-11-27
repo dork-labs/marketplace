@@ -16,7 +16,7 @@ You are the **worker** for {{identifier}} ({{title}}) in a `flow drain`. You run
 ## Phase 1: build
 
 1. **Do not claim.** The item is already claimed for you.
-2. **Implement**, failing test first wherever behavior changes. The item's `## Validation criteria` and `## On Completion` are your definition of done.
+2. **Implement**, failing test first wherever behavior changes. The item's `## Done when` or `## Validation criteria`, and its `## On Completion`, are your definition of done.
 3. **Verify** with the repo's targeted tests, typecheck and lint. Prove each new test fails without your fix.
 4. **After each task commit**, write the checkpoint: put its body (`## Done`, `## Next`, `## Open questions`, `## Next command`) in `.dork/flow/drain/checkpoint-body.md`, then run `flow checkpoint {{identifier}} --trigger task --task <task> --body-file .dork/flow/drain/checkpoint-body.md`.
 5. **Push** the branch, then run `flow report {{identifier}} pushed`. Then **stop and wait** for a message. Do not open a PR. A bug fix records its proof test with `flow proof` first, at every push (`verifying-work`'s `proof-test.md`).

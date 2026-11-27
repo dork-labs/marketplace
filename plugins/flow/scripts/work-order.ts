@@ -21,14 +21,23 @@
  *
  * - Started items (In Progress, In Review) are {@link WorkOrder.inFlight}:
  *   shown, never re-ranked.
- * - Items in triage, or with no priority, no project or no estimate, are
+ * - Items in triage, or with no priority or no project, are
  *   {@link WorkOrder.needsTriage}, with the missing fields named. Urgent items
- *   and release gates rank without a project.
+ *   and release gates rank without a project. An item with no estimate ranks
+ *   (last on the size key) and is not ready: `needs a size` (DOR-5069).
+ *
+ * ## Readiness is an output
+ *
+ * Every ranked item carries {@link OrderedIssue.readiness} from `readiness.ts`
+ * (`needs a size`, `needs a done-when`, `needs a decision (DOR-x)`, `blocked by
+ * DOR-y`). It never moves an item: the drain reads it to make the top item
+ * ready first, and `agent/ready` stays the claim gate.
  * - An item blocked by an open item is {@link WorkOrder.held} ("held by
  *   DOR-x"); its blocker inherits the better of its own place and the blocked
  *   item's, through any depth.
  * - An item in a project that is not Started is held "waits for project
- *   <P>", unless it is Urgent or a release gate.
+ *   <P>", unless it is Urgent or a release gate. So is an item in a Started
+ *   project that waits on another open project; <P> is then the one in the way.
  * - An item or project carrying the configured `order.personLabel` is
  *   {@link WorkOrder.personal}: out of the agent order. Unset, nothing is.
  *
@@ -45,7 +54,7 @@
 import type { FlowConfig, OrderKeySchema, SizeOrderSchema } from './config-schema.ts';
 import { sizeOrdinal } from './dispatch-policy.ts';
 import { compareIdentifiers, issueNumber } from './identifiers.ts';
-import { rankProjects } from './project-order.ts';
+import { plainDate, rankProjects } from './project-order.ts';
 import { readinessOf } from './readiness.ts';
 import { labelsOf } from './work-item.ts';
 import type { ProjectInfo, WorkItem } from './work-item.ts';
@@ -111,7 +120,7 @@ export interface NeedsTriage {
   identifier: string;
   /** Title. */
   title: string;
-  /** What is missing: `priority`, `project`, `estimate`, `triage state`. */
+  /** What is missing: `priority`, `project`, `triage state`. A missing estimate is a readiness reason instead. */
   missing: string[];
 }
 
@@ -141,6 +150,10 @@ export interface ProjectEntry {
   why: OrderReason[];
   /** What a person should fix: "needs a priority", "over cap", "can't start: waits on <P>". */
   flags: string[];
+  /** Its target date, `YYYY-MM-DD`, when it has one: data only, it never moves the project. */
+  targetDate?: string;
+  /** The project waiting on this one whose place it took, when it inherited a better one. */
+  inheritsFrom?: string;
 }
 
 /** The ranked project lists. */
@@ -151,8 +164,12 @@ export interface ProjectRanking {
   next: ProjectEntry[];
   /** Paused and Backlog projects, in rank: shown only with `--all`. */
   later: ProjectEntry[];
+  /** Projects with `order.personLabel`, in rank: out of the agent order. */
+  personal: { id: string; name: string }[];
   /** Whole-list flags, e.g. "over cap: 9 Started, cap 6; lowest: P1, P2". */
   flags: string[];
+  /** Each project that waits on an open project, by id, to the names of the projects it waits on. */
+  waitsOn: ReadonlyMap<string, string>;
   /**
    * Each listed project's rank for the issue order's project key: its place in
    * `now`, then `next`, then `later` read as one list (1 is best). A project
@@ -168,7 +185,13 @@ export interface WorkOrder {
   /** One-line notices printed above the order, e.g. "Urgent below pins: DOR-1, DOR-2". Display only. */
   banners: string[];
   /** The project lists. */
-  projects: { now: ProjectEntry[]; next: ProjectEntry[]; later: ProjectEntry[]; flags: string[] };
+  projects: {
+    now: ProjectEntry[];
+    next: ProjectEntry[];
+    later: ProjectEntry[];
+    personal: ProjectRanking['personal'];
+    flags: string[];
+  };
   /** The issue order, best first. */
   issues: OrderedIssue[];
   /** Items being worked on now. */
@@ -256,9 +279,6 @@ const TYPE_RANK = new Map<string, number>([
 /** Plain names for each type rank, for the `why` list. */
 const TYPE_NAME = ['Bug', 'Improvement', 'Feature'];
 
-/** Month names for plain-words dates, so the text never depends on the machine's locale. */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /** One ranked candidate, with the tuple it sorts by. */
 interface Entry {
   /** The item. */
@@ -306,16 +326,6 @@ function dateKey(value: unknown): number {
   if (typeof value !== 'string') return NEUTRAL;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? NEUTRAL : ms;
-}
-
-/** A date in plain words, "Nov 27", with the year when it is not the year of `now`. */
-function plainDate(value: string, now: string): string {
-  const ms = Date.parse(value);
-  if (Number.isNaN(ms)) return value;
-  const date = new Date(ms);
-  const nowYear = new Date(Date.parse(now)).getUTCFullYear();
-  const day = `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`;
-  return date.getUTCFullYear() === nowYear ? day : `${day}, ${date.getUTCFullYear()}`;
 }
 
 /** Whether an item carries a label (exact, by group and name). */
@@ -533,7 +543,7 @@ function buildOrder(input: WorkOrderInput): Built {
   const config = input.config;
   const now = input.now;
   const projectById = new Map(projects.map((project) => [project.id, project]));
-  const ranking = rankProjects(projects, items, config);
+  const ranking = rankProjects(projects, items, config, now);
   const open = new Map(
     items.filter((item) => OPEN_CATEGORIES.has(item.stateCategory)).map((i) => [i.identifier, i])
   );
@@ -589,7 +599,6 @@ function buildOrder(input: WorkOrderInput): Built {
       if (typeof projectId !== 'string' && !(band !== null && ANY_PROJECT_BANDS.has(band))) {
         missing.push('project');
       }
-      if (sizeOrdinal(item.size) === undefined) missing.push('estimate');
       if (missing.length > 0 || band === null) {
         needsTriage.push({ identifier: item.identifier, title: item.title, missing });
         continue;
@@ -604,15 +613,16 @@ function buildOrder(input: WorkOrderInput): Built {
           });
           continue;
         }
-        if (status !== 'started') {
+        // A Started project that waits on another open project holds its
+        // issues too, named by the project in its way.
+        const waitsOn = status === 'started' ? ranking.waitsOn.get(projectId) : undefined;
+        if (status !== 'started' || waitsOn !== undefined) {
           if (openBlockers(item, open).length === 0) waiting.set(item.identifier, { item, band });
           else passThrough.set(item.identifier, item);
-        }
-        if (status !== 'started') {
           held.push({
             identifier: item.identifier,
             title: item.title,
-            reason: `waits for project ${projectName(projectId)}`,
+            reason: `waits for project ${waitsOn ?? projectName(projectId)}`,
           });
           continue;
         }
@@ -742,6 +752,7 @@ function buildOrder(input: WorkOrderInput): Built {
         now: ranking.now,
         next: ranking.next,
         later: ranking.later,
+        personal: ranking.personal,
         flags: ranking.flags,
       },
       issues,

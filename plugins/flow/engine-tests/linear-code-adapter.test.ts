@@ -146,10 +146,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 3.3.0 and all seven capabilities', () => {
+  it('declares contract 3.5.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('3.3.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.5.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -905,6 +905,27 @@ describe('applyWorkState', () => {
     });
   });
 
+  it('reclassifies: replaces type/*, drops a label, and adds an optional one only when the team has it (DOR-5069)', async () => {
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowWriteRead'
+        ? writeRead(call, ['type/idea', 'Feature', 'agent/ready', 'stage/execute'])
+        : okEnvelope({ issueUpdate: { success: true } })
+    );
+    await adapter.applyWorkState(STALE_ITEM, {
+      typeLabel: 'type/task',
+      dropLabels: ['Feature'],
+      optionalLabels: ['Improvement', 'NotATeamLabel'],
+    });
+    expect(calls[1].variables.input).toEqual({
+      labelIds: [
+        labelId('agent/ready'),
+        labelId('stage/execute'),
+        labelId('type/task'),
+        labelId('Improvement'),
+      ],
+    });
+  });
+
   it('works on the recorded answer exactly as Linear gave it', async () => {
     // Purpose: no editing of the fixture at all: the real issue (claimed,
     // started) moves to verify, keeping every label it had but its stage.
@@ -1156,6 +1177,21 @@ describe('createItem', () => {
       projectId: 'proj-1',
       priority: 4,
     });
+  });
+
+  it('adds an optional label only when the team has it, and never refuses one it lacks (DOR-5069)', async () => {
+    const { adapter, calls } = build(routeCreate());
+    await adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: ['type/task'],
+      optionalLabels: ['Bug', 'NotATeamLabel'],
+    });
+    const create = calls.find((call) => call.operation === 'FlowCreateItem');
+    expect((create?.variables.input as Record<string, unknown>).labelIds).toEqual([
+      createLabelId('type/task'),
+      createLabelId('Bug'),
+    ]);
   });
 
   it('finds a project by id through the id-filtered read', async () => {
@@ -1729,6 +1765,59 @@ describe('the work order reads (contract 3.2.0)', () => {
         blockedBy: ['proj-1'],
       },
     ]);
+  });
+
+  it('warns once when a project has more relations or labels than one read returns', async () => {
+    const full = structuredClone(PROJECT_INFO_PAGE);
+    const [first, second] = full.team.projects.nodes as {
+      relations: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+      inverseRelations: { nodes: unknown[] };
+      labels: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+    }[];
+    first.relations.nodes = Array.from({ length: 10 }, (_, i) => ({
+      type: 'related',
+      anchorType: 'end',
+      relatedAnchorType: 'start',
+      project: { id: 'proj-1' },
+      relatedProject: { id: `proj-x${i}` },
+    }));
+    first.relations.pageInfo = { hasNextPage: true };
+    second.labels.nodes = Array.from({ length: 20 }, (_, i) => ({ name: `l${i}`, parent: null }));
+    second.labels.pageInfo = { hasNextPage: true };
+    const { adapter, warnings } = build((call) =>
+      call.operation === 'FlowProjectInfo' ? okEnvelope(full) : snapshotRoute(call)
+    );
+    await adapter.getBacklogSnapshot();
+    const lines = warnings.filter((w) => /than flow reads/.test(w));
+    expect(lines).toEqual([
+      'Linear has more relations or labels for Another project, Example project than flow reads (10 relations each way, 20 labels), so a project dependency or label may be missing',
+    ]);
+  });
+
+  it('does not warn when nothing was cut off, even on a page that is exactly full', async () => {
+    const full = structuredClone(PROJECT_INFO_PAGE);
+    const [first] = full.team.projects.nodes as {
+      relations: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+    }[];
+    first.relations.nodes = Array.from({ length: 10 }, (_, i) => ({
+      type: 'related',
+      anchorType: 'end',
+      relatedAnchorType: 'start',
+      project: { id: 'proj-1' },
+      relatedProject: { id: `proj-x${i}` },
+    }));
+    first.relations.pageInfo = { hasNextPage: false };
+    for (const route of [
+      snapshotRoute,
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo' ? okEnvelope(full) : snapshotRoute(call),
+    ]) {
+      const { adapter, calls, warnings } = build(route);
+      await adapter.getBacklogSnapshot();
+      expect(warnings.filter((w) => /than flow reads/.test(w))).toEqual([]);
+      const query = calls.find((call) => call.operation === 'FlowProjectInfo')?.query ?? '';
+      expect(query).toMatch(/relations\(first: 10\) \{ pageInfo \{ hasNextPage \}/);
+    }
   });
 
   it('reads who pinned an item only for items with the pin label', async () => {

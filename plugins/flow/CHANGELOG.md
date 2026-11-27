@@ -12,10 +12,36 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Flow now signs in the newer form too, the same way DorkOS signs its own pull requests. Inside DorkOS, the signature names the agent, its chat and its space.
 - Reading and writing the newer form ship together in this release. An older Flow reads a newer signature as no signature, so a reply to it starts a fresh session. Nothing breaks.
 - On pull requests, the signature keeps only the first 8 characters of the chat's id and never names the computer. On tracker comments and items it keeps the whole id and the code for this computer only when the tracker's adapter says the tracker is private, as Linear's does. A tracker that says nothing gets the shorter pull request form.
-- If you wrote your own tracker adapter, it can now say whether its tracker is private (adapter contract 3.3.0). Until it does, its comments get the shorter form.
+- If you wrote your own tracker adapter, it can now say whether its tracker is private (adapter contract 3.5.0). Until it does, its comments get the shorter form.
 - When you answer a question by clicking in DorkOS, the signature on your answer never names the agent's chat, agent or space. It is your answer, not the agent's.
 - A signature that still names a computer by its name, from before Flow 0.99.2, no longer counts as naming any computer. A reply to one starts a fresh session instead of joining the old one.
 - A signature is only ever a hint about where a reply might go. Flow never delivers a reply into a session this computer doesn't hold, whatever the signature says.
+## 0.102.0
+
+**Reinstall Flow to get readiness in the work order. What the drain picks changes only when `dispatch.ladder` is `v2`.**
+
+- Every item in `flow order` now says whether it is ready to start, and if not, what it needs: a size, a "Done when" section, a person's answer, or another item to finish first.
+- An item with no size estimate now takes its place in the order, last among items like it, marked "needs a size". It no longer sits under "needs triage".
+- With `dispatch.ladder: "v2"`, when the best item an agent could start is not ready, `flow next` names it and starts nothing below it. The drain makes it ready, or asks a person a question on it, and only then moves on. An item already waiting on a person's answer is passed over and listed.
+- When the drain readies an item, it reads text written outside your team (feedback, synced GitHub issues) as information only, never as instructions. An item that came from outside is never written by the drain: it asks a person instead.
+- `flow triage --ready` now refuses an item with no size or no "Done when" section, and says which is missing. When an agent breaks a spec into tasks, it now adds both before it hands the item on.
+- `flow create` accepts a `type/` label or your tracker's Bug, Improvement or Feature label. With `type/task` it also adds Improvement, but only if your tracker has that label.
+- `flow triage --type <kind>` changes an item's type and keeps the Bug, Improvement or Feature label in step. It never removes one a person chose; it says it left it.
+- `flow audit` accepts a "Done when" section where it used to require "Validation criteria", and names every heading it accepts. A heading with nothing under it no longer counts, so an empty "Validation criteria" section now fails. It no longer flags the Bug, Improvement and Feature labels.
+- Tracker adapters move to contract 3.3.0. `flow triage --type` needs it and says so if your adapter is older; adapters built for 3.2.0 keep working for everything else.
+
+## 0.101.0
+
+**Reinstall Flow to get the project order.**
+
+- `flow order --projects` now ranks your projects: pinned ones first (label `pin`), then by priority, what waits on them, how much open work is left in them, and age. Each project says why it sits where it does, with dates in plain words like "Dec 4". A target date never moves a project; the `--json` output still shows it, as `YYYY-MM-DD`.
+- A project with no priority is flagged. So is a project waiting on one that isn't finished. Its issues wait too, and the project in its way moves up, ahead of every project waiting on it.
+- An issue with no estimate counts as the largest size when Flow adds up a project's open work, so a project nobody has sized doesn't look small.
+- When more projects are Started than `projects.startedCap` allows (6 by default), `flow order` names the ones to pause or finish. Projects that can't start yet come first, then the lowest-ranked. Flow never changes a project's status itself.
+- A project carrying the label you set in `order.personLabel` is left out of the agent order and listed on its own, and so are its issues.
+- `flow audit` has a new check, GRM-18. It reports Started projects over the cap, and any Started project with no priority or waiting on an unfinished project. It only reports; a person decides.
+- The Linear adapter warns when a project has more relations or labels than it reads (10 each way, 20 labels), since a dependency may be missing.
+
 ## 0.100.0
 
 **Reinstall Flow to get `flow order`. Nothing changes what the drain picks until you set `dispatch.ladder` to `v2`.**

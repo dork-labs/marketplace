@@ -11,129 +11,19 @@
  * has not been triaged. The buckets themselves are explained once, in the
  * triaging-work skill.
  *
- * **Sections.** A section is a markdown heading (`#` to `######`) or a bold
- * label line (`**Proof:**`), matched without case, with a trailing colon or
- * not, and it must hold some text. A heading section runs to the next heading
- * of its own level or higher (a sub-heading is part of it); a bold-label
- * section runs to the next heading. Either also ends at the next proof or
- * done-when label. Lines inside a code fence are text, never headings. Proof
- * also reads as "Evidence"; done-when also reads as "Definition of done",
- * "Acceptance criteria" or "Validation criteria" (the section a ready item
- * needs anyway).
+ * **Sections** are read by `sections.ts`, the one reader the work order's
+ * readiness and the groom's GRM-5 share: a proof section and a done-when
+ * section, each holding some text.
  *
  * @module @dorkos/flow/cli/create-fields
  */
 
 import { UsageError } from '../errors.ts';
+import { hasDoneWhen, hasProof } from '../sections.ts';
 import type { NewItem } from '../tracker/types.ts';
-
-/** The headings that count as the proof section, normalized. */
-const PROOF_NAMES = ['proof', 'evidence'];
-
-/** The headings that count as the done-when section, normalized. */
-const DONE_NAMES = [
-  'done when',
-  'definition of done',
-  'acceptance criteria',
-  'validation criteria',
-];
-
-/** Every section name a section ends at. */
-const SECTION_NAMES = [...PROOF_NAMES, ...DONE_NAMES];
 
 /** The t-shirt sizes a tracker without numeric estimates uses, as `WorkItem.size`. */
 const TSHIRT = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
-
-/** A markdown heading line, `#` to `######`. */
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
-
-/** A bold label line, `**Proof:** text` or `__Proof__`. */
-const BOLD_LABEL = /^\s{0,3}(?:\*\*|__)(.+?)(?:\*\*|__)\s*:?\s*(.*)$/;
-
-/** A code fence's opening or closing line. */
-const FENCE = /^\s{0,3}(```|~~~)/;
-
-/** A heading's name, normalized: lower case, single spaces, no trailing colon. */
-function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[-_]+/g, ' ').replace(/:\s*$/, '').replace(/\s+/g, ' ').trim();
-}
-
-/** One line of a description, read for sections. */
-interface Line {
-  /** The line's text. */
-  text: string;
-  /** Its heading level (1-6), 7 for a bold label, or `undefined` for plain text. */
-  level?: number;
-  /** The heading's normalized name. */
-  name?: string;
-  /** Text after a bold label on its own line. */
-  rest?: string;
-}
-
-/** Read each line once: headings and labels outside code fences, everything else text. */
-function readLines(description: string): Line[] {
-  let fenced = false;
-  return description.split('\n').map((text) => {
-    if (FENCE.test(text)) {
-      fenced = !fenced;
-      return { text };
-    }
-    if (fenced) return { text };
-    const heading = HEADING.exec(text);
-    if (heading)
-      return { text, level: heading[1].length, name: normalizeName(heading[2]), rest: '' };
-    const bold = BOLD_LABEL.exec(text);
-    if (bold) return { text, level: 7, name: normalizeName(bold[1]), rest: bold[2] };
-    return { text };
-  });
-}
-
-/**
- * Whether a description holds a non-empty section under one of the names.
- *
- * @param description - The description, before it is signed.
- * @param names - The accepted section names, normalized.
- * @returns `true` when one of those sections has text in it.
- */
-export function hasSection(description: string, names: readonly string[]): boolean {
-  const lines = readLines(description);
-  for (let i = 0; i < lines.length; i += 1) {
-    const start = lines[i];
-    if (start.level === undefined || !names.includes(start.name ?? '')) continue;
-    let body = start.rest ?? '';
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const line = lines[j];
-      const heading = line.level !== undefined && line.level <= 6;
-      if (heading && (line.level as number) <= start.level) break;
-      if (line.level !== undefined && SECTION_NAMES.includes(line.name ?? '')) break;
-      // A sub-heading belongs to the section but is not its text; any other
-      // bold line ("**Seen in:** the log") is.
-      if (!heading) body += line.text;
-    }
-    if (body.trim() !== '') return true;
-  }
-  return false;
-}
-
-/**
- * Whether a description has its proof section.
- *
- * @param description - The description, before it is signed.
- * @returns `true` when it does.
- */
-export function hasProof(description: string): boolean {
-  return hasSection(description, PROOF_NAMES);
-}
-
-/**
- * Whether a description has its done-when section.
- *
- * @param description - The description, before it is signed.
- * @returns `true` when it does.
- */
-export function hasDoneWhen(description: string): boolean {
-  return hasSection(description, DONE_NAMES);
-}
 
 /**
  * `--priority` as 1-4, when given and well formed.
@@ -209,7 +99,7 @@ export function missingFields(draft: Draft): string[] {
     );
   }
   if (!draft.labels.some((label) => label.startsWith('type/'))) {
-    missing.push('a type (--label type/<kind>)');
+    missing.push('a type (--label type/<kind>, or Bug, Improvement or Feature)');
   }
   if (draft.priority === undefined) {
     missing.push('a priority (--priority 1 or 2 Must, 3 Should, 4 Could)');

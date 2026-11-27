@@ -6,12 +6,19 @@
  *
  * - Files only a triaged item (DOR-4546). Refuses (exit 2) before any tracker
  *   call, naming every problem in one message: a missing title, description,
- *   `type/*` label, MoSCoW priority 1-4 (0 "none" is refused), size or
+ *   type, MoSCoW priority 1-4 (0 "none" is refused), size or
  *   project, a missing proof or done-when section in the description
  *   (`create-fields.ts`), and every malformed value: an `agent/*` label other
  *   than `agent/from-outside` (readiness is triage's decision), two labels of
  *   one group, a bad priority, size, key or `--not-duplicate-of`, and a title
  *   ending in a capture tag (`[owner/name#N]`) without `agent/from-outside`.
+ * - The type is a `type/*` label or a bare `Bug`, `Improvement` or `Feature`
+ *   (any case, written once in the tracker's spelling; `type-labels.ts`). A
+ *   bare label brings its `type/*` (`Bug` and `Improvement`: `type/task`;
+ *   `Feature`: `type/idea`). `type/task` also gets `Improvement`, only when the
+ *   team has that label (`optionalLabels`); `type/idea`, capture's
+ *   placeholder, gets nothing. Two bare types, or a bare label and a `type/*`
+ *   that name different types, are refused.
  *   There is no way around it: an item that cannot say these is not ready to
  *   file.
  * - Needs the `createItem` and `getBacklogSnapshot` capabilities (exit 3
@@ -49,12 +56,13 @@
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
-import { nearMatches, titleWords, type NearMatch } from '../duplicate-title.ts';
-import { ConfigError, EXIT } from '../errors.ts';
-import { requireCapabilities } from '../tracker/load.ts';
-import type { Capability, CodeAdapter, NewItem } from '../tracker/types.ts';
+import { CAPTURE_TAG, nearMatches, titleWords, type NearMatch } from '../duplicate-title.ts';
+import { EXIT } from '../errors.ts';
+import { requireCapabilities, requireContract } from '../tracker/load.ts';
+import type { Capability, NewItem } from '../tracker/types.ts';
 import { AGENT_FROM_OUTSIDE, labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { resolveTypes } from '../type-labels.ts';
 import { missingFields, notDuplicateOf, priorityOf, refusal, sizeOf } from './create-fields.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
 import { signBody, trackerVisibility } from './provenance.ts';
@@ -78,13 +86,6 @@ const KEY_MAX = 200;
 export function keyMarker(key: string): string {
   return `<!-- flow-create:key=${key} -->`;
 }
-
-/**
- * A title ending in a capture tag, `[owner/name#N]` (DOR-3258): the mark of an
- * item captured from an outside issue. Matched loosely, so a near-tag fails
- * closed too.
- */
-const CAPTURE_TAG = /\[[^[\]]*\/[^[\]]*#\d+\]\s*$/;
 
 /**
  * The labels, each once, recording a problem when one is empty, `agent/*`
@@ -195,24 +196,6 @@ function nearDuplicate(matches: readonly NearMatch[]): VerbResult {
   };
 }
 
-/**
- * Refuse a size an adapter below contract 3.1.0 would drop.
- *
- * @param adapter - The loaded adapter.
- * @throws {ConfigError} Naming the version, when it is older.
- */
-function requireSizeContract(adapter: CodeAdapter): void {
-  const version = adapter.contractVersion;
-  if (version === undefined) return;
-  const [major, minor] = version.split('.').map(Number);
-  if (major > SIZE_CONTRACT[0] || (major === SIZE_CONTRACT[0] && minor >= SIZE_CONTRACT[1])) {
-    return;
-  }
-  throw new ConfigError(
-    `the tracker adapter targets contract ${version}, which cannot file an item with a size (contract ${SIZE_CONTRACT.join('.')}.0); regenerate it with the building-adapters skill`
-  );
-}
-
 /** `--key`, when given and well formed. */
 function keyOf(ctx: VerbContext, problems: string[]): string | undefined {
   const raw = ctx.args.flags.key;
@@ -257,7 +240,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const scratch = given?.scratch;
   const text = given?.text.trimEnd();
   const description = text === undefined || text.trim() === '' ? undefined : text;
-  const labels = labelList(ctx, problems);
+  // Either type vocabulary is accepted (DOR-5069).
+  const types = resolveTypes(labelList(ctx, problems));
+  problems.push(...types.problems);
+  const labels = types.labels;
   if (CAPTURE_TAG.test(title) && !labels.includes(AGENT_FROM_OUTSIDE)) {
     problems.push(
       `a title ending in a capture tag ("${title.match(CAPTURE_TAG)?.[0]}") is an item captured from outside the team: add --label ${AGENT_FROM_OUTSIDE}`
@@ -291,7 +277,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const adapter = await ctx.adapter();
   const needed: Capability[] = ['createItem', 'getBacklogSnapshot'];
   requireCapabilities(adapter, needed);
-  requireSizeContract(adapter);
+  requireContract(adapter, SIZE_CONTRACT, 'file an item with a size');
 
   const parts = [description];
   parts.push(duplicateLine(title, checked));
@@ -306,6 +292,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       trackerVisibility(adapter)
     ),
     labels,
+    ...(types.optional.length === 0 ? {} : { optionalLabels: types.optional }),
     project,
     priority,
     size,

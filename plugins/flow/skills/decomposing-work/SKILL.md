@@ -80,12 +80,12 @@ If Task tools are absent, use the JSON fallback in runtime guidance; skip API pr
 - `flow stage <id> decompose --checkpoint-file <f>`.
 - Mirror the **active phase** as a plan checklist generated from `03-tasks.json`; never
   hand-edit it, regenerate it.
-- Optional breadcrumb: `flow comment`.
 - **Hand it on** (and promoted sub-issues) at `stage/execute`, where the next session
-  starts. In a drain run: `flow stage <id> execute` and go on. Otherwise
-  `flow release <id> --stage execute` if this session claimed it, else
-  `flow triage <id> --ready --stage execute`. Without `agent/ready` dispatch never picks
-  it up; DECOMPOSE is the second readiness producer after TRIAGE.
+  starts. First make it ready: a `## Done when` pointing at the spec's acceptance
+  criteria and `03-tasks.json`, and a size if it has none. In a drain run:
+  `flow stage <id> execute` and go on. Otherwise `flow release <id> --stage execute` if
+  this session claimed it, else `flow triage <id> --ready --stage execute`, which
+  refuses an item missing either. DECOMPOSE is the second readiness producer after TRIAGE.
 
 No linked item or no tracker: skip the mirror; the files on disk are the result.
 

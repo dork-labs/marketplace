@@ -7,6 +7,9 @@
  *   when that is `auto`. GRM-16 (an expired Could) measures against the run's clock
  *   and reads `groom.couldExpiryDays` and `groom.neverExpireLabels`. GRM-17 (a pin
  *   with no reason, or set by someone else) reads `order.pinSetters`.
+ *   GRM-18 (Started projects over the cap, unprioritised or waiting) reads the pull's
+ *   `projectInfo`, `projects.startedCap` and `order.personLabel`; with no `projectInfo`
+ *   it checks nothing.
  * - Human output: one block per failing invariant, titled from the oracle's
  *   own invariant list, one line per offending item.
  * - `--json`: the oracle's `{ ok, failures }`.
@@ -65,6 +68,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     couldExpiryDays: project.loaded.config.groom.couldExpiryDays,
     neverExpireLabels: project.loaded.config.groom.neverExpireLabels,
     pinSetters: project.loaded.config.order.pinSetters,
+    ...(Array.isArray(snapshot.projectInfo) ? { projects: snapshot.projectInfo } : {}),
+    startedCap: project.loaded.config.projects.startedCap,
+    ...(project.loaded.config.order.personLabel === undefined
+      ? {}
+      : { personLabel: project.loaded.config.order.personLabel }),
   });
   const verdict = verdictOf(results);
   return {

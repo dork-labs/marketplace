@@ -25,8 +25,16 @@
  * `--stage` without `--ready` (or `--ready` without it), an empty question, a
  * stage that is not in config or has no label, a closed item, and an item an
  * agent is on (started, or `agent/claimed`), and an item carrying
- * `agent/from-outside`, which only a person or the PM clears. Setting the type, priority or
- * size is not this verb's job: no adapter capability writes them.
+ * `agent/from-outside`, which only a person or the PM clears. `--ready` also
+ * refuses an item with no size or no done-when section (`readiness.ts`,
+ * DOR-5069): an agent could not start it, at any stage. Priority and size are not this
+ * verb's job: no adapter capability writes them.
+ *
+ * `--type <kind>` reclassifies the item in the same write (`type-labels.ts`):
+ * the `type/*` label is replaced, a bare `Bug`, `Improvement` or `Feature`
+ * label flow implied for the old type is swapped for the one the new type
+ * implies (added only when the team has it), and one a person set that names
+ * another type is left, with a `note` in the output.
  *
  * `--dry-run` prints the change and writes nothing.
  *
@@ -34,6 +42,7 @@
  */
 
 import { PreconditionError, UsageError } from '../errors.ts';
+import { requireContract } from '../tracker/load.ts';
 import {
   AGENT_CLAIMED,
   AGENT_NEEDS_INPUT,
@@ -41,6 +50,8 @@ import {
   projectionFor,
   type WorkStateChange,
 } from '../work-state.ts';
+import { readinessOf } from '../readiness.ts';
+import { FLOW_TYPES, typeChange } from '../type-labels.ts';
 import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody, trackerVisibility, unsignedBody } from './provenance.ts';
@@ -54,6 +65,9 @@ import {
   runFor,
 } from './work-write.ts';
 import { dropEndedQuestion, noteDroppedAnswer } from './question-write.ts';
+
+/** The first contract version whose `applyWorkState` takes a type change (`--type`). */
+const TYPE_CONTRACT = [3, 3] as const;
 
 /** How many of the latest comments are read to spot a retried question. */
 const RECENT_COMMENTS = 10;
@@ -81,6 +95,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new UsageError('--ready needs --stage <stage>: a ready item says where to resume');
   }
   if (!ready && stage !== undefined) throw new UsageError('--stage goes with --ready only');
+  const rawType = ctx.args.flags.type;
+  const kind = typeof rawType === 'string' ? rawType.trim() : undefined;
+  if (kind !== undefined && !FLOW_TYPES.includes(kind)) {
+    throw new UsageError(`--type takes one of ${FLOW_TYPES.join(', ')}, not "${kind}"`);
+  }
   // Read the question only once the flags agree: reading a scratch file adds
   // the git-exclude line, and a refused combination must touch nothing.
   const question = flagText(ctx, { inline: 'park', file: 'question-file', what: 'question' });
@@ -91,6 +110,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ctx,
     ready ? ['getItem', 'applyWorkState'] : ['getItem', 'applyWorkState', 'comment']
   );
+  // A reclassification writes typeLabel, dropLabels and optionalLabels, which
+  // an adapter before contract 3.3.0 would drop without a word.
+  if (kind !== undefined) requireContract(adapter, TYPE_CONTRACT, 'reclassify an item (--type)');
   const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
   requireOpen(item, 'triage');
   if (item.stateCategory === 'started' || item.labels.includes(AGENT_CLAIMED)) {
@@ -98,11 +120,30 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       `${identifier} is being worked (${item.stateCategory === 'started' ? 'started' : AGENT_CLAIMED}), so "flow triage" leaves it alone`
     );
   }
-  const change: WorkStateChange = ready
-    ? projectionFor({ type: 'release', to: 'ready', stage }, { stages })
-    : projectionFor({ type: 'needs-input' }, { stages });
+  const retyped = kind === undefined ? null : typeChange(item.labels, kind);
+  const change: WorkStateChange = {
+    ...(ready
+      ? projectionFor({ type: 'release', to: 'ready', stage }, { stages })
+      : projectionFor({ type: 'needs-input' }, { stages })),
+    ...(retyped?.change ?? {}),
+  };
   // Before the question is posted, so a refused park writes nothing at all.
   requireNotFromOutside(item, change);
+  // --ready never readies an item an agent could not start: no size, or no
+  // done-when (DOR-5069), at any stage, so it agrees with the work order's
+  // readiness (DECOMPOSE writes both before it hands an item on). An open
+  // question (agent/needs-input) is what --ready answers, and blockers are the
+  // groom's to see, so neither counts here.
+  if (ready) {
+    const missing = readinessOf(item, { open: new Map() }).reasons.filter(
+      (reason) => !reason.startsWith('needs a decision')
+    );
+    if (missing.length > 0) {
+      throw new PreconditionError(
+        `${identifier} is not ready (${missing.join(', ')}): fill it in, or park it with a question for the person who can`
+      );
+    }
+  }
   // A new park on its own question: an answer left on the run belongs to no park,
   // and must not resume this one (DOR-3777). The drain keeps its own.
   if (!ready && !ctx.dryRun && !item.labels.includes(AGENT_NEEDS_INPUT)) {
@@ -145,6 +186,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       decision: ready ? 'ready' : 'park',
       change,
       commented,
+      ...(retyped?.note ? { note: retyped.note } : {}),
     },
     text: ready
       ? `${verb} ${identifier} ready at ${String(change.stageLabel)}.`

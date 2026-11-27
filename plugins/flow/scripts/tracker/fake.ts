@@ -50,7 +50,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '3.1.0';
+export const FAKE_CONTRACT_VERSION = '3.3.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -85,7 +85,10 @@ export const FAKE_STATES: readonly FakeState[] = [
 
 /**
  * The fake team's labels: the generic families flow uses, as the recorded
- * Linear team has them. A seeded item's own labels are added to these.
+ * Linear team has them. A seeded item's own labels are added to these. The
+ * bare `Bug`, `Improvement` and `Feature` labels are left out on purpose: the
+ * default fake team is one that deleted them, and a test that wants them adds
+ * them through `backlog.labels`.
  */
 export const FAKE_TEAM_LABELS: readonly string[] = [
   'agent/ready',
@@ -493,6 +496,10 @@ export class FakeTracker {
         `the ${this.team.key ?? 'fake'} team has no "${unknown}" label; create it in the tracker (flow never creates labels)`
       );
     }
+    // An optional label is added only when the team has it, as the Linear adapter does.
+    for (const label of spec.optionalLabels ?? []) {
+      if (known.has(label) && !labels.includes(label)) labels.push(label);
+    }
     // One label per group, as Linear enforces for its label groups.
     const groups = new Map<string, string>();
     for (const label of labels) {
@@ -610,8 +617,12 @@ export class FakeTracker {
   private applyWorkState(item: WorkItem, change: WorkStateChange): void {
     this.read();
     const current = this.find(item.identifier);
-    const next = labelsAfterChange(current.labels, change);
     const known = this.teamLabels();
+    // An optional label the team lacks is skipped, as the Linear adapter does.
+    const optional = new Set(change.optionalLabels ?? []);
+    const next = labelsAfterChange(current.labels, change).filter(
+      (label) => !optional.has(label) || known.has(label) || current.labels.includes(label)
+    );
     // Only a label this change ADDS must be the team's: an item keeps whatever it
     // already carries, as the Linear adapter keeps an issue's own labels.
     const unknown = next.find((label) => !known.has(label) && !current.labels.includes(label));

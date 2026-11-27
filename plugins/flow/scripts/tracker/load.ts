@@ -288,6 +288,31 @@ export function requireCapabilities(adapter: CodeAdapter, needed: readonly Capab
 }
 
 /**
+ * Refuse, before anything runs, when the adapter's code targets a contract
+ * older than the one a verb's write needs (its `CONTRACT_VERSION`, which the
+ * loader sets as {@link CodeAdapter.contractVersion}). An adapter flow did not
+ * load carries no version and is taken to be current.
+ *
+ * @param adapter - The loaded adapter.
+ * @param minimum - The first contract version, `[major, minor]`, that can do it.
+ * @param what - What the verb would ask of it, in plain words: "file an item with a size".
+ * @throws {ConfigError} Naming the adapter's version and the one needed.
+ */
+export function requireContract(
+  adapter: CodeAdapter,
+  minimum: readonly [number, number],
+  what: string
+): void {
+  const version = adapter.contractVersion;
+  if (version === undefined) return;
+  const [major, minor] = version.split('.').map(Number);
+  if (major > minimum[0] || (major === minimum[0] && minor >= minimum[1])) return;
+  throw new ConfigError(
+    `the tracker adapter targets contract ${version}, which cannot ${what} (contract ${minimum.join('.')}.0); regenerate it with the building-adapters skill`
+  );
+}
+
+/**
  * The real adapter factory the `flow` script wires: find the project's roots,
  * load and validate its config, then load the adapter's code over the `cli`
  * transport. Config warnings go to stderr.

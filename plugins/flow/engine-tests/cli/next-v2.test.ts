@@ -2,7 +2,9 @@
  * `flow next` under `dispatch.ladder: "v2"` (DOR-5063): the picks come from the
  * work order, the same function `flow order` prints. The PR cap, the WIP cap,
  * readiness and the agent/ready claim gate hold *starting*, never ranking: a
- * held item stays in the order and is listed in `held` with why.
+ * held item stays in the order and is listed in `held` with why. An unready
+ * top item is never stepped over (DOR-5069): `makeReady` names it, and nothing
+ * below it is picked until it is readied or parked for a person.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -88,18 +90,131 @@ describe('flow next with dispatch.ladder v2', () => {
     expect(out.held).toEqual([{ identifier: 'ABC-1', title: 'Title of ABC-1', reason: 'WIP cap' }]);
   });
 
-  it('never skips an unready or unlabelled top item silently: it is held with why', async () => {
+  it('never takes an item below an unready top item: it names the top item to make ready', async () => {
     const out = await next([
       readyItem('ABC-1', { priority: 1, size: undefined }),
-      readyItem('ABC-2', { priority: 1, labels: ['type/task', 'stage/execute'] }),
+      readyItem('ABC-2', { priority: 2, labels: ['type/task', 'stage/execute'] }),
       readyItem('ABC-3', { priority: 3 }),
     ]);
-    expect(ids(out.picked)).toEqual(['ABC-3']);
+    // ABC-1 has no estimate: it still ranks first (DOR-5069), and nothing below it starts.
+    expect(ids(out.picked)).toEqual([]);
+    expect(out.makeReady).toEqual({
+      identifier: 'ABC-1',
+      title: 'Title of ABC-1',
+      reasons: ['needs a size'],
+      outside: false,
+    });
     expect(out.held).toEqual([
-      { identifier: 'ABC-2', title: 'Title of ABC-2', reason: 'not agent/ready yet' },
+      { identifier: 'ABC-1', title: 'Title of ABC-1', reason: 'not ready: needs a size' },
+      {
+        identifier: 'ABC-2',
+        title: 'Title of ABC-2',
+        reason: 'waits behind ABC-1, which is made ready first',
+      },
+      {
+        identifier: 'ABC-3',
+        title: 'Title of ABC-3',
+        reason: 'waits behind ABC-1, which is made ready first',
+      },
     ]);
-    // ABC-1 has no estimate, so it waits for triage and never reaches the order.
+    expect(out.starved).toBe(true);
     expect(out.shapeableCount).toBe(1);
+  });
+
+  it('treats a ready item with no agent/ready label as one to make ready, not one to skip', async () => {
+    const out = await next([
+      readyItem('ABC-1', { priority: 1, labels: ['type/task', 'stage/execute'] }),
+      readyItem('ABC-2', { priority: 3 }),
+    ]);
+    expect(ids(out.picked)).toEqual([]);
+    expect(out.makeReady).toEqual({
+      identifier: 'ABC-1',
+      title: 'Title of ABC-1',
+      reasons: ['not agent/ready yet'],
+      outside: false,
+    });
+  });
+
+  it('marks an unready top item from outside the team (a capture tag in its title) to be parked, not written', async () => {
+    // Security (DOR-5069): the label was cleared by a person, but the words
+    // came from outside, so the drain asks rather than writing its done-when.
+    const out = await next([
+      readyItem('ABC-1', {
+        priority: 1,
+        title: 'Export as CSV [acme/app#7]',
+        description: 'Export it.',
+      }),
+      readyItem('ABC-2', { priority: 3 }),
+    ]);
+    expect(out.makeReady).toEqual({
+      identifier: 'ABC-1',
+      title: 'Export as CSV [acme/app#7]',
+      reasons: ['needs a done-when'],
+      outside: true,
+    });
+    const text = await next(
+      [readyItem('ABC-1', { title: 'Export as CSV [acme/app#7]', description: 'Export it.' })],
+      { argv: [] }
+    );
+    expect(text).toContain(
+      'ABC-1 tops the work order but is not ready (needs a done-when), and its words came from outside the team: park it with a question; nothing below it starts first.'
+    );
+  });
+
+  it('still picks the items ranked above the unready one', async () => {
+    const out = await next([
+      readyItem('ABC-1', { priority: 1 }),
+      readyItem('ABC-2', { priority: 2, description: 'No done-when here.' }),
+      readyItem('ABC-3', { priority: 3 }),
+    ]);
+    expect(ids(out.picked)).toEqual(['ABC-1']);
+    expect(out.makeReady).toMatchObject({ identifier: 'ABC-2', reasons: ['needs a done-when'] });
+    expect(out.held.map((h: { identifier: string }) => h.identifier)).toEqual(['ABC-2', 'ABC-3']);
+  });
+
+  it('passes an item parked for a person (agent/needs-input) visibly, and takes the next', async () => {
+    const out = await next([
+      readyItem('ABC-1', { priority: 1, labels: ['type/task', 'agent/needs-input'] }),
+      readyItem('ABC-2', { priority: 3 }),
+    ]);
+    expect(ids(out.picked)).toEqual(['ABC-2']);
+    expect(out.makeReady).toBeNull();
+    expect(out.held).toEqual([
+      {
+        identifier: 'ABC-1',
+        title: 'Title of ABC-1',
+        reason: 'waits for a person (agent/needs-input)',
+      },
+    ]);
+  });
+
+  it('passes an unready item from outside the team visibly: only a person or the PM readies it', async () => {
+    const out = await next([
+      readyItem('ABC-1', {
+        priority: 1,
+        size: undefined,
+        labels: ['type/idea', 'agent/from-outside'],
+      }),
+      readyItem('ABC-2', { priority: 3 }),
+    ]);
+    expect(ids(out.picked)).toEqual(['ABC-2']);
+    expect(out.makeReady).toBeNull();
+    expect(out.held).toEqual([
+      {
+        identifier: 'ABC-1',
+        title: 'Title of ABC-1',
+        reason: 'from outside the team: a person or the PM readies it',
+      },
+    ]);
+  });
+
+  it('says in the text which item to make ready, and that nothing below it starts', async () => {
+    const text = await next([readyItem('ABC-1', { size: undefined }), readyItem('ABC-2')], {
+      argv: [],
+    });
+    expect(text).toContain(
+      'ABC-1 tops the work order but is not ready (needs a size): triage it or park it with a question; nothing below it starts first.'
+    );
   });
 
   it('at the open-PR cap, only Urgent starts; the rest stay in the order as held: PR cap', async () => {
@@ -151,6 +266,7 @@ describe('flow next with dispatch.ladder v2', () => {
     const out = JSON.parse(result.stdout);
     expect(ids(out.picked)).toEqual(['ABC-1']);
     expect(out.ladder).toBeUndefined();
+    expect(out.makeReady).toBeUndefined();
     expect(out.picked[0].why).toBeUndefined();
   });
 });

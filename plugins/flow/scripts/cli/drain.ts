@@ -102,6 +102,7 @@ import {
 import {
   gatherAssignmentInput,
   liveCounts,
+  makeReadyLine,
   noAccountMessage,
   planNext,
   restartRank,
@@ -688,6 +689,9 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
             : `The open PRs could not be counted (${plan.prCap.error}), so only urgent work starts.`
         );
       }
+      // An unready top item (dispatch.ladder v2) holds everything below it:
+      // the flow-drain skill's tick triages or parks it (DOR-5069).
+      if (plan.order?.makeReady) planNotes.push(makeReadyLine(plan.order.makeReady));
       const accounts = plan.assignment?.accounts ?? [];
       const picks = plan.picked.map((item, i) => {
         const pick = plan.accounts?.[i]?.pick ?? null;

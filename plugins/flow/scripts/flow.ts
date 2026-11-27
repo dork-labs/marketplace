@@ -568,7 +568,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'triage',
     summary: 'Finish a triage: ready an item, or park it with a question.',
     description:
-      'Write the outcome of a triage. --ready --stage <stage> makes the item unstarted with agent/ready and that stage/* label. --park <question> (or --question-file <path>) posts the question as a signed comment (not twice) and applies agent/needs-input; a question file under .dork/flow/tmp/ is removed once posted. Refuses before any write an item that is closed, being worked, or carries agent/from-outside (only a person or the PM clears that). Does not set type, priority or size.',
+      'Write the outcome of a triage. --ready --stage <stage> makes the item unstarted with agent/ready and that stage/* label. --park <question> (or --question-file <path>) posts the question as a signed comment (not twice) and applies agent/needs-input; a question file under .dork/flow/tmp/ is removed once posted. --type <kind> also reclassifies it: the type/* label is replaced, and a bare Bug, Improvement or Feature label flow implied is swapped too (added only when the team has it; one a person set is left, with a note). Refuses before any write an item that is closed, being worked, or carries agent/from-outside (only a person or the PM clears that), and --ready on an item with no size or no done-when section. Does not set priority or size.',
     common: ['project', 'dry-run', 'session'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [
@@ -590,6 +590,12 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'path',
         description: 'Park it, asking the question in this file.',
+      },
+      {
+        name: 'type',
+        kind: 'string',
+        value: 'kind',
+        description: 'Reclassify it: idea, research, hypothesis, task, monitor, signal or meta.',
       },
     ],
     load: () => import('./cli/triage.ts'),

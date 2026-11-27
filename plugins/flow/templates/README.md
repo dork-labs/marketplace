@@ -10,7 +10,8 @@ configured tracker.
 ## `records/` — tracker work-item bodies, by type
 
 The body a stage writes into a tracker work item. Each carries the canonical
-`## Validation criteria` and `## On Completion` sections — the engine reads them
+`## Validation criteria` and `## On Completion` sections — the engine reads them,
+and takes `## Done when` (what `flow create` asks for) as the validation criteria
 (DONE routing in `closing-work`, project-pulse continuity). Generalized from the
 legacy Linear-loop record templates (retired in spec #257) and de-Linear-ified.
 

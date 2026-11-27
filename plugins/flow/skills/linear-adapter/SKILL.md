@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.3.0. `adapter.ts` beside this file is the code `flow` runs.
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.5.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 

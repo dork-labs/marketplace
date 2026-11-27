@@ -70,8 +70,13 @@ const FILLER = new Set([
   'update',
 ]);
 
-/** A trailing capture tag, as `flow create` reads it. */
-const CAPTURE_TAG = /\[[^[\]]*\/[^[\]]*#\d+\]\s*$/;
+/**
+ * A trailing capture tag (`[owner/name#N]`): the mark of an item captured
+ * from outside the team. Its title keeps it after a person clears
+ * `agent/from-outside`, so the words stay outside words (`flow create`,
+ * `flow next`'s `makeReady.outside`).
+ */
+export const CAPTURE_TAG = /\[[^[\]]*\/[^[\]]*#\d+\]\s*$/;
 
 /**
  * Fold a plural to its singular, lightly: `stories` to `story`, `rooms` to

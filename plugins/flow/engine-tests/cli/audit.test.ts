@@ -74,6 +74,36 @@ describe('flow audit', () => {
     expect(verdict.failures[0].detail).toContain('FAKE-1');
   });
 
+  it('reports the project flags (GRM-18) from projectInfo and projects.startedCap', async () => {
+    // Purpose: the groom reads the same project flags as flow order --projects,
+    // with the cap from the project's config; a pull with no projectInfo checks nothing.
+    temp = tempProject({
+      tracker: 'fake',
+      identity: { agent: 'flow-bot' },
+      projects: { startedCap: 1 },
+    });
+    const started = (id: string, priority?: 2) => ({
+      id,
+      name: id.toUpperCase(),
+      slugId: id,
+      statusType: 'started' as const,
+      targetDate: '2026-12-31',
+      labels: [],
+      blockedBy: [],
+      ...(priority === undefined ? {} : { priority }),
+    });
+    const backlog = { ...cleanBacklog(), projectInfo: [started('p-a', 2), started('p-b')] };
+    const json = await runFlow(['audit', '--json'], temp, backlog);
+    expect(json.code).toBe(EXIT.findings);
+    expect(JSON.parse(json.stdout).failures).toEqual([
+      {
+        invariant: 'GRM-18',
+        detail: 'over cap: 2 Started, cap 1; lowest: P-B; Started project P-B: needs a priority',
+      },
+    ]);
+    expect((await runFlow(['audit', '--json'], temp, cleanBacklog())).code).toBe(EXIT.ok);
+  });
+
   it('resolves identity.agent "auto" to the tracker\'s current user', async () => {
     // Purpose: GRM-8 lets a ready item be assigned to the agent; with
     // identity.agent "auto" that account must come from getCurrentUser, or
@@ -106,11 +136,15 @@ describe('flow audit', () => {
     const allowed = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract']));
     expect(allowed.code).toBe(EXIT.ok);
 
-    const other = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract', 'Bug']));
+    const other = await runFlow(
+      ['audit', '--json'],
+      temp,
+      withBare(['cloud-contract', 'Frontend'])
+    );
     expect(other.code).toBe(EXIT.findings);
     const [failure] = JSON.parse(other.stdout).failures;
     expect(failure).toMatchObject({ invariant: 'GRM-12' });
-    expect(failure.detail).toContain('Bug');
+    expect(failure.detail).toContain('Frontend');
     expect(failure.detail).not.toContain('cloud-contract');
   });
 

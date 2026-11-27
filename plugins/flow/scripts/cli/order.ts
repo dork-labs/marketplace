@@ -8,7 +8,10 @@
  *   first (the first 15 in text; all in `--json`), then what is in flight,
  *   held, waiting for triage and kept out by `order.personLabel`.
  * - `-n <N>`: keep the first N issues, in text and JSON.
- * - `--projects`: the project lists only.
+ * - `--projects`: the project lists only: each project's place, its reasons
+ *   (dates in plain words; the JSON also carries `targetDate` as data), what
+ *   a person should fix, the Started cap, and the projects `order.personLabel`
+ *   keeps out.
  * - `--all`: also the Paused and Backlog projects.
  * - `--why <id>`: one item's reasons, and which field would move it up.
  * - `--rank-of <id>`: the item's place number, or `unranked: <reason>`.
@@ -124,15 +127,40 @@ function projectBlock(heading: string, entries: readonly ProjectEntry[]): string
     trimRow([
       `  ${entry.place}`,
       entry.name,
-      entry.why.map((reason) => reason.text).join(', ') || 'no priority',
+      entry.why.map((reason) => reason.text).join(', '),
       entry.flags.join('; '),
     ])
   );
   return [heading, formatColumns(rows)].join('\n');
 }
 
-/** The project half of the text. */
-export function renderProjects(order: WorkOrder, all: boolean, startedCap: number): string {
+/**
+ * The heading over the work `order.personLabel` keeps out of the agent order.
+ *
+ * @param personLabel - `order.personLabel`, when set.
+ * @returns E.g. `Out of the agent order (label owner/someone)`.
+ */
+function outOfOrderHeading(personLabel?: string): string {
+  return personLabel === undefined
+    ? 'Out of the agent order'
+    : `Out of the agent order (label ${personLabel})`;
+}
+
+/**
+ * The project half of the text.
+ *
+ * @param order - The work order.
+ * @param all - Whether to show Paused and Backlog projects.
+ * @param startedCap - `projects.startedCap`, for the heading.
+ * @param personLabel - `order.personLabel`, for the line naming the projects it keeps out.
+ * @returns The text.
+ */
+export function renderProjects(
+  order: WorkOrder,
+  all: boolean,
+  startedCap: number,
+  personLabel?: string
+): string {
   return [
     projectBlock(
       `Projects now (Started: ${order.projects.now.length}, cap ${startedCap})`,
@@ -140,6 +168,9 @@ export function renderProjects(order: WorkOrder, all: boolean, startedCap: numbe
     ) ?? 'Projects now: none Started.',
     projectBlock('Projects next (Planned)', order.projects.next),
     all ? projectBlock('Projects later (Paused or Backlog)', order.projects.later) : null,
+    order.projects.personal.length > 0
+      ? `${outOfOrderHeading(personLabel)}: ${order.projects.personal.map((p) => p.name).join(', ')}`
+      : null,
     order.projects.flags.length > 0 ? `Project flags: ${order.projects.flags.join('; ')}` : null,
   ]
     .filter((block): block is string => block !== null)
@@ -194,7 +225,7 @@ export function renderOrder(
         ].join('\n');
   return [
     ...order.banners,
-    renderProjects(order, all, startedCap),
+    renderProjects(order, all, startedCap, personLabel),
     issueBlock,
     unrankedBlock(
       'In flight',
@@ -213,9 +244,7 @@ export function renderOrder(
       ])
     ),
     unrankedBlock(
-      personLabel === undefined
-        ? 'Out of the agent order'
-        : `Out of the agent order (label ${personLabel})`,
+      outOfOrderHeading(personLabel),
       order.personal.map((item) => [item.identifier, cut(item.title)])
     ),
     `Computed ${order.generatedAt}.`,
@@ -273,12 +302,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     now: order.projects.now,
     next: order.projects.next,
     ...(all ? { later: order.projects.later } : {}),
+    personal: order.projects.personal,
     flags: order.projects.flags,
   };
   if (ctx.args.flags.projects === true) {
     return {
       json: { generatedAt: order.generatedAt, projects },
-      text: renderProjects(order, all, config.projects.startedCap),
+      text: renderProjects(order, all, config.projects.startedCap, config.order.personLabel),
     };
   }
   return {
