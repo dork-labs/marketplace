@@ -88,6 +88,12 @@ const PROJECT_CHUNK = 100;
  * under Linear's complexity cap of 10 000.
  */
 export const PROJECT_INFO_PAGE_SIZE = 25;
+
+/** How many relations each way one project read asks for. A full page may not be all of them. */
+const PROJECT_RELATION_PAGE = 10;
+
+/** How many labels one project read asks for. A full page may not be all of them. */
+const PROJECT_LABEL_PAGE = 20;
 /** How many history events and comments the pin read looks through. */
 const PIN_READ_DEPTH = 50;
 /** A backstop against a cursor that never ends. */
@@ -187,9 +193,9 @@ export const PROJECT_INFO_QUERY = `query FlowProjectInfo($teamId: String!, $firs
       pageInfo { hasNextPage endCursor }
       nodes {
         id name slugId priority targetDate createdAt sortOrder status { type }
-        labels(first: 20) { nodes { name parent { name } } }
-        relations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
-        inverseRelations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        labels(first: ${PROJECT_LABEL_PAGE}) { pageInfo { hasNextPage } nodes { name parent { name } } }
+        relations(first: ${PROJECT_RELATION_PAGE}) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: ${PROJECT_RELATION_PAGE}) { pageInfo { hasNextPage } nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
       }
     }
   }
@@ -436,9 +442,17 @@ export interface RawProjectInfo {
   createdAt?: string | null;
   sortOrder?: number | null;
   status?: { type?: string | null } | null;
-  labels?: { nodes?: RawLabel[] | null } | null;
-  relations?: { nodes?: RawProjectRelation[] | null } | null;
-  inverseRelations?: { nodes?: RawProjectRelation[] | null } | null;
+  labels?: { nodes?: RawLabel[] | null; pageInfo?: RawNestedPage | null } | null;
+  relations?: { nodes?: RawProjectRelation[] | null; pageInfo?: RawNestedPage | null } | null;
+  inverseRelations?: {
+    nodes?: RawProjectRelation[] | null;
+    pageInfo?: RawNestedPage | null;
+  } | null;
+}
+
+/** Whether a nested list on a project node had more than one read returned. */
+interface RawNestedPage {
+  hasNextPage?: boolean | null;
 }
 
 /** What {@link PIN_QUERY} returns for one issue. */
@@ -1382,6 +1396,16 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   /** Every open project of the team, with the work order's fields. */
   async function projectInfoOf(teamId: string): Promise<ProjectInfo[]> {
     const out: ProjectInfo[] = [];
+    /** Projects whose relations or labels had more than one read returns: some are missing. */
+    const truncated: string[] = [];
+    const done = (): ProjectInfo[] => {
+      if (truncated.length > 0) {
+        warn(
+          `Linear has more relations or labels for ${truncated.sort().join(', ')} than flow reads (${PROJECT_RELATION_PAGE} relations each way, ${PROJECT_LABEL_PAGE} labels), so a project dependency or label may be missing`
+        );
+      }
+      return out;
+    };
     let after: string | null = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const data: { team?: { projects?: RawPage<RawProjectInfo> | null } | null } = await graphql(
@@ -1394,9 +1418,17 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       }
       for (const node of connection.nodes ?? []) {
         const project = normalizeProjectInfo(node);
-        if (project !== null) out.push(project);
+        if (project === null) continue;
+        out.push(project);
+        if (
+          node.relations?.pageInfo?.hasNextPage === true ||
+          node.inverseRelations?.pageInfo?.hasNextPage === true ||
+          node.labels?.pageInfo?.hasNextPage === true
+        ) {
+          truncated.push(project.name || project.id);
+        }
       }
-      if (connection.pageInfo?.hasNextPage !== true) return out;
+      if (connection.pageInfo?.hasNextPage !== true) return done();
       after = connection.pageInfo.endCursor ?? null;
       if (after === null)
         throw new TrackerError('Linear said there was another page but gave no cursor');

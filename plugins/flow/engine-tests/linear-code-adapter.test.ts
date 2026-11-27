@@ -1728,6 +1728,59 @@ describe('the work order reads (contract 3.2.0)', () => {
     ]);
   });
 
+  it('warns once when a project has more relations or labels than one read returns', async () => {
+    const full = structuredClone(PROJECT_INFO_PAGE);
+    const [first, second] = full.team.projects.nodes as {
+      relations: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+      inverseRelations: { nodes: unknown[] };
+      labels: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+    }[];
+    first.relations.nodes = Array.from({ length: 10 }, (_, i) => ({
+      type: 'related',
+      anchorType: 'end',
+      relatedAnchorType: 'start',
+      project: { id: 'proj-1' },
+      relatedProject: { id: `proj-x${i}` },
+    }));
+    first.relations.pageInfo = { hasNextPage: true };
+    second.labels.nodes = Array.from({ length: 20 }, (_, i) => ({ name: `l${i}`, parent: null }));
+    second.labels.pageInfo = { hasNextPage: true };
+    const { adapter, warnings } = build((call) =>
+      call.operation === 'FlowProjectInfo' ? okEnvelope(full) : snapshotRoute(call)
+    );
+    await adapter.getBacklogSnapshot();
+    const lines = warnings.filter((w) => /than flow reads/.test(w));
+    expect(lines).toEqual([
+      'Linear has more relations or labels for Another project, Example project than flow reads (10 relations each way, 20 labels), so a project dependency or label may be missing',
+    ]);
+  });
+
+  it('does not warn when nothing was cut off, even on a page that is exactly full', async () => {
+    const full = structuredClone(PROJECT_INFO_PAGE);
+    const [first] = full.team.projects.nodes as {
+      relations: { nodes: unknown[]; pageInfo?: { hasNextPage: boolean } };
+    }[];
+    first.relations.nodes = Array.from({ length: 10 }, (_, i) => ({
+      type: 'related',
+      anchorType: 'end',
+      relatedAnchorType: 'start',
+      project: { id: 'proj-1' },
+      relatedProject: { id: `proj-x${i}` },
+    }));
+    first.relations.pageInfo = { hasNextPage: false };
+    for (const route of [
+      snapshotRoute,
+      (call: Call) =>
+        call.operation === 'FlowProjectInfo' ? okEnvelope(full) : snapshotRoute(call),
+    ]) {
+      const { adapter, calls, warnings } = build(route);
+      await adapter.getBacklogSnapshot();
+      expect(warnings.filter((w) => /than flow reads/.test(w))).toEqual([]);
+      const query = calls.find((call) => call.operation === 'FlowProjectInfo')?.query ?? '';
+      expect(query).toMatch(/relations\(first: 10\) \{ pageInfo \{ hasNextPage \}/);
+    }
+  });
+
   it('reads who pinned an item only for items with the pin label', async () => {
     const pinnedCore = structuredClone(CORE_PAGE_1) as typeof CORE_PAGE_1;
     (pinnedCore.team.issues.nodes[0].labels as { nodes: unknown[] }).nodes.push({

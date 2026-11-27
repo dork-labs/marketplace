@@ -45,9 +45,24 @@ interface ShortProject {
   id: string;
   name: string;
   status: ProjectInfo['statusType'];
-  priority?: number;
-  target?: string;
+  priority?: number | null;
+  target?: string | null;
+  slug?: string;
   labels?: string[];
+  blockedBy?: string[];
+  created?: string;
+}
+
+/** What a case expects of the project lists, by project id. */
+interface ExpectedProjects {
+  now?: string[];
+  next?: string[];
+  later?: string[];
+  personal?: string[];
+  flags?: string[];
+  projectFlags?: Record<string, string[]>;
+  inherits?: Record<string, string>;
+  why?: Record<string, string[]>;
 }
 
 interface CaseFile {
@@ -56,8 +71,12 @@ interface CaseFile {
   cases: {
     name: string;
     orderKeys?: OrderConfig['orderKeys'];
+    startedCap?: number;
     patch?: Record<string, Partial<ShortItem>>;
+    projectPatch?: Record<string, Partial<ShortProject>>;
+    addProjects?: ShortProject[];
     expected: {
+      projects?: ExpectedProjects;
       issues: string[];
       held?: Record<string, string>;
       needsTriage?: Record<string, string[]>;
@@ -80,12 +99,13 @@ function project(short: ShortProject): ProjectInfo {
   return {
     id: short.id,
     name: short.name,
-    slugId: `slug-${short.id}`,
+    slugId: short.slug ?? `slug-${short.id}`,
     statusType: short.status,
     labels: short.labels ?? [],
-    blockedBy: [],
-    ...(short.priority === undefined ? {} : { priority: short.priority as 1 }),
-    ...(short.target === undefined ? {} : { targetDate: short.target }),
+    blockedBy: short.blockedBy ?? [],
+    ...(typeof short.priority === 'number' ? { priority: short.priority as 1 } : {}),
+    ...(typeof short.target === 'string' ? { targetDate: short.target } : {}),
+    ...(short.created === undefined ? {} : { createdAt: short.created }),
   };
 }
 
@@ -130,13 +150,24 @@ function item(short: ShortItem, projects: readonly ShortProject[]): WorkItem {
 /** Build the input for the base fixture with patches applied. */
 function input(
   patch: Record<string, Partial<ShortItem>> = {},
-  orderKeys?: OrderConfig['orderKeys']
+  orderKeys?: OrderConfig['orderKeys'],
+  projectPatch: Record<string, Partial<ShortProject>> = {},
+  startedCap?: number,
+  addProjects: readonly ShortProject[] = []
 ): WorkOrderInput {
+  const shortProjects = [...file.base.projects, ...addProjects].map((short) => ({
+    ...short,
+    ...(projectPatch[short.id] ?? {}),
+  }));
   const shortItems = file.base.items.map((short) => ({ ...short, ...(patch[short.id] ?? {}) }));
   return {
-    items: shortItems.map((short) => item(short, file.base.projects)),
-    projects: file.base.projects.map(project),
-    config: orderKeys === undefined ? CONFIG : { ...CONFIG, orderKeys },
+    items: shortItems.map((short) => item(short, shortProjects)),
+    projects: shortProjects.map(project),
+    config: {
+      ...CONFIG,
+      ...(orderKeys === undefined ? {} : { orderKeys }),
+      ...(startedCap === undefined ? {} : { startedCap }),
+    },
     now: file.now,
   };
 }
@@ -156,7 +187,13 @@ function shuffled<T>(list: readonly T[], seed: number): T[] {
 describe('work order cases (conformance/work-order/work-order.cases.json)', () => {
   for (const testCase of file.cases) {
     describe(testCase.name, () => {
-      const given = input(testCase.patch, testCase.orderKeys);
+      const given = input(
+        testCase.patch,
+        testCase.orderKeys,
+        testCase.projectPatch,
+        testCase.startedCap,
+        testCase.addProjects
+      );
       const order = computeWorkOrder(given);
       const { expected } = testCase;
 
@@ -185,6 +222,27 @@ describe('work order cases (conformance/work-order/work-order.cases.json)', () =
           expect(order.personal.map((d) => d.identifier)).toEqual(expected.personal);
         }
         if (expected.banners) expect(order.banners).toEqual(expected.banners);
+      });
+
+      it('ranks and flags the projects', () => {
+        const want = expected.projects;
+        if (want === undefined) return;
+        const ids = (list: { id: string }[]): string[] => list.map((p) => p.id);
+        const all = [...order.projects.now, ...order.projects.next, ...order.projects.later];
+        if (want.now) expect(ids(order.projects.now)).toEqual(want.now);
+        if (want.next) expect(ids(order.projects.next)).toEqual(want.next);
+        if (want.later) expect(ids(order.projects.later)).toEqual(want.later);
+        if (want.personal) expect(ids(order.projects.personal)).toEqual(want.personal);
+        if (want.flags) expect(order.projects.flags).toEqual(want.flags);
+        for (const [id, flags] of Object.entries(want.projectFlags ?? {})) {
+          expect(all.find((p) => p.id === id)?.flags).toEqual(flags);
+        }
+        for (const [heir, from] of Object.entries(want.inherits ?? {})) {
+          expect(all.find((p) => p.id === heir)?.inheritsFrom).toBe(from);
+        }
+        for (const [id, why] of Object.entries(want.why ?? {})) {
+          expect(all.find((p) => p.id === id)?.why.map((r) => r.text)).toEqual(why);
+        }
       });
 
       it('names inherited places', () => {
@@ -351,7 +409,8 @@ describe('projects rank without dates (Nov 24: no steering by dates)', () => {
       now: file.now,
     });
     expect(order.projects.now.map((p) => p.id)).toEqual(['p-early', 'p-late']);
-    expect(order.projects.now[1].why.map((r) => r.text)).toEqual(['priority 2']);
+    const why = order.projects.now.flatMap((p) => p.why);
+    expect(why.some((r) => r.key === 'targetDate' || /target/.test(r.text))).toBe(false);
     expect(order.projects.now.flatMap((p) => p.flags)).toEqual([]);
   });
 
@@ -360,6 +419,27 @@ describe('projects rank without dates (Nov 24: no steering by dates)', () => {
     const text = ids.map((id) => explainIssue(input(), id).join('\n')).join('\n');
     expect(text).toMatch(/project ranks higher/);
     expect(text).not.toMatch(/target date/);
+  });
+});
+
+describe('a very deep chain of projects', () => {
+  it('ranks without running out of stack, the last one in the way first', () => {
+    // Paused projects lift nothing, so only the blockers-first pass walks the chain.
+    const depth = 20_000;
+    const chain: ProjectInfo[] = Array.from({ length: depth }, (_, i) => ({
+      id: `p-${String(i).padStart(5, '0')}`,
+      name: `P${i}`,
+      slugId: `s-${String(i).padStart(5, '0')}`,
+      statusType: 'paused',
+      priority: 3,
+      targetDate: '2026-12-31',
+      labels: [],
+      blockedBy: i + 1 < depth ? [`p-${String(i + 1).padStart(5, '0')}`] : [],
+    }));
+    const order = computeWorkOrder({ items: [], projects: chain, config: CONFIG, now: file.now });
+    expect(order.projects.later).toHaveLength(depth);
+    expect(order.projects.later[0].id).toBe(`p-${String(depth - 1).padStart(5, '0')}`);
+    expect(order.projects.later[depth - 1].id).toBe('p-00000');
   });
 });
 

@@ -141,6 +141,45 @@ describe('flow order', () => {
     expect(result.stdout).not.toContain('ABC-1');
   });
 
+  it('--projects shows flags, the cap and the projects order.personLabel keeps out; dates in words, ISO in JSON', async () => {
+    const projects: ProjectInfo[] = [
+      ...PROJECTS,
+      {
+        id: 'p-search',
+        name: 'Search',
+        slugId: 'search',
+        statusType: 'started',
+        priority: 2,
+        labels: [],
+        blockedBy: [],
+      },
+      {
+        id: 'p-desk',
+        name: 'Desk',
+        slugId: 'desk',
+        statusType: 'started',
+        priority: 1,
+        labels: ['owner/someone'],
+        blockedBy: [],
+      },
+    ];
+    temp = tempProject({ projects: { startedCap: 1 }, order: { personLabel: 'owner/someone' } });
+    const text = await runFlow(['order', '--projects'], { items: items(), projectInfo: projects });
+    expect(text.stdout).toContain('Projects now (Started: 2, cap 1)');
+    expect(text.stdout).toMatch(/1 +Billing +priority Urgent, /);
+    expect(text.stdout).toMatch(/2 +Search +.*  over cap/);
+    expect(text.stdout).not.toMatch(/target Dec 1|needs a target date/);
+    expect(text.stdout).toContain('Project flags: over cap: 2 Started, cap 1; lowest: Search');
+    expect(text.stdout).toContain('Out of the agent order (label owner/someone): Desk');
+    const json = JSON.parse(
+      (await runFlow(['order', '--projects', '--json'], { items: items(), projectInfo: projects }))
+        .stdout
+    );
+    expect(json.projects.now[0]).toMatchObject({ id: 'p-billing', targetDate: '2026-12-01' });
+    expect(json.projects.personal).toEqual([{ id: 'p-desk', name: 'Desk' }]);
+    expect(json.projects.flags).toEqual(['over cap: 2 Started, cap 1; lowest: Search']);
+  });
+
   it('--rank-of prints the place, or unranked with the reason', async () => {
     const ranked = await runFlow(['order', '--rank-of', 'ABC-1'], {
       items: items(),

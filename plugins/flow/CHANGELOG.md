@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.101.0
+
+**Reinstall Flow to get the project order.**
+
+- `flow order --projects` now ranks your projects: pinned ones first (label `pin`), then by priority, what waits on them, how much open work is left in them, and age. Each project says why it sits where it does, with dates in plain words like "Dec 4". A target date never moves a project; the `--json` output still shows it, as `YYYY-MM-DD`.
+- A project with no priority is flagged. So is a project waiting on one that isn't finished. Its issues wait too, and the project in its way moves up, ahead of every project waiting on it.
+- An issue with no estimate counts as the largest size when Flow adds up a project's open work, so a project nobody has sized doesn't look small.
+- When more projects are Started than `projects.startedCap` allows (6 by default), `flow order` names the ones to pause or finish. Projects that can't start yet come first, then the lowest-ranked. Flow never changes a project's status itself.
+- A project carrying the label you set in `order.personLabel` is left out of the agent order and listed on its own, and so are its issues.
+- `flow audit` has a new check, GRM-18. It reports Started projects over the cap, and any Started project with no priority or waiting on an unfinished project. It only reports; a person decides.
+- The Linear adapter warns when a project has more relations or labels than it reads (10 each way, 20 labels), since a dependency may be missing.
+
 ## 0.100.0
 
 **Reinstall Flow to get `flow order`. Nothing changes what the drain picks until you set `dispatch.ladder` to `v2`.**

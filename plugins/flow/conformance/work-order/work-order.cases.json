@@ -1,6 +1,6 @@
 {
   "contract": "work-order",
-  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target, labels }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys and patch items. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
+  "about": "The work order (DOR-5063): computeWorkOrder({ items, projects, config, now }). Items and projects are written short and expanded by the test: an item is { id, p (priority 0-4), state (backlog | unstarted | started; default unstarted), size, project (a project id), labels, blockedBy, blocks, due (YYYY-MM-DD), created (ISO), triage, pin }; a project is { id, name, status, priority, target (null removes it; data only, it never moves a project or flags one), labels, blockedBy (project ids it waits on), created (ISO) }. 'base' is the shared fixture; the config is the default with order.personLabel set to owner/someone; each case may replace config.orderKeys or config.startedCap patch items (patch) and projects (projectPatch), and add projects (addProjects); a project may also give slug, and priority null removes it. expected.issues is the issue order, best first; expected.held, needsTriage, inFlight and personal list identifiers (held and needsTriage with their reason or missing fields); expected.inherits maps an item to the blocked item whose place it took; expected.banners is exact. expected.projects (DOR-5067) gives the now, next, later and personal lists as project ids in rank, the whole-list flags, each named project's flags and why text, and inherits (a project to the one waiting on it whose place it took). Each flip changes one field of one item on the base and names where that item lands (place, or 'unranked: <reason>' as rankOfIssue prints it). The test also shuffles every input and demands the same output.",
   "now": "2026-11-23T12:00:00.000Z",
   "base": {
     "projects": [
@@ -36,6 +36,13 @@
         "name": "Shipped",
         "status": "completed",
         "priority": 2
+      },
+      {
+        "id": "p-docs",
+        "name": "Docs",
+        "status": "planned",
+        "priority": 3,
+        "target": "2026-12-20"
       }
     ],
     "items": [
@@ -217,7 +224,22 @@
         "inherits": {
           "ABC-9": "ABC-8"
         },
-        "banners": ["Urgent below pins: ABC-3 (security)"]
+        "banners": ["Urgent below pins: ABC-3 (security)"],
+        "projects": {
+          "now": ["p-billing", "p-search"],
+          "next": ["p-mobile", "p-docs"],
+          "personal": ["p-ops"],
+          "flags": [],
+          "projectFlags": {
+            "p-billing": [],
+            "p-mobile": [],
+            "p-docs": []
+          },
+          "why": {
+            "p-search": ["priority High", "8 points open"],
+            "p-docs": ["priority Medium", "no open issues"]
+          }
+        }
       }
     },
     {
@@ -519,6 +541,640 @@
         "needsTriage": {
           "ABC-11": ["triage state"],
           "ABC-12": ["estimate"]
+        }
+      }
+    },
+    {
+      "name": "the Started cap: over it, the lowest Started projects are named and nothing else changes",
+      "startedCap": 1,
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-billing", "p-search"],
+          "flags": ["over cap: 2 Started, cap 1; lowest: Search"],
+          "projectFlags": {
+            "p-billing": [],
+            "p-search": ["over cap"]
+          }
+        }
+      }
+    },
+    {
+      "name": "a target date never moves a project, and none missing is flagged",
+      "projectPatch": {
+        "p-billing": {
+          "target": "2026-11-25"
+        },
+        "p-search": {
+          "priority": 1,
+          "target": null
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "projectFlags": {
+            "p-billing": [],
+            "p-search": []
+          }
+        }
+      }
+    },
+    {
+      "name": "remaining work breaks a tie, an unsized issue counting as the largest bucket",
+      "projectPatch": {
+        "p-search": {
+          "priority": 1
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "why": {
+            "p-billing": ["priority Urgent", "28 points open, 1 unsized counted as 13 each"]
+          }
+        }
+      }
+    },
+    {
+      "name": "an inherited project rank: the project in the way takes the place of the one waiting on it",
+      "projectPatch": {
+        "p-mobile": {
+          "blockedBy": ["p-docs"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "next": ["p-docs", "p-mobile"],
+          "inherits": {
+            "p-docs": "p-mobile"
+          },
+          "projectFlags": {
+            "p-mobile": ["can't start: waits on Docs"],
+            "p-docs": []
+          },
+          "why": {
+            "p-docs": [
+              "inherits Mobile's place",
+              "priority Medium",
+              "in the way of Mobile",
+              "no open issues"
+            ]
+          }
+        },
+        "held": {
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile"
+        }
+      }
+    },
+    {
+      "name": "a Started project waiting on another: its issues wait, the one in the way rises",
+      "projectPatch": {
+        "p-billing": {
+          "blockedBy": ["p-search"]
+        }
+      },
+      "expected": {
+        "issues": ["ABC-16", "ABC-3", "ABC-17", "ABC-6", "ABC-9", "ABC-1"],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "inherits": {
+            "p-search": "p-billing"
+          },
+          "projectFlags": {
+            "p-billing": ["can't start: waits on Search"]
+          }
+        },
+        "held": {
+          "ABC-2": "waits for project Search",
+          "ABC-4": "waits for project Search",
+          "ABC-5": "waits for project Search",
+          "ABC-7": "waits for project Search",
+          "ABC-8": "held by ABC-9",
+          "ABC-13": "waits for project Mobile",
+          "ABC-99": "waits for project Search",
+          "ABC-100": "waits for project Search"
+        }
+      }
+    },
+    {
+      "name": "a Planned project's issues wait, except Urgent ones and release gates",
+      "patch": {
+        "ABC-13": {
+          "labels": ["release-gate"]
+        },
+        "ABC-7": {
+          "project": "p-docs"
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-13",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "held": {
+          "ABC-7": "waits for project Docs",
+          "ABC-8": "held by ABC-9"
+        }
+      }
+    },
+    {
+      "name": "a project with the person label (owner/someone) is out of the agent order, and so are its issues",
+      "projectPatch": {
+        "p-search": {
+          "labels": ["owner/someone"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-billing"],
+          "personal": ["p-search", "p-ops"]
+        },
+        "personal": ["ABC-1", "ABC-6", "ABC-8", "ABC-9", "ABC-14", "ABC-15"]
+      }
+    },
+    {
+      "name": "a diamond: a project in the way goes ahead of every project waiting on it, directly or not",
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-beta", "p-gamma"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-10",
+          "blockedBy": ["p-gamma"]
+        },
+        {
+          "id": "p-gamma",
+          "name": "Gamma",
+          "status": "started",
+          "priority": 3,
+          "target": "2026-12-10"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-gamma", "p-beta", "p-alpha", "p-billing", "p-search"],
+          "inherits": {
+            "p-beta": "p-alpha",
+            "p-gamma": "p-alpha"
+          }
+        }
+      }
+    },
+    {
+      "name": "a three-deep chain of projects: the last one in the way goes first",
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-beta"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 3,
+          "target": "2026-12-10",
+          "blockedBy": ["p-gamma"]
+        },
+        {
+          "id": "p-gamma",
+          "name": "Gamma",
+          "status": "started",
+          "priority": 4,
+          "target": "2026-12-10"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-gamma", "p-beta", "p-alpha", "p-billing", "p-search"],
+          "inherits": {
+            "p-beta": "p-alpha",
+            "p-gamma": "p-alpha"
+          }
+        }
+      }
+    },
+    {
+      "name": "two projects waiting on each other do not hang the ranking",
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-beta"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-10",
+          "blockedBy": ["p-alpha"]
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-beta", "p-alpha", "p-billing", "p-search"],
+          "projectFlags": {
+            "p-alpha": ["can't start: waits on Beta"],
+            "p-beta": ["can't start: waits on Alpha"]
+          }
+        }
+      }
+    },
+    {
+      "name": "on an exact tie, the project in the way still goes first",
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-15",
+          "blockedBy": ["p-beta"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-15"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-billing", "p-beta", "p-alpha", "p-search"]
+        }
+      }
+    },
+    {
+      "name": "over the cap, a Started project that can't start is named before one that can run",
+      "startedCap": 1,
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-beta"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "planned",
+          "priority": 3,
+          "target": "2026-12-30"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-alpha", "p-billing", "p-search"],
+          "flags": ["over cap: 3 Started, cap 1; lowest: Alpha, Search"],
+          "projectFlags": {
+            "p-alpha": ["over cap", "can't start: waits on Beta"],
+            "p-billing": [],
+            "p-search": ["over cap"]
+          }
+        }
+      }
+    },
+    {
+      "name": "a pinned project goes first",
+      "projectPatch": {
+        "p-search": {
+          "labels": ["pin"]
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "why": {
+            "p-search": ["pinned", "priority High", "8 points open"]
+          }
+        }
+      }
+    },
+    {
+      "name": "a project with no priority sorts last and is flagged",
+      "projectPatch": {
+        "p-billing": {
+          "priority": null
+        }
+      },
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-9",
+          "ABC-1",
+          "ABC-2",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-search", "p-billing"],
+          "projectFlags": {
+            "p-billing": ["needs a priority"]
+          }
+        }
+      }
+    },
+    {
+      "name": "created time, then the slug, break the last ties",
+      "addProjects": [
+        {
+          "id": "p-pear",
+          "name": "Pear",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-15",
+          "created": "2026-10-01T00:00:00Z"
+        },
+        {
+          "id": "p-quince",
+          "name": "Quince",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-15",
+          "created": "2026-09-01T00:00:00Z"
+        },
+        {
+          "id": "p-rye",
+          "name": "Rye",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-20",
+          "slug": "zzz"
+        },
+        {
+          "id": "p-sage",
+          "name": "Sage",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-20",
+          "slug": "aaa"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "next": ["p-mobile", "p-docs", "p-quince", "p-pear", "p-sage", "p-rye"]
+        }
+      }
+    },
+    {
+      "name": "over the cap with several stuck projects, the lowest stuck one is named first",
+      "startedCap": 4,
+      "addProjects": [
+        {
+          "id": "p-alpha",
+          "name": "Alpha",
+          "status": "started",
+          "priority": 1,
+          "target": "2026-11-30",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-beta",
+          "name": "Beta",
+          "status": "started",
+          "priority": 2,
+          "target": "2026-12-10",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-gamma",
+          "name": "Gamma",
+          "status": "started",
+          "priority": 3,
+          "target": "2026-12-20",
+          "blockedBy": ["p-zed"]
+        },
+        {
+          "id": "p-zed",
+          "name": "Zed",
+          "status": "planned",
+          "priority": 4,
+          "target": "2027-01-31"
+        }
+      ],
+      "expected": {
+        "issues": [
+          "ABC-16",
+          "ABC-3",
+          "ABC-17",
+          "ABC-6",
+          "ABC-2",
+          "ABC-9",
+          "ABC-1",
+          "ABC-4",
+          "ABC-7",
+          "ABC-5",
+          "ABC-99",
+          "ABC-100"
+        ],
+        "projects": {
+          "now": ["p-alpha", "p-billing", "p-beta", "p-search", "p-gamma"],
+          "flags": ["over cap: 5 Started, cap 4; lowest: Gamma"],
+          "projectFlags": {
+            "p-alpha": ["can't start: waits on Zed"],
+            "p-gamma": ["over cap", "can't start: waits on Zed"]
+          }
         }
       }
     }

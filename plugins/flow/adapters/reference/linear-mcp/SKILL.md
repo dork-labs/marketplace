@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.1.0`) over **one transport - the in-session Linear MCP
+> (contract version `3.2.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -94,9 +94,10 @@ Progress", "Shipped") and varies per team, so the engine branches only on the
 categories. It is the un-triaged holding state. Normalize it to `backlog`
 (non-terminal, so it lists and recovers like any open item). Never emit a sixth
 category (INV-1): the model has exactly five values. A Triage-state item is kept
-out of dispatch by the **absent `agent/ready` label**, not by its category. The
-good fixture's `DOR-6` is exactly this case: `stateName: "Triage"`,
-`stateCategory: "backlog"`, no `agent/ready` label.
+out of dispatch by the **absent `agent/ready` label**, not by its category.
+Since contract 3.2.0 it also carries `triage: true`, so the work order lists it
+under "needs triage". The good fixture's `DOR-6` is exactly this case:
+`stateName: "Triage"`, `stateCategory: "backlog"`, no `agent/ready` label.
 
 ### Native labels -> generic families (re-namespacing is mandatory)
 
@@ -140,8 +141,59 @@ literal `agent/ready`): re-namespacing is mandatory, not cosmetic.
     `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)` - because
     the threshold is a t-shirt word and the estimate may be a number. Never write
     `size >= "xl"`.
-- **`updatedAt`** (contract 3.1.0) <- Linear's `updatedAt`, ISO-8601, as given.
-  Missing -> `undefined`. The groom's Could expiry (GRM-16) reads it.
+- **`updatedAt`** (since contract 3.1.0) <- Linear's `updatedAt`, ISO-8601, as
+  given. Missing -> `undefined`. The groom's Could expiry (GRM-16) reads it.
+
+### The work order's reads (contract 3.2.0)
+
+`flow order`, and `flow next` under `dispatch.ladder: "v2"`, rank work from a
+few more Linear fields. Every one is optional: an adapter that leaves one out
+still loads, and the work order treats the field as unset.
+
+- **`dueDate`** <- the issue's `dueDate`, `YYYY-MM-DD` as given. Missing ->
+  `undefined`. The first key inside a band, earliest first.
+- **`triage`** <- `true` when the issue's state `type` is `triage` (its
+  `stateCategory` stays `backlog`, as above). Absent otherwise. The work order
+  lists the item under "needs triage" instead of ranking it.
+- **`pin`** <- read only for an issue with the bare `pin` label:
+  `{ reason?, actor?, actorName?, at? }`. `reason` is the rest of the first line
+  of the latest comment that starts with `pin:`; `actor`, `actorName` and `at`
+  are who added the `pin` label and when, from the issue's history. The groom's
+  GRM-17 flags a pin with no reason or one added outside `order.pinSetters`.
+- **`projectInfo`** on the backlog snapshot <- every open project of the team
+  (status type not `completed` or `canceled`), each with `id`, `name`,
+  `slugId`, `statusType`, `labels` and `blockedBy`, plus `priority`,
+  `targetDate`, `createdAt` and `sortOrder` when Linear has them:
+  - `statusType` <- the project's `status { type }`: `started`, `planned`,
+    `paused`, `backlog`, `completed` or `canceled`. A status flow does not know
+    drops the project.
+  - `priority` <- the project's priority, `1`-`4` only (`0` means none: leave
+    it out). `targetDate` <- its `targetDate`, `YYYY-MM-DD`.
+  - `labels` <- the project's labels, re-namespaced `group/name` like an
+    issue's (the `order.personLabel` label takes a project out of the agent order; `pin` puts
+    it first).
+  - `blockedBy` <- the ids of the projects this one waits on, from both
+    `relations` and `inverseRelations`: a `dependency` edge whose blocking end
+    is the other project (anchor `end` to `start`). Sorted, no repeats, never
+    itself.
+  - Each project read asks for at most 10 relations each way and 20 labels.
+    When any of those lists says it has more (`pageInfo { hasNextPage }`),
+    some are missing: warn once per snapshot, naming the projects, rather than
+    guessing.
+  - The sum of open estimates is **not** read here: flow adds up the items'
+    `size` itself.
+
+  Without `projectInfo`, flow ranks only the projects the items name, by their
+  status alone.
+
+  **Over MCP:** fill each project field from `list_projects` / `get_project`
+  where the server returns it, and leave out what it does not; never invent a
+  value. Project relations are the field MCP servers are least likely to
+  expose: when the server cannot show them, `blockedBy` is `[]` and the run's
+  warnings say once that project dependencies were not read. `get_issue` gives
+  the issue's `dueDate` and its state `type`; a pinned issue's comments come
+  from `list_comments`. When the server cannot show who added the `pin` label,
+  leave `actor` and `at` out (GRM-17 then judges the pin on its reason alone).
 
 ---
 
@@ -345,7 +397,7 @@ The elicitation primitive - **four atomic effects, in order**:
   `title`, `description`, the `type/*` label for `spec.type`, `estimate` for
   `spec.size`, the parent's project and a priority 1-4. `flow create`, which
   normally files it, refuses an item without a type, priority, size, project,
-  `## Proof` and `## Done when` (contract 3.1.0).
+  `## Proof` and `## Done when` (since contract 3.1.0).
 - **Normalize.** Return the created issue **normalized as a `WorkItem`** so the
   caller records its `identifier` as the task's canonical home (the per-task
   `issue` field in `03-tasks.json`). Sub-issue promotion fires only when `size`
@@ -452,7 +504,7 @@ provably closed), **INV-4** (labels re-namespaced into the generic families),
 these reads never trust anyone, the trusted example INV-6's fixture needs comes
 from a `cli` read), and **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `3.1.0`, and **declares
+pre-filtered). It targets contract version `3.2.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.

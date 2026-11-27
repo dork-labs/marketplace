@@ -1,7 +1,7 @@
 /*
  * audit-backlog.ts - the /flow backlog-groom invariant oracle.
  *
- * Asserts the seventeen groom invariants (GRM-1 .. GRM-17) against a snapshot of
+ * Asserts the eighteen groom invariants (GRM-1 .. GRM-18) against a snapshot of
  * NORMALIZED WorkItems - the whole live backlog as the adapter's
  * `getBacklogSnapshot()` verb emits it. Where validate-adapter.ts asks "did the
  * adapter normalize each item correctly?", this oracle asks "is the backlog
@@ -37,6 +37,8 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { rankProjects } from './project-order.ts';
+import type { ProjectInfo, WorkItem } from './work-item.ts';
 import { stateCoherence } from './work-state.ts';
 
 /** State categories an item may still be worked FROM (open, not terminal). */
@@ -53,7 +55,7 @@ const AGENT_READY_LABEL = 'agent/ready';
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`GRM-1` .. `GRM-17`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`GRM-1` .. `GRM-18`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -81,6 +83,12 @@ interface AuditOpts {
   neverExpireLabels?: readonly string[];
   /** Accounts allowed to add the `pin` label (config `order.pinSetters`). Default: none, which flags no pin on who added it. */
   pinSetters?: readonly string[];
+  /** Every open project of the team (the snapshot's `projectInfo`), for GRM-18. Absent: GRM-18 checks nothing. */
+  projects?: readonly unknown[];
+  /** How many projects may be Started at once (config `projects.startedCap`). Default: 6. */
+  startedCap?: number;
+  /** The label that keeps a project out of the agent order (config `order.personLabel`). Default: none. */
+  personLabel?: string;
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -93,7 +101,7 @@ interface HarnessArgs {
 
 const HELP = `audit-backlog - the /flow backlog-groom invariant oracle.
 
-Asserts the seventeen groom invariants (GRM-1 .. GRM-17) against a snapshot of
+Asserts the eighteen groom invariants (GRM-1 .. GRM-18) against a snapshot of
 NORMALIZED WorkItems - the whole live backlog, as the adapter's
 getBacklogSnapshot() verb emits it. Run by the grooming-backlog skill before
 and after a groom; runnable standalone for a read-only health check.
@@ -107,7 +115,8 @@ Fixture: a JSON array of WorkItems, or
   { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."],
     "now": "<ISO>", "couldExpiryDays": 60,
     "neverExpireLabels": ["security", "needs-security-design"],
-    "pinSetters": ["<account id>"] } }.
+    "pinSetters": ["<account id>"], "projects": [<ProjectInfo>...],
+    "startedCap": 6, "personLabel": "owner/someone" } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -146,6 +155,10 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-17  every open item with the pin label has a reason (a comment starting
           "pin:", read into pin.reason), and, when opts.pinSetters is set, was
           pinned by one of those accounts (pin.actor)
+  GRM-18  the projects in opts.projects are within opts.startedCap (default 6)
+          Started at once, and every Started one has a priority and waits on
+          no open project. A project with opts.personLabel is not counted. A target date is never required. A report for a
+          person: flow never changes a project's status
 `;
 
 /** True for a non-array, non-null object. */
@@ -513,6 +526,33 @@ function checkGrm17(items: readonly unknown[], opts: AuditOpts): string[] {
   });
 }
 
+/** `projects.startedCap`'s default, so the standalone oracle agrees with the config. */
+const DEFAULT_STARTED_CAP = 6;
+
+/**
+ * GRM-18 - the project layer of the work order is in order (DOR-5067): no more
+ * Started projects than `projects.startedCap`, and every Started one has a
+ * priority and waits on no open project (a target date is never required).
+ * It reports the work order's own project flags, so the groom and
+ * `flow order --projects` always agree. Read only: a person pauses, finishes
+ * or prioritizes a project; flow never changes one. Checks nothing when the snapshot carries no project info.
+ */
+function checkGrm18(items: readonly unknown[], opts: AuditOpts): string[] {
+  if (!Array.isArray(opts.projects)) return [];
+  const ranking = rankProjects(opts.projects as ProjectInfo[], items as WorkItem[], {
+    orderKeys: [],
+    sizeOrder: 'small-first',
+    startedCap: opts.startedCap ?? DEFAULT_STARTED_CAP,
+    ...(opts.personLabel === undefined ? {} : { personLabel: opts.personLabel }),
+  });
+  const details = [...ranking.flags];
+  for (const project of ranking.now) {
+    const flags = project.flags.filter((flag) => flag !== 'over cap');
+    if (flags.length > 0) details.push(`Started project ${project.name}: ${flags.join(', ')}`);
+  }
+  return details;
+}
+
 /** One groom invariant: its id, a one-line summary, and the check that asserts it. */
 interface Invariant {
   /** The invariant identifier, e.g. `GRM-4`. */
@@ -550,6 +590,11 @@ const INVARIANTS: readonly Invariant[] = [
   },
   { id: 'GRM-16', summary: 'no waiting Could untouched past its expiry', check: checkGrm16 },
   { id: 'GRM-17', summary: 'a pin has a reason and an allowed setter', check: checkGrm17 },
+  {
+    id: 'GRM-18',
+    summary: 'Started projects are within the cap, prioritised and free to start',
+    check: checkGrm18,
+  },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -683,6 +728,17 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
     if (Array.isArray(setters) && setters.every((id) => isNonEmptyString(id))) {
       opts.pinSetters = setters;
     }
+    // Project objects for GRM-18; the ranking degrades on bad fields itself.
+    const projects = isPlainObject(parsed.opts) ? parsed.opts.projects : undefined;
+    if (Array.isArray(projects) && projects.every((project) => isPlainObject(project))) {
+      opts.projects = projects;
+    }
+    // The config's rule: a positive whole number; anything else keeps the default.
+    const cap = isPlainObject(parsed.opts) ? parsed.opts.startedCap : undefined;
+    if (typeof cap === 'number' && Number.isInteger(cap) && cap > 0) opts.startedCap = cap;
+    // A label, as the config allows; anything else keeps the default (none).
+    const personLabel = isPlainObject(parsed.opts) ? parsed.opts.personLabel : undefined;
+    if (isNonEmptyString(personLabel)) opts.personLabel = personLabel;
     return { items: parsed.items, opts };
   }
   throw new Error(
