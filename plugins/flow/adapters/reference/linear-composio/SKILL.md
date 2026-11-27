@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.2.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `3.3.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -365,7 +365,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
   line, the `agent:provenance` signature**
   ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
   HTML comments byte-for-byte in comment bodies, so no degradation applies here.
-  This adapter declares the tracker **private** (SPEC `visibility`, since 3.2.0): a
+  This adapter declares the tracker **private** (SPEC `visibility`, since 3.3.0): a
   Linear workspace's issues are its members' alone, so the signature carries the
   whole chat id and `host`.
   Pass the body as a real GraphQL variable, never interpolated — the signature's
@@ -541,5 +541,5 @@ provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), **INV-6** (each comment's `authorIsTrusted`
 read from Linear's `active`/`guest`/`app` flags, team and `botActor`), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `3.2.0`,
+broader candidate set, never pre-filtered). It targets contract version `3.3.0`,
 and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).

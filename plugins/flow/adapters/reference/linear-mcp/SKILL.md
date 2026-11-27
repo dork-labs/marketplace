@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.2.0`) over **one transport - the in-session Linear MCP
+> (contract version `3.3.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -289,7 +289,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
   as its last line, the `agent:provenance` signature**
   ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
   HTML comments byte-for-byte in comment bodies, so no degradation applies here.
-  This adapter declares the tracker **private** (SPEC `visibility`, since 3.2.0): a
+  This adapter declares the tracker **private** (SPEC `visibility`, since 3.3.0): a
   Linear workspace's issues are its members' alone, so the signature carries the
   whole chat id and `host`.
 - **Durability + degradation.** Durable (a posted comment persists). Idempotency
@@ -455,7 +455,7 @@ provably closed), **INV-4** (labels re-namespaced into the generic families),
 these reads never trust anyone, the trusted example INV-6's fixture needs comes
 from a `cli` read), and **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `3.2.0`, and **declares
+pre-filtered). It targets contract version `3.3.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.

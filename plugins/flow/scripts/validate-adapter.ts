@@ -57,6 +57,9 @@ const OPTIONAL_FIELDS: string[] = [
   'agentDisposition',
   'createdAt',
   'updatedAt',
+  'dueDate',
+  'triage',
+  'pin',
 ];
 
 /** A single breached invariant in the verdict. */
@@ -278,6 +281,23 @@ function checkInv2(items: readonly unknown[]): string[] {
         details.push(`${label} optional "createdAt" must be a string`);
       if (field === 'updatedAt' && typeof value !== 'string')
         details.push(`${label} optional "updatedAt" must be a string`);
+      // Contract 3.2.0: the work order's reads.
+      if (field === 'dueDate' && !(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)))
+        details.push(`${label} optional "dueDate" must be a YYYY-MM-DD string`);
+      if (field === 'triage' && typeof value !== 'boolean')
+        details.push(`${label} optional "triage" must be a boolean`);
+      if (
+        field === 'pin' &&
+        !(
+          isPlainObject(value) &&
+          ['reason', 'actor', 'actorName', 'at'].every(
+            (key) => value[key] === undefined || isNonEmptyString(value[key])
+          )
+        )
+      )
+        details.push(
+          `${label} optional "pin" must be an object of non-empty strings (reason, actor, actorName, at)`
+        );
       if (
         field === 'agentDisposition' &&
         !(typeof value === 'string' && AGENT_DISPOSITIONS.includes(value))

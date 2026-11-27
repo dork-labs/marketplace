@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the sixteen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the seventeen groom invariants, closes shipped/duplicate/junk work and expired Could items with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog
@@ -27,7 +27,7 @@ one team's identifiers: stop and fix the read first.
 go to the operator at the phase-5 gate. Labels, priorities, estimates, states,
 relations and description sections proceed under the operator's approval of the groom.
 
-**The sixteen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
+**The seventeen invariants** are the oracle, not prose: `flow audit --json` (exit 1 = an
 invariant fails); `node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help`
 lists them.
 
@@ -65,12 +65,12 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
 - **Expired Coulds:** each GRM-16 failure in the baseline audit is a waiting Could
-  untouched for `groom.couldExpiryDays` (default 60) or more days. Propose closing it as `canceled` with the comment the
-  failure quotes. A Could carrying a `groom.neverExpireLabels` label (security
-  work, by default) is never reported. Its evidence is its
-  last-touched date; it needs no ship proof.
+  untouched past `groom.couldExpiryDays`. Propose closing it as `canceled` with the comment the
+  failure quotes; `groom.neverExpireLabels` exempts one. Evidence: its last-touched date.
+- **Pins:** report each GRM-17 failure to the operator, naming who pinned it and when.
+  Never remove a pin or write its `pin:` reason yourself.
 - **No project:** every GRM-2 failure is an open item with no project. Phase 4 gives it
-  one (the current maintenance project when none fits); never leave one project-less.
+  one (maintenance when none fits); never leave one project-less.
 
 Every closure carries a `flow comment` with evidence. Ambiguity stays open and is flagged.
 

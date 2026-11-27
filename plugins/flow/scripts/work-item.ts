@@ -202,6 +202,80 @@ export interface WorkItem {
    * falls back to {@link createdAt}.
    */
   updatedAt?: string;
+  /**
+   * The date the item is due, `YYYY-MM-DD`, when the tracker has one (contract
+   * 3.2.0). The work order's first key inside a band: earliest first, none
+   * last. Absent when unset; never a guess.
+   */
+  dueDate?: string;
+  /**
+   * `true` when the tracker holds the item in its triage inbox: a holding state
+   * the adapter folds into the `backlog` category (contract 3.2.0). The work
+   * order lists such an item under "needs triage" instead of ranking it.
+   * Absent means not in triage.
+   */
+  triage?: boolean;
+  /**
+   * Why and by whom the item is pinned, read when it carries the `pin` label
+   * (contract 3.2.0). Absent on an item with no `pin` label.
+   */
+  pin?: PinInfo;
+}
+
+/**
+ * The record behind a `pin` label: the reason a person wrote in a comment
+ * starting `pin:`, and who added the label and when, from the tracker's
+ * history. Each field is absent when the tracker does not say; the groom
+ * (GRM-17) flags a pin with no reason, or one added by someone outside
+ * `order.pinSetters`.
+ */
+export interface PinInfo {
+  /** The text after `pin:` in the latest comment that starts with it. */
+  reason?: string;
+  /** Account id of whoever added the `pin` label. */
+  actor?: string;
+  /** Display name of that account, when the tracker gives one. */
+  actorName?: string;
+  /** When the `pin` label was added, ISO-8601. */
+  at?: string;
+}
+
+/**
+ * A project's status in the work order's project layer. `started` projects
+ * feed the issue order; `planned` ones queue; `paused` and `backlog` are out
+ * unless asked for; `completed` and `canceled` are out.
+ */
+export type ProjectStatus = 'started' | 'planned' | 'paused' | 'backlog' | 'completed' | 'canceled';
+
+/**
+ * A project as the adapter reads it for the work order's project layer
+ * (contract 3.2.0, `getBacklogSnapshot`'s `projectInfo`). Remaining open
+ * estimate is not here: the project ranking sums it from the items.
+ */
+export interface ProjectInfo {
+  /** Tracker-native project id. */
+  id: string;
+  /** Human-readable project name. */
+  name: string;
+  /** The project's short, stable key in the tracker; the last tie-break. */
+  slugId: string;
+  /** The project's status. */
+  statusType: ProjectStatus;
+  /**
+   * Tracker-native priority on the 0–4 scale (`0` none · `1` urgent · `2`
+   * high · `3` medium · `4` low), or absent when unset.
+   */
+  priority?: WorkItemPriority;
+  /** Target date, `YYYY-MM-DD`, or absent when unset. */
+  targetDate?: string;
+  /** Every label on the project, namespaced `group/name` like an item's. */
+  labels: string[];
+  /** Ids of the projects this one waits on (project relations). */
+  blockedBy: string[];
+  /** ISO-8601 creation time, when the tracker says. */
+  createdAt?: string;
+  /** The tracker's manual sort position, when it has one. */
+  sortOrder?: number;
 }
 
 /**

@@ -123,7 +123,7 @@ export function findAnswer(
  *
  * @param comment - The answering comment.
  * @param identifier - The item.
- * @returns E.g. `the comment by dorian on ACME-12 at 2026-09-26T12:05:00Z`.
+ * @returns E.g. `the comment by mira on ACME-12 at 2026-09-26T12:05:00Z`.
  */
 export function answerPointer(comment: ItemComment, identifier: string): string {
   const who = comment.author === '' ? 'a person' : comment.author;

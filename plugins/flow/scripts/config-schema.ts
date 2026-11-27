@@ -488,6 +488,15 @@ export const DispatchRankSchema = z.enum([
 ]);
 /** Tie-break order by work-item size (§4). */
 export const SizeOrderSchema = z.enum(['small-first', 'large-first']);
+/** Which dispatch ladder `flow next` uses: today's (`v1`) or the work order (`v2`). */
+export const DispatchLadderSchema = z.enum(['v1', 'v2']);
+/**
+ * One key that orders items inside a band of the work order: due date
+ * (earliest first), project rank, how many open items it unblocks (more
+ * first), type (Bug, Improvement, Feature), size (smaller first) and age
+ * (older first).
+ */
+export const OrderKeySchema = z.enum(['dueDate', 'projectRank', 'unblocks', 'type', 'size', 'age']);
 
 /** Dispatch policy — what to work on next (§4). */
 export const DispatchSchema = z
@@ -498,6 +507,61 @@ export const DispatchSchema = z
       .default(['unblockers', 'priority', 'projectStatus', 'type', 'size', 'age']),
     /** Size tie-break order. */
     sizeOrder: SizeOrderSchema.default('small-first'),
+    /**
+     * Which ladder `flow next` picks from. `v1` (the default) is the 7-tier
+     * ladder above, gated by `agent/ready`. `v2` takes its picks from the work
+     * order `flow order` prints (bands, due date, project rank, inheritance,
+     * pins); the PR and WIP caps then hold starting, not ranking.
+     */
+    ladder: DispatchLadderSchema.default('v1'),
+    /**
+     * The keys that order items inside one band of the work order, in
+     * precedence. The issue number always breaks the last tie. `type` (Bug,
+     * then Improvement, then Feature) is available but not in the default.
+     */
+    orderKeys: z
+      .array(OrderKeySchema)
+      // Zod's JSON Schema has no uniqueItems; the parse refuses a repeat.
+      .refine((keys) => new Set(keys).size === keys.length, {
+        message: 'must not list a key twice',
+      })
+      .default(['dueDate', 'projectRank', 'unblocks', 'size', 'age']),
+  })
+  .prefault({});
+
+/**
+ * The project layer of the work order: how many projects may be Started at
+ * once. The function never changes a project's status; over the cap it names
+ * the lowest-ranked Started projects so a person can pause or finish one.
+ */
+export const ProjectsSchema = z
+  .object({
+    /** How many projects may be Started at once. Default: 6. */
+    startedCap: z.number().int().positive().default(6),
+  })
+  .prefault({});
+
+/** A `group/name` label: one slash, neither part empty or edged with space. */
+const PERSON_LABEL_PATTERN = /^[^/\s](?:[^/]*[^/\s])?\/[^/\s](?:[^/]*[^/\s])?$/;
+
+/** Who may move work to the top of the work order, and whose work stays out of it. */
+export const OrderSchema = z
+  .object({
+    /**
+     * Tracker account ids allowed to add the `pin` label. The groom (GRM-17)
+     * flags a pin added by anyone else. Default: none, which flags no pin on
+     * who added it.
+     */
+    pinSetters: z.array(z.string().min(1)).default([]),
+    /**
+     * A `group/name` label (say `owner/someone`) that keeps an item, or every
+     * item in a project carrying it, out of the agent order: listed apart as
+     * a person's own work. No default: unset, nothing is kept out.
+     */
+    personLabel: z
+      .string()
+      .regex(PERSON_LABEL_PATTERN, 'must be a group/name label, like owner/someone')
+      .optional(),
   })
   .prefault({});
 
@@ -1292,6 +1356,10 @@ export const FlowConfigSchema = z
     involvement: InvolvementSchema,
     /** Dispatch policy. */
     dispatch: DispatchSchema,
+    /** The project layer of the work order: the Started cap. */
+    projects: ProjectsSchema,
+    /** Who may pin work to the top of the work order. */
+    order: OrderSchema,
     /** Gates — plan approval, review/auto-merge, circuit breakers. */
     gates: GatesSchema,
     /** Adversarial pre-PR review policy. */

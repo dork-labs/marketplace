@@ -12,10 +12,24 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Flow now signs in the newer form too, the same way DorkOS signs its own pull requests. Inside DorkOS, the signature names the agent, its chat and its space.
 - Reading and writing the newer form ship together in this release. An older Flow reads a newer signature as no signature, so a reply to it starts a fresh session. Nothing breaks.
 - On pull requests, the signature keeps only the first 8 characters of the chat's id and never names the computer. On tracker comments and items it keeps the whole id and the code for this computer only when the tracker's adapter says the tracker is private, as Linear's does. A tracker that says nothing gets the shorter pull request form.
-- If you wrote your own tracker adapter, it can now say whether its tracker is private (adapter contract 3.2.0). Until it does, its comments get the shorter form.
+- If you wrote your own tracker adapter, it can now say whether its tracker is private (adapter contract 3.3.0). Until it does, its comments get the shorter form.
 - When you answer a question by clicking in DorkOS, the signature on your answer never names the agent's chat, agent or space. It is your answer, not the agent's.
 - A signature that still names a computer by its name, from before Flow 0.99.2, no longer counts as naming any computer. A reply to one starts a fresh session instead of joining the old one.
 - A signature is only ever a hint about where a reply might go. Flow never delivers a reply into a session this computer doesn't hold, whatever the signature says.
+## 0.100.0
+
+**Reinstall Flow to get `flow order`. Nothing changes what the drain picks until you set `dispatch.ladder` to `v2`.**
+
+- New: `flow order` shows what comes next, worked out only from your tracker. First your projects in rank, then your issues best first, each with a short reason for its place: "due Nov 27", "project #2 Billing", "unblocks ABC-12", "size 2".
+- Issues go in bands: pinned, Urgent, release gate, confirmed Musts (High, in Todo), Shoulds, Coulds. Inside a band, an earlier due date goes first, then the project's rank, then work that unblocks other work, then smaller and older items.
+- A blocked item doesn't rank. The item blocking it moves up to its place instead, and says so, even when that blocker sits in a project that hasn't started. Items that block each other in a loop are listed with the loop named.
+- A Security High whose due date is a real outside deadline (e.g. a disclosure date) counts as a confirmed Must in any state but Triage.
+- An item whose project is finished or canceled is listed under "needs triage" instead of waiting forever.
+- Nothing is hidden. Work in progress, items waiting on a blocker or on a project that hasn't started, items that need triage, and items carrying the label you set in `order.personLabel` (say `owner/someone`, for work a person keeps for themself) are each listed apart, with the reason. With no `order.personLabel`, nothing is kept out.
+- `flow order --why <item>` explains one item's place and which field would move it up. `--rank-of <item>` prints just its place.
+- A `pin` label puts an item at the very top. Flow shows who pinned it, when, and the reason from a comment starting `pin:`. When an Urgent item sits below a pin, the list starts with a line naming it. `flow audit` now flags a pin with no reason, or one added by someone outside `order.pinSetters`.
+- With `dispatch.ladder: "v2"`, `flow next` and the drain pick from this same list. The open-PR cap, the WIP cap and readiness then only decide what may start now. Work they hold back stays in the list, with the reason.
+- The Linear adapter now reads due dates, the Triage state, who pinned an item, and each project's priority, target date, labels and the projects it waits on.
 
 ## 0.99.2
 

@@ -38,7 +38,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const DISPATCH_SCRIPT = path.resolve(here, '..', '..', 'scripts', 'dispatch.ts');
 
 const AGENT = 'flow-bot';
-const HUMAN = 'dorian';
+const HUMAN = 'mira';
 
 let temp: TempProject | undefined;
 

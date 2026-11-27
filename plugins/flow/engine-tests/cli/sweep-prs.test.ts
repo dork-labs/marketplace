@@ -127,7 +127,7 @@ async function flow(
 ) {
   temp ??= tempProject({
     tracker: 'fake',
-    identity: { agent: 'flow-bot', reviewer: 'dorian' },
+    identity: { agent: 'flow-bot', reviewer: 'mira' },
     ...opts.config,
   });
   let out = '';

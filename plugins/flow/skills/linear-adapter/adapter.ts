@@ -57,6 +57,8 @@ import type {
   InboxRead,
   ItemComment,
   ItemWithComments,
+  PinInfo,
+  ProjectInfo,
   StateCategory,
   WorkItem,
   NewItem,
@@ -67,7 +69,7 @@ import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '3.2.0';
+export const CONTRACT_VERSION = '3.3.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -80,6 +82,14 @@ export const RELATION_PAGE_SIZE = 40;
 export const CLOSED_PAGE_SIZE = 250;
 /** Project ids per projects query. */
 const PROJECT_CHUNK = 100;
+/**
+ * Projects per page when pulling the work order's project fields. Each asks
+ * for its labels and both directions of its relations, so the page stays well
+ * under Linear's complexity cap of 10 000.
+ */
+export const PROJECT_INFO_PAGE_SIZE = 25;
+/** How many history events and comments the pin read looks through. */
+const PIN_READ_DEPTH = 50;
 /** A backstop against a cursor that never ends. */
 const MAX_PAGES = 200;
 
@@ -104,7 +114,7 @@ const DISPOSITIONS = ['ready', 'claimed', 'completed', 'needs-input'] as const;
 const LABEL_PAGE = 100;
 
 /** The fields every normalized issue needs, except its project and relations. */
-const ISSUE_FIELDS = `id identifier title description priority estimate createdAt updatedAt
+const ISSUE_FIELDS = `id identifier title description priority estimate dueDate createdAt updatedAt
   state { name type } assignee { id } parent { identifier }
   labels(first: ${LABEL_PAGE}) { nodes { id name parent { name } } }`;
 
@@ -163,6 +173,38 @@ export const SNAPSHOT_CLOSED_QUERY = `query FlowSnapshotClosed($teamId: String!,
 export const PROJECTS_QUERY = `query FlowProjects($ids: [ID!]) {
   projects(first: ${PROJECT_CHUNK}, filter: { id: { in: $ids } }) {
     nodes { id name state status { type } lead { id } }
+  }
+}`;
+
+/**
+ * The work order's project layer (contract 3.2.0): every open project of the
+ * team, with its status, priority, target date, labels and project relations
+ * in both directions, paged at {@link PROJECT_INFO_PAGE_SIZE}.
+ */
+export const PROJECT_INFO_QUERY = `query FlowProjectInfo($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    projects(first: $first, after: $after, filter: { status: { type: { nin: ["completed", "canceled"] } } }) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id name slugId priority targetDate createdAt sortOrder status { type }
+        labels(first: 20) { nodes { name parent { name } } }
+        relations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+        inverseRelations(first: 10) { nodes { type anchorType relatedAnchorType project { id } relatedProject { id } } }
+      }
+    }
+  }
+}`;
+
+/**
+ * Who pinned an item and why (contract 3.2.0): its history, for the event
+ * that added the `pin` label, and its comments, for the latest one starting
+ * `pin:`. Read only for items that carry the label.
+ */
+export const PIN_QUERY = `query FlowPin($id: String!) {
+  issue(id: $id) {
+    identifier
+    history(first: ${PIN_READ_DEPTH}) { nodes { createdAt actor { id name } addedLabels { name parent { name } } } }
+    comments(first: ${PIN_READ_DEPTH}) { nodes { body createdAt } }
   }
 }`;
 
@@ -343,6 +385,7 @@ interface RawIssue {
   description?: string | null;
   priority?: number | null;
   estimate?: number | null;
+  dueDate?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
@@ -372,6 +415,45 @@ interface RawProject {
   state?: string | null;
   status?: { type?: string | null } | null;
   lead?: { id?: string | null } | null;
+}
+
+/** One project relation, as Linear returns it from either side. */
+interface RawProjectRelation {
+  type?: string | null;
+  anchorType?: string | null;
+  relatedAnchorType?: string | null;
+  project?: { id?: string | null } | null;
+  relatedProject?: { id?: string | null } | null;
+}
+
+/** A project node from {@link PROJECT_INFO_QUERY}. */
+export interface RawProjectInfo {
+  id: string;
+  name?: string | null;
+  slugId?: string | null;
+  priority?: number | null;
+  targetDate?: string | null;
+  createdAt?: string | null;
+  sortOrder?: number | null;
+  status?: { type?: string | null } | null;
+  labels?: { nodes?: RawLabel[] | null } | null;
+  relations?: { nodes?: RawProjectRelation[] | null } | null;
+  inverseRelations?: { nodes?: RawProjectRelation[] | null } | null;
+}
+
+/** What {@link PIN_QUERY} returns for one issue. */
+export interface RawPinRead {
+  identifier?: string | null;
+  history?: {
+    nodes?:
+      | {
+          createdAt?: string | null;
+          actor?: { id?: string | null; name?: string | null } | null;
+          addedLabels?: RawLabel[] | null;
+        }[]
+      | null;
+  } | null;
+  comments?: { nodes?: { body?: string | null; createdAt?: string | null }[] | null } | null;
 }
 
 /** A comment node. */
@@ -621,7 +703,124 @@ export function normalizeIssue(
   if (disposition !== undefined) item.agentDisposition = disposition;
   if (typeof node.createdAt === 'string') item.createdAt = node.createdAt;
   if (typeof node.updatedAt === 'string') item.updatedAt = node.updatedAt;
+  if (typeof node.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(node.dueDate)) {
+    item.dueDate = node.dueDate;
+  }
+  // Triage folds into `backlog` above; the work order still needs to see it.
+  if (node.state?.type === 'triage') item.triage = true;
   return item;
+}
+
+/** Linear project status types the work order knows. */
+const PROJECT_STATUSES = new Set<string>([
+  'started',
+  'planned',
+  'paused',
+  'backlog',
+  'completed',
+  'canceled',
+]);
+
+/**
+ * The ids of the projects a project waits on, from its relations in both
+ * directions. Linear records a dependency with an anchor on each side; the
+ * side anchored at its `end` must finish before the side anchored at its
+ * `start` begins, so the `start` side waits on the `end` side. Any other
+ * relation (or anchors that do not say who waits) is not a dependency.
+ *
+ * @param node - The project node.
+ * @returns The blocking project ids, sorted, without repeats.
+ */
+export function projectBlockers(node: RawProjectInfo): string[] {
+  const out = new Set<string>();
+  const edges = [...(node.relations?.nodes ?? []), ...(node.inverseRelations?.nodes ?? [])];
+  for (const edge of edges) {
+    if (edge?.type !== 'dependency') continue;
+    const own = edge.project?.id;
+    const related = edge.relatedProject?.id;
+    if (!own || !related) continue;
+    let blocker: string | undefined;
+    let waiter: string | undefined;
+    if (edge.anchorType === 'end' && edge.relatedAnchorType === 'start') {
+      blocker = own;
+      waiter = related;
+    } else if (edge.anchorType === 'start' && edge.relatedAnchorType === 'end') {
+      blocker = related;
+      waiter = own;
+    }
+    if (waiter === node.id && blocker !== undefined && blocker !== node.id) out.add(blocker);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Normalize a project node into the work order's {@link ProjectInfo}, or
+ * `null` when Linear gives no status flow knows.
+ *
+ * @param node - The project node.
+ * @returns The project, or `null`.
+ */
+export function normalizeProjectInfo(node: RawProjectInfo): ProjectInfo | null {
+  const status = node.status?.type;
+  if (typeof status !== 'string' || !PROJECT_STATUSES.has(status)) return null;
+  const out: ProjectInfo = {
+    id: node.id,
+    name: node.name ?? '',
+    slugId: node.slugId ?? node.id,
+    statusType: status as ProjectInfo['statusType'],
+    labels: [...new Set((node.labels?.nodes ?? []).map(namespacedLabel))],
+    blockedBy: projectBlockers(node),
+  };
+  const p = node.priority;
+  if (typeof p === 'number' && Number.isInteger(p) && p >= 1 && p <= 4) {
+    out.priority = p as NonNullable<ProjectInfo['priority']>;
+  }
+  if (typeof node.targetDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(node.targetDate)) {
+    out.targetDate = node.targetDate;
+  }
+  if (typeof node.createdAt === 'string') out.createdAt = node.createdAt;
+  if (typeof node.sortOrder === 'number' && Number.isFinite(node.sortOrder)) {
+    out.sortOrder = node.sortOrder;
+  }
+  return out;
+}
+
+/** The bare label the work order reads as a pin. */
+const PIN_LABEL = 'pin';
+
+/**
+ * Read who pinned an item and why: the latest history event that added the
+ * bare `pin` label (its actor and time), and the latest comment whose text
+ * starts with `pin:` (the rest of its first line is the reason). Each field is
+ * left out when Linear does not say.
+ *
+ * @param read - The issue as {@link PIN_QUERY} returns it.
+ * @returns The pin record.
+ */
+export function pinInfoOf(read: RawPinRead | null | undefined): PinInfo {
+  const pin: PinInfo = {};
+  const added = (read?.history?.nodes ?? [])
+    .filter((event) =>
+      (event?.addedLabels ?? []).some((label) => namespacedLabel(label) === PIN_LABEL)
+    )
+    .filter((event) => typeof event.createdAt === 'string')
+    .sort((a, b) => (b.createdAt as string).localeCompare(a.createdAt as string))[0];
+  if (added !== undefined) {
+    if (added.actor?.id) pin.actor = added.actor.id;
+    if (added.actor?.name) pin.actorName = added.actor.name;
+    pin.at = added.createdAt as string;
+  }
+  const comment = (read?.comments?.nodes ?? [])
+    .filter((node) => typeof node?.body === 'string' && /^\s*pin:/i.test(node.body))
+    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0];
+  if (comment !== undefined) {
+    const reason = (comment.body as string)
+      .replace(/^\s*pin:/i, '')
+      .split('\n')[0]
+      .trim();
+    if (reason !== '') pin.reason = reason;
+  }
+  return pin;
 }
 
 // ---------------------------------------------------------------------------
@@ -728,6 +927,8 @@ export function readDocument(query: string): string {
     SNAPSHOT_CLOSED_QUERY,
     PANEL_CHANGES_QUERY,
     PROJECTS_QUERY,
+    PROJECT_INFO_QUERY,
+    PIN_QUERY,
     ITEM_QUERY,
     ITEM_WITH_COMMENTS_QUERY,
     INBOX_QUERY,
@@ -1109,6 +1310,32 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       return item === null ? [] : [item];
     });
 
+    // The work order's reads: every open project's fields, and who pinned each
+    // pinned item. A panel read (a bounded maxPages) is display-only and skips
+    // them. They are extras: a failure leaves the field out with a warning and
+    // never fails the snapshot, which v1 dispatch, the audit and the drain need.
+    let projectInfo: ProjectInfo[] | undefined;
+    if (maxPages === MAX_PAGES) {
+      try {
+        projectInfo = await projectInfoOf(teamId);
+      } catch (error) {
+        warn(
+          `Linear project fields could not be read (${error instanceof Error ? error.message : String(error)}); projects rank by status alone`
+        );
+      }
+      for (const item of items) {
+        if (!item.labels.includes(PIN_LABEL)) continue;
+        try {
+          const data = await graphql<{ issue?: RawPinRead | null }>(PIN_QUERY, { id: item.id });
+          item.pin = pinInfoOf(data.issue);
+        } catch (error) {
+          warn(
+            `who pinned ${item.identifier} could not be read (${error instanceof Error ? error.message : String(error)}); its pin shows no reason`
+          );
+        }
+      }
+    }
+
     let closed: ClosedItem[] = [];
     if (opts.includeClosed) {
       const nodes = inTeam(
@@ -1148,7 +1375,35 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         const project = projectMap.get(id);
         return project === undefined ? [] : [project];
       }),
+      ...(projectInfo === undefined ? {} : { projectInfo }),
     };
+  }
+
+  /** Every open project of the team, with the work order's fields. */
+  async function projectInfoOf(teamId: string): Promise<ProjectInfo[]> {
+    const out: ProjectInfo[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const data: { team?: { projects?: RawPage<RawProjectInfo> | null } | null } = await graphql(
+        PROJECT_INFO_QUERY,
+        { teamId, first: PROJECT_INFO_PAGE_SIZE, after }
+      );
+      const connection = data.team?.projects;
+      if (connection === undefined || connection === null) {
+        throw new TrackerError('Linear returned no team projects; check connection.team.id');
+      }
+      for (const node of connection.nodes ?? []) {
+        const project = normalizeProjectInfo(node);
+        if (project !== null) out.push(project);
+      }
+      if (connection.pageInfo?.hasNextPage !== true) return out;
+      after = connection.pageInfo.endCursor ?? null;
+      if (after === null)
+        throw new TrackerError('Linear said there was another page but gave no cursor');
+    }
+    throw new TrackerError(
+      `the team has more than ${MAX_PAGES} pages of projects; flow stopped reading`
+    );
   }
 
   async function getItem(
