@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.3.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.4.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -656,7 +656,7 @@ interface TrackerTransport {
   call it and cannot pin the acting identity, so `flow` refuses it (exit 3).
 - Secrets never reach stdout, stderr or a file the adapter writes.
 
-**The seven methods.** The adapter lists the ones it implements in
+**The methods.** The adapter lists the ones it implements in
 `capabilities`; a `flow` command that needs one the adapter lacks exits 3
 naming it.
 
@@ -668,7 +668,9 @@ type Capability =
   | 'applyWorkState'
   | 'comment'
   | 'createItem'
-  | 'getInbox';
+  | 'getInbox'
+  | 'getViewOrder'
+  | 'setPositions';
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
@@ -682,6 +684,22 @@ interface CodeAdapter {
   comment(item: WorkItem, body: string): Promise<void>;
   createItem?(item: NewItem): Promise<{ id: string; identifier: string; url: string }>; // since 2.2.0
   getInbox?(opts?: { since?: string }): Promise<InboxRead[]>; // since 3.0.0
+  getViewOrder?(kind: 'issues' | 'projects', viewId: string): Promise<ViewEntry[]>; // since 3.4.0
+  setPositions?(writes: readonly PositionWrite[]): Promise<void>; // since 3.4.0
+}
+
+interface ViewEntry {
+  id: string; // tracker-native id, what a write takes
+  key: string; // an issue's identifier, a project's id
+  name: string; // an issue's title, a project's name
+  position: number; // lower first
+}
+
+interface PositionWrite {
+  kind: 'issues' | 'projects';
+  id: string;
+  key: string;
+  position: number; // never exactly 0
 }
 
 interface InboxRead {
@@ -751,6 +769,8 @@ labels a `type/*` label implies (`scripts/type-labels.ts`).
 | `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
 | `createItem`         | creating an item (capture, follow-ups)      | `flow create`, `flow selftest --file`               |
 | `getInbox`           | `getInbox` (since 3.0.0)                    | `flow inbox`, the only inbox read a model may use   |
+| `getViewOrder`       | reading a saved view's order (since 3.4.0)  | `flow order --write-order`, `--check-order`         |
+| `setPositions`       | writing manual positions (since 3.4.0)      | `flow order --write-order`, the drain after a claim |
 
 **The two optional reads.**
 
@@ -828,6 +848,34 @@ labels a `type/*` label implies (`scripts/type-labels.ts`).
 - After every write the `flow` command re-reads the item with `getItem` and
   exits 4 when the tracker disagrees with the change. A write the tracker
   reported as done but did not keep is caught there, never trusted.
+
+**`getViewOrder` and `setPositions` (since 3.4.0) keep a saved view in the
+work order.** Both are optional; without them `flow order --write-order` and
+`--check-order` exit 3 naming the missing one.
+
+- `getViewOrder(kind, viewId)` returns the view's members, lower position
+  first, each as `{ id, key, name, position }`: the key is an issue's
+  identifier or a project's id. It throws a `ConfigError` (exit 3) when the
+  view does not exist or lists the other kind, and drops another team's issue
+  or project with a warning. Read-only.
+- `setPositions(writes)` writes the position field and nothing else, one
+  tracker write per entry, in order. It writes an issue by its key, so the
+  check is on what is written: before any write it refuses an issue key
+  outside the team, a project that is not one of the team's (exit 5) and a
+  position of exactly 0. It throws on the
+  first write the tracker does not confirm; `flow` writes only positions that
+  differ, so a rerun picks up where it stopped. After writing, `flow` reads
+  the views back and exits 4 when the order did not stick. A short lock keeps
+  two writing runs from interleaving. `flow` calls it with at most 10 writes
+  at a time, pauses between calls, and writes at most `order.maxWrites`
+  positions per run.
+- The order `flow` writes: the ranked members the view shows, best first,
+  then every other member in one block, in the order it had. A member the
+  order does not rank (blocked, waiting for triage, new) sitting above the
+  last ranked one is drift.
+- Where a tracker keeps one position per item for every list ordered by hand
+  (Linear's `sortOrder`), say so in the adapter's docs: a write moves the item
+  in every such list, not just the view.
 
 **Errors.** Anything a method throws becomes exit 4 ("could not reach the
 tracker"), unless it is one of flow's own typed errors, which keep their code.
@@ -925,6 +973,12 @@ declaration.
 - **PATCH bump** - clarification or wording only; no behavioral change.
 
 ### What each version added
+
+- **3.4.0** - additive (MINOR, DOR-5068): a saved view's manual order. Two
+  optional methods, `getViewOrder` and `setPositions` (rules under the code
+  realization). `flow order --write-order` and `--check-order` refuse an adapter
+  that targets an older contract or lacks either. An adapter at 3.3 still loads,
+  and every other verb works as before.
 
 - **3.3.0** - additive (MINOR, DOR-5069): reclassifying and optional labels.
   `NewItem` gains optional `optionalLabels`, and `WorkStateChange` gains

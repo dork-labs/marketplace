@@ -24,3 +24,11 @@ Since contract 3.3.0 a write's `optionalLabels` (on `createItem` and
 `applyWorkState`) are added only when the team has the label, and skipped
 otherwise. The fake team leaves out the bare `Bug`, `Improvement` and
 `Feature` labels, so a test that wants them lists them in the file's `labels`.
+
+Since contract 3.4.0 the file's `views` hold saved views by id, each with its
+`kind` (`issues` or `projects`) and its `members` (issue identifiers or
+project ids), and `positions` holds the manual order by key, shared by every
+view as Linear's `sortOrder` is. `getViewOrder` reads a view lower position
+first; `setPositions` writes `positions` and nothing else. The team's projects
+are those in `projectInfo` and `projects`: a view drops any other project, and
+a write refuses one.

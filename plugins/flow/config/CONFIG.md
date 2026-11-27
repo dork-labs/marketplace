@@ -563,7 +563,12 @@ status, priority, target date and relations.
 ```jsonc
 "dispatch": { "ladder": "v2", "orderKeys": ["dueDate", "projectRank", "unblocks", "size", "age"] },
 "projects": { "startedCap": 6 },
-"order": { "pinSetters": ["<tracker account id>"], "personLabel": "owner/someone" }
+"order": {
+  "pinSetters": ["<tracker account id>"],
+  "personLabel": "owner/someone",
+  "views": { "issues": "<issue view id>", "projects": "<project view id>" },
+  "maxWrites": 300
+}
 ```
 
 - `dispatch.ladder` is which list `flow next` picks from. `v1`, the default,
@@ -601,6 +606,34 @@ status, priority, target date and relations.
   person keeps for themself. An item with it, or in a project with it, stays
   out of the agent order and is listed apart, under "Out of the agent order".
   It has no default: unset, nothing is kept out.
+- `order.views.issues` and `order.views.projects` are the ids of two saved
+  tracker views, ordered by hand (Linear: a custom view set to Manual order,
+  with no grouping). `flow order --write-order` writes the order into them:
+  the ranked issues the issue view shows, best first, and the Started then
+  Planned projects. Anything else the view shows (a blocked item, one waiting
+  for triage, a new one) goes after them, in the order it had. It moves only
+  the items whose place changed, so a second run writes nothing.
+  `flow order --check-order` reads both and exits 1 when either is out of
+  order, naming the first item in the wrong place. Each run saves its result
+  to `.dork/flow/order-views.json`, which `flow status` shows. Unset,
+  both stop and say what to set. On Linear the order is the workspace-wide
+  `sortOrder`, so writing it also moves the same issues and projects in every
+  other view ordered by hand.
+- Two things write the views: the hourly `flow-order` schedule and, under
+  `dispatch.ladder: "v2"`, the drain after a pass that claimed work. A rule
+  in your project's settings that allows `flow order --write-order` allows it
+  for every session there. What limits the writes is flow itself: the
+  adapter writes the position field and nothing else (on Linear, one of
+  flow's fixed mutations, a `sortOrder`-only `issueUpdate` or
+  `projectUpdate`), only for your team's issues and projects (another team's
+  project in the view is left alone and never counts as out of order), and
+  at most `order.maxWrites` a run, in batches of 10 with a one-second pause
+  between them.
+- `order.maxWrites` (default `300`, at most `1000`) is the most positions one
+  write run changes. When the views need more, the run writes the first ones
+  from the top, says how many are left ("Wrote 300 of 512 positions…"), saves
+  that for `flow status`, and exits 1. Exit 1 here is not a failure: the
+  views are not in order yet, and the next run writes the rest.
 
 ## `fleet`: the account setup reminder
 

@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `3.3.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `3.4.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -288,6 +288,41 @@ and `Feature` labels that a `type/*` label implies
   refuses an adapter below contract 3.3.0 before any write.
 - **The read-back** checks the `type/*` label and that each dropped label is
   gone. It never asks for an optional label.
+
+### A view's manual order (contract 3.4.0)
+
+`flow order --write-order` and `--check-order` read and write the manual order
+of two saved views (`order.views.issues`, `order.views.projects`). What Linear
+stores, found by introspecting the API and reading the team's views read-only
+on 2026-11-23:
+
+- **There is no per-view order.** A `CustomView` holds its filter
+  (`filterData`, `projectFilterData`) and its display preferences
+  (`viewPreferencesValues.viewOrdering` for issues, `projectViewOrdering` for
+  projects), and nothing else about order. A view set to Manual order shows
+  its issues by `Issue.sortOrder`, ascending, and its projects by
+  `Project.sortOrder`, ascending.
+- **Both positions are workspace-wide.** Linear's schema calls
+  `Issue.sortOrder` "the issue's position in manually sorted lists" and
+  `Project.sortOrder` "the sort order for the project within the workspace".
+  Writing one moves that issue or project in every list ordered by hand: a
+  team board on Manual, a project's issue list, another custom view. Lists
+  grouped by priority use a separate field, `prioritySortOrder`, so the two
+  views must have no grouping. Flow never writes `prioritySortOrder`.
+- **Reading.** `customView(id:)` with `issues(sort: [{ manual: { order:
+  Ascending } }])` or `projects(...)` returns the view's members in that
+  order, each with its `sortOrder` (a float; new issues get about 1000 less
+  than the last). `modelName` (`Issue` or `Project`) says which kind a view
+  lists. A page of 100 with no relations costs far under the 10,000 cap.
+- **Writing.** `issueUpdate(id:, input: { sortOrder })` and
+  `projectUpdate(id:, input: { sortOrder })`, one call per item, nothing else
+  in the input. An issue is written by its identifier (Linear's `id:` takes
+  one), so the team check covers what is written. A value between two neighbours places the item between them,
+  so one moved item is one write. `projectUpdate` reads a `sortOrder` of
+  exactly 0 as "append", so flow never sends 0. Linear "may adjust positions
+  to avoid collisions".
+- **Team scope.** A view can show another team's issues; the read drops them
+  with a warning, and a write refuses an issue key outside the configured team.
 
 ---
 
@@ -622,5 +657,5 @@ provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), **INV-6** (each comment's `authorIsTrusted`
 read from Linear's `active`/`guest`/`app` flags, team and `botActor`), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `3.3.0`,
+broader candidate set, never pre-filtered). It targets contract version `3.4.0`,
 and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).

@@ -320,7 +320,7 @@ describe('/flow:status reads the schedules and never changes them', () => {
       "keeps a global install's per-project copy",
     ]);
     expect(
-      statusGaps(status.replace(', `flow-triage` or `flow-retro`', ' or `flow-triage`'))
+      statusGaps(status.replace(', `flow-retro` or `flow-order`', ' or `flow-retro`'))
     ).toEqual(['keeps every shipped flow schedule']);
     for (const wide of ['mcp__dorkos__*', 'mcp__dorkos']) {
       expect(

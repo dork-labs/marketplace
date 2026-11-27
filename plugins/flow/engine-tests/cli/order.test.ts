@@ -263,4 +263,44 @@ describe('flow order', () => {
     expect(out.projects.now.map((p: { id: string }) => p.id)).toEqual(['p-billing']);
     expect(out.issues.map((i: { identifier: string }) => i.identifier)).toContain('ABC-1');
   });
+
+  it("--for-project keeps one project's issues in the same order, with the same places and why", async () => {
+    const backlog = { items: items(), projectInfo: PROJECTS };
+    const full = JSON.parse((await runFlow(['order', '--json'], backlog)).stdout);
+    const out = JSON.parse(
+      (await runFlow(['order', '--for-project', 'billing', '--json'], backlog)).stdout
+    );
+    expect(out.project).toEqual({ id: 'p-billing', name: 'Billing' });
+    expect(
+      out.issues.map((i: { identifier: string; place: number }) => [i.identifier, i.place])
+    ).toEqual([
+      ['ABC-4', 1],
+      ['ABC-5', 3],
+      ['ABC-1', 4],
+    ]);
+    // Nothing re-sorted or re-explained: each entry is the full order's own.
+    for (const issue of out.issues) {
+      expect(issue).toEqual(
+        full.issues.find((i: { identifier: string }) => i.identifier === issue.identifier)
+      );
+    }
+    const byId = JSON.parse(
+      (await runFlow(['order', '--for-project', 'p-mobile', '-n', '1', '--json'], backlog)).stdout
+    );
+    expect(byId.issues.map((i: { identifier: string }) => i.identifier)).toEqual(['ABC-3']);
+    const text = (await runFlow(['order', '--for-project', 'Billing', '-n', '2'], backlog)).stdout;
+    expect(text).toMatch(/^Billing: 3 ranked issues; first 2/);
+    expect(text).toMatch(/3 +ABC-5/);
+    expect(text).not.toContain('ABC-1');
+  });
+
+  it('--for-project refuses a project it cannot find, and the view flags', async () => {
+    const backlog = { items: items(), projectInfo: PROJECTS };
+    const missing = await runFlow(['order', '--for-project', 'Nope'], backlog);
+    expect(missing.code).toBe(5);
+    expect(missing.stderr).toContain('Nope');
+    expect((await runFlow(['order', '--for-project', 'Billing', '--projects'], backlog)).code).toBe(
+      2
+    );
+  });
 });

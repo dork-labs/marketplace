@@ -87,6 +87,7 @@ function urgentLine(
     'tracker-unreachable': 3,
     unsupervised: 3.5,
     'nothing-ready': 4,
+    'order-drift': 4.5,
     paused: 5,
     'agents-merge': 6,
   };

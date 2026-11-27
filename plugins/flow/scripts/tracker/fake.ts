@@ -28,7 +28,7 @@
  * @module @dorkos/flow/tracker/fake
  */
 
-import { PreconditionError, TrackerError } from '../errors.ts';
+import { ConfigError, PreconditionError, TrackerError } from '../errors.ts';
 import { labelsAfterChange } from '../work-state.ts';
 import type {
   BacklogSnapshot,
@@ -41,7 +41,10 @@ import type {
   ItemWithComments,
   TrackerAccount,
   NewItem,
+  PositionWrite,
   ProjectInfo,
+  ViewEntry,
+  ViewKind,
   WorkItem,
   WorkItemProject,
   WorkStateChange,
@@ -49,7 +52,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '3.3.0';
+export const FAKE_CONTRACT_VERSION = '3.4.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -112,7 +115,7 @@ export interface FakeBacklog {
   tracker?: string;
   /** The team. Items outside it are refused. Default `{ key: 'FAKE', id: 'team-fake' }`. */
   team?: { key: string | null; id: string | null };
-  /** The capabilities to declare. Default: all five. */
+  /** The capabilities to declare. Default: every one. */
   capabilities?: Capability[];
   /** The account the adapter acts as. */
   user?: TrackerAccount;
@@ -154,6 +157,25 @@ export interface FakeBacklog {
    * at once). It widens the window a race between two processes needs.
    */
   getItemDelayMs?: number | Record<string, number>;
+  /**
+   * Saved views by id (contract 3.4.0): what each lists and its members, an
+   * issue by identifier and a project by id. The view's filter is this list.
+   */
+  views?: Record<string, FakeView>;
+  /**
+   * Manual positions by key (an issue's identifier, a project's id), lower
+   * first, shared by every view as Linear's `sortOrder` is. A member with none
+   * sits at 1000 times its place in its view's `members`.
+   */
+  positions?: Record<string, number>;
+}
+
+/** One saved view of the fake tracker (contract 3.4.0). */
+export interface FakeView {
+  /** What it lists. */
+  kind: ViewKind;
+  /** Its members: issue identifiers or project ids. */
+  members: string[];
 }
 
 /** One write the tracker accepted, in order. */
@@ -161,7 +183,8 @@ export type FakeWrite =
   | { method: 'applyWorkState'; identifier: string; change: WorkStateChange }
   | { method: 'comment'; identifier: string; author: string; body: string }
   | { method: 'mergePr'; identifier: string }
-  | { method: 'createItem'; identifier: string };
+  | { method: 'createItem'; identifier: string }
+  | { method: 'setPosition'; kind: ViewKind; key: string; position: number };
 
 /** How a {@link FakeTracker} is built. */
 export interface FakeTrackerOptions {
@@ -358,6 +381,14 @@ export class FakeTracker {
   }
 
   /** Whether an identifier is this team's. */
+  /** The team's projects: every one in `projectInfo` or `projects`. */
+  private ownProjects(): Set<string> {
+    return new Set([
+      ...(this.backlog.projectInfo ?? []).map((project) => project.id),
+      ...(this.backlog.projects ?? []).map((project) => project.id),
+    ]);
+  }
+
   private ownId(identifier: string): boolean {
     const key = this.team.key;
     return key === null || identifier.startsWith(`${key}-`);
@@ -386,7 +417,7 @@ export class FakeTracker {
     return new Set([...FAKE_TEAM_LABELS, ...(this.backlog.labels ?? [])]);
   }
 
-  /** The adapter, as a plain object with the six methods. */
+  /** The adapter, as a plain object with every method. */
   private buildAdapter(): CodeAdapter {
     return {
       capabilities: this.backlog.capabilities ?? [...ALL_CAPABILITIES],
@@ -443,7 +474,67 @@ export class FakeTracker {
         this.addComment(item.identifier, this.user.id, body);
       },
       createItem: async (spec) => this.createItem(spec),
+      getViewOrder: async (kind, viewId) => this.viewOrder(kind, viewId),
+      setPositions: async (writes) => this.setPositions(writes),
     };
+  }
+
+  /**
+   * A saved view's entries, lower position first (contract 3.4.0). Refuses a
+   * missing view, or one of the other kind, as a `ConfigError`; drops an
+   * issue or a project of another team, as the Linear adapter does.
+   */
+  private viewOrder(kind: ViewKind, viewId: string): ViewEntry[] {
+    this.read();
+    const saved = this.backlog.views?.[viewId];
+    if (saved === undefined) throw new ConfigError(`there is no view ${viewId}`);
+    if (saved.kind !== kind) {
+      throw new ConfigError(`view ${viewId} lists ${saved.kind}, not ${kind}`);
+    }
+    const entries = saved.members.flatMap((key, i): ViewEntry[] => {
+      const position = this.backlog.positions?.[key] ?? (i + 1) * 1000;
+      if (kind === 'projects') {
+        // Another team's project is dropped, as the Linear adapter does (it also warns).
+        if (!this.ownProjects().has(key)) return [];
+        const project = (this.backlog.projectInfo ?? []).find((p) => p.id === key);
+        return [{ id: key, key, name: project?.name ?? key, position }];
+      }
+      if (!this.ownId(key)) return [];
+      const item = this.backlog.items.find((candidate) => candidate.identifier === key);
+      return [{ id: item?.id ?? key, key, name: item?.title ?? key, position }];
+    });
+    return entries.sort((x, y) => x.position - y.position || (x.key < y.key ? -1 : 1));
+  }
+
+  /** Write positions in order (contract 3.4.0), refusing first what the Linear adapter refuses. */
+  private setPositions(writes: readonly PositionWrite[]): void {
+    this.read();
+    for (const write of writes) {
+      if (write.kind === 'issues' && !this.ownId(write.key)) {
+        throw new PreconditionError(
+          `${write.key} belongs to another team, not ${this.team.key}; flow only acts on its own team`
+        );
+      }
+      if (write.kind === 'projects' && !this.ownProjects().has(write.key)) {
+        throw new PreconditionError(
+          `the project ${write.key} is not one of team ${this.team.key}'s projects; flow only acts on its own team`
+        );
+      }
+      if (write.position === 0 || !Number.isFinite(write.position)) {
+        throw new TrackerError(`refusing position ${write.position} for ${write.key}`);
+      }
+    }
+    if (this.backlog.dropWrites) return;
+    for (const write of writes) {
+      (this.backlog.positions ??= {})[write.key] = write.position;
+      this.writes.push({
+        method: 'setPosition',
+        kind: write.kind,
+        key: write.key,
+        position: write.position,
+      });
+    }
+    this.persist(this.backlog);
   }
 
   /**

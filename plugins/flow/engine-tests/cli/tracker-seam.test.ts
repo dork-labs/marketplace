@@ -152,6 +152,8 @@ describe('finding the adapter code', () => {
         'getCurrentUser',
         'getInbox',
         'getItem',
+        'getViewOrder',
+        'setPositions',
       ].sort()
     );
     expect(await adapter.getCurrentUser()).toEqual({ id: 'agent-1', name: 'Fake agent' });

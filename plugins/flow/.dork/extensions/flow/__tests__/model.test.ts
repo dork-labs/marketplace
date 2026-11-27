@@ -493,6 +493,59 @@ describe('buildProject', () => {
     expect(build().conditions).toEqual([]);
   });
 
+  // DOR-5068: the work order views' last check or write, from .dork/flow/order-views.json.
+  it('raises order-drift while the last saved result says a view is out of order', () => {
+    const build = () =>
+      buildProject({
+        entry: entry(),
+        read: read(),
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      }).conditions.filter((c) => c.kind === 'order-drift');
+    const save = (value: unknown) => {
+      mkdirSync(path.join(world.main, '.dork', 'flow'), { recursive: true });
+      writeFileSync(
+        path.join(world.main, '.dork', 'flow', 'order-views.json'),
+        JSON.stringify(value)
+      );
+    };
+    expect(build()).toEqual([]);
+    const at = '2026-09-28T09:00:00.000Z';
+    const since = '2026-09-27T09:00:00.000Z';
+    save({
+      v: 1,
+      at,
+      mode: 'check',
+      inOrder: false,
+      drift: { view: 'projects', place: 1, expected: 'p-a', found: 'p-b' },
+      wrote: null,
+      driftSince: since,
+    });
+    // No views configured: a leftover file raises nothing.
+    expect(build()).toEqual([]);
+    mkdirSync(path.join(world.main, '.agents', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(world.main, '.agents', 'flow', 'config.json'),
+      JSON.stringify({ order: { views: { issues: 'v-i', projects: 'v-p' } } })
+    );
+    // The condition dates from when the same drift was first seen.
+    expect(build()).toEqual([
+      {
+        kind: 'order-drift',
+        since,
+        escalated: false,
+        detail: {
+          notice:
+            "The work order's project view is out of order at place 1: it shows p-b where the order has p-a.",
+        },
+      },
+    ]);
+    save({ v: 1, at, mode: 'write', inOrder: true, drift: null, wrote: 2 });
+    expect(build()).toEqual([]);
+  });
+
   // DOR-3768 condition 5: the panel says so while agents may merge their own PRs.
   it('raises agents-merge from the committed config only, for as long as labelOn is security-paths', () => {
     const dir = path.join(world.main, '.agents', 'flow');
