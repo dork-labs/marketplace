@@ -520,8 +520,9 @@ export async function discoverCheckouts(
  * Whether a run's worker is gone, by `flow fleet`'s own rule for a run with no
  * live session row (`sessionState`'s run-only branch): a run waiting for review
  * is parked, never stale; otherwise it is stale when it names a worker pid that
- * no longer exists. A DorkOS-hosted run records `workerPid: -1`, which that
- * check (`process.kill(-1, 0)`) never reads as gone, exactly as in `flow fleet`.
+ * no longer exists. A run that records `workerPid: -1` (a DorkOS-hosted run, a
+ * sandboxed DorkOS claim) is never checked and never read as gone, exactly as
+ * in `flow fleet`.
  *
  * @param run - The run as stored.
  * @param pidAlive - Whether a pid exists.

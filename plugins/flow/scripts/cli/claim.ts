@@ -79,9 +79,9 @@ const CLAIM_LOCK_WAIT_MS = 60_000;
 /**
  * The worker pid a DorkOS session records when its shell cannot read the
  * harness process: flow's "no local process" value, as a drain run records
- * while queued. No check ever reads it as a dead worker (status and run-ended
- * read it as unknown; fleet and the extension, through `kill(-1, 0)`, as
- * alive), so recovery never reclaims the run. The flip side: flow cannot tell
+ * while queued. No check ever reads it as a dead worker or passes it to
+ * `kill` (`pidExists` refuses a pid of 0 or less; status, run-ended, fleet and
+ * the extension read it as unknown), so recovery never reclaims the run. The flip side: flow cannot tell
  * when that chat ends. The run carries the chat's `dorkosSessionId` for a
  * check that asks DorkOS, and a closed item still reports the run as ended.
  */
