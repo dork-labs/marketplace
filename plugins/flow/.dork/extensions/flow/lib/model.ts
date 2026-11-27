@@ -19,7 +19,12 @@ import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { readJsonFile } from '../../../../scripts/atomic-json.ts';
-import { CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
+import {
+  CONFIG_FILE,
+  LOCAL_CONFIG_FILE,
+  PAUSE_FILE,
+  PROJECT_CONFIG_DIR,
+} from '../../../../scripts/config-names.ts';
 import {
   LABEL_ON_NOTICE,
   labelOnShown,
@@ -32,6 +37,11 @@ import {
   unsupervisedLanes,
   type Unsupervised,
 } from '../../../../scripts/drain/last-pass.ts';
+import {
+  orderViewsDriftLine,
+  readOrderViewsStatus,
+  type OrderViewsStatus,
+} from '../../../../scripts/order-views-status.ts';
 import { liveKey } from '../../../../scripts/drain/live-count.ts';
 import { liveDrainPid } from '../../../../scripts/drain/lock.ts';
 import {
@@ -114,14 +124,16 @@ export interface FlowCondition {
     | 'settings-problem'
     | 'nothing-ready'
     | 'unsupervised'
-    | 'agents-merge';
+    | 'agents-merge'
+    | 'order-drift';
   /** When it began. */
   since: string;
   /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
   /**
    * For nothing-ready: items waiting to be sorted. For unsupervised: the lanes
-   * nothing watches. For agents-merge: the words to show (`label-on.ts`).
+   * nothing watches. For agents-merge and order-drift: the words to show
+   * (`label-on.ts`, `order-views-status.ts`).
    */
   detail: {
     untriaged?: number;
@@ -676,6 +688,25 @@ export function readLabelOn(root: string): LabelOn {
   );
 }
 
+/**
+ * Whether the project names both work order views (`order.views.issues` and
+ * `.projects`, DOR-5068) in its config or its local config: without them a
+ * leftover result file raises nothing.
+ *
+ * @param root - The project's main checkout.
+ * @returns True when both ids are set.
+ */
+export function orderViewsConfigured(root: string): boolean {
+  const views = (file: string): Record<string, unknown> => {
+    const value = readJsonFile(path.join(root, PROJECT_CONFIG_DIR, file)).value;
+    const order = isObject(value) ? value.order : undefined;
+    const set = isObject(order) ? order.views : undefined;
+    return isObject(set) ? set : {};
+  };
+  const merged = { ...views(CONFIG_FILE), ...views(LOCAL_CONFIG_FILE) };
+  return typeof merged.issues === 'string' && typeof merged.projects === 'string';
+}
+
 /** How long a tracker that does not answer stays quiet before the lens says so, in ms (§7.1). */
 export const UNREACHABLE_SHOWN_AFTER_MS = 15 * 60_000;
 
@@ -699,6 +730,8 @@ export function conditionsOf(
     unsupervised?: Unsupervised | null;
     /** `land.securityPaths.labelOn` from the committed config (DOR-3768). */
     labelOn?: LabelOn;
+    /** The work order views' last saved result (DOR-5068), or `null`. */
+    orderViews?: OrderViewsStatus | null;
   } = {}
 ): FlowCondition[] {
   const conditions: FlowCondition[] = [];
@@ -750,6 +783,16 @@ export function conditionsOf(
       since: unsupervised.lastPassAt ?? now.toISOString(),
       escalated: false,
       detail: { lanes: unsupervised.identifiers.length },
+    });
+  }
+  // The work order views drifted at the last check or write (DOR-5068).
+  const driftLine = extra.orderViews ? orderViewsDriftLine(extra.orderViews) : null;
+  if (extra.orderViews && driftLine !== null) {
+    conditions.push({
+      kind: 'order-drift',
+      since: extra.orderViews.driftSince ?? extra.orderViews.at,
+      escalated: false,
+      detail: { notice: driftLine },
     });
   }
   // Not a fault, a standing risk a person chose: shown for as long as it is on.
@@ -891,6 +934,7 @@ export function buildProject(input: {
               stallAfterMs: drainSettings.stallAfterMinutes * 60_000,
             }),
       labelOn: readLabelOn(entry.root),
+      orderViews: orderViewsConfigured(entry.root) ? readOrderViewsStatus(entry.root) : null,
     }),
     version: entry.version,
     autonomy,

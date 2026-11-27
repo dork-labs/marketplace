@@ -30,6 +30,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { assertLoopback, resolveDorkosUrl } from '../fleet/sessions.ts';
+import { orderViewsDriftLine, type OrderViewsStatus } from '../order-views-status.ts';
 import {
   intakeHealth,
   scheduleHealth,
@@ -44,6 +45,7 @@ export const FLOW_SCHEDULES: readonly string[] = [
   'flow-groom',
   'flow-triage',
   'flow-retro',
+  'flow-order',
 ];
 
 /** How long one DorkOS read may take. */
@@ -60,6 +62,12 @@ export interface Health {
   schedulesUnknown: string | null;
   /** One row per intake source. */
   intake: IntakeHealth[];
+  /**
+   * The last `flow order --write-order` or `--check-order` result
+   * (`.dork/flow/order-views.json`, DOR-5068), or `null` when none was saved.
+   * Set by `flow status`, not by {@link readHealth}.
+   */
+  orderViews?: OrderViewsStatus | null;
 }
 
 /** What the read needs. */
@@ -234,6 +242,15 @@ export function renderHealth(health: Health): string {
   }
   for (const source of health.intake) {
     lines.push(`  Intake (${source.name ?? source.id}): ${source.detail}`);
+  }
+  const views = health.orderViews;
+  if (views) {
+    const drift = orderViewsDriftLine(views);
+    lines.push(
+      drift !== null
+        ? `  Work order views: ${drift}`
+        : `  Work order views: in order (${views.mode === 'write' ? 'written' : 'checked'} ${views.at}${views.wrote === null ? '' : `, ${views.wrote} position${views.wrote === 1 ? '' : 's'}`}).`
+    );
   }
   return lines.join('\n');
 }

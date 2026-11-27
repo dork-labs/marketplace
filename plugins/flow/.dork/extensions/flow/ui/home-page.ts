@@ -126,6 +126,7 @@ const CONDITION_ORDER: Readonly<Record<string, number>> = {
   'tracker-unreachable': 2,
   unsupervised: 2.5,
   'nothing-ready': 3,
+  'order-drift': 3.5,
   paused: 4,
   'agents-merge': 5,
 };

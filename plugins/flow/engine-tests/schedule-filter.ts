@@ -25,7 +25,7 @@ export function projectFilterGaps(passage: string): string[] {
     ['rejects a mere name prefix', /merely the start of another folder's name/],
     [
       'keeps every shipped flow schedule',
-      /`name` is `flow-drain`, `flow-groom`, `flow-triage` or `flow-retro`/,
+      /`name` is `flow-drain`, `flow-groom`, `flow-triage`, `flow-retro` or `flow-order`/,
     ],
     // DOR-3376: a global install's per-project copy keeps the shared file's
     // `filePath`, so the folder test alone would miss it, and a pause would

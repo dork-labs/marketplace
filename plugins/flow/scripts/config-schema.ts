@@ -544,7 +544,10 @@ export const ProjectsSchema = z
 /** A `group/name` label: one slash, neither part empty or edged with space. */
 const PERSON_LABEL_PATTERN = /^[^/\s](?:[^/]*[^/\s])?\/[^/\s](?:[^/]*[^/\s])?$/;
 
-/** Who may move work to the top of the work order, and whose work stays out of it. */
+/**
+ * Who may move work to the top of the work order, whose work stays out of it,
+ * and the views it is written into.
+ */
 export const OrderSchema = z
   .object({
     /**
@@ -562,6 +565,27 @@ export const OrderSchema = z
       .string()
       .regex(PERSON_LABEL_PATTERN, 'must be a group/name label, like owner/someone')
       .optional(),
+    /**
+     * The saved tracker views `flow order --write-order` keeps in the work
+     * order, by the tracker's view id (on Linear, a custom view's id). Each
+     * view's manual order is written from the fields; nobody drags in it.
+     * Unset: `--write-order` and `--check-order` say what to set and stop.
+     */
+    views: z
+      .object({
+        /** The issue view: the ranked issues it shows, best first. */
+        issues: z.string().min(1).optional(),
+        /** The project view: the Started projects, then the Planned ones. */
+        projects: z.string().min(1).optional(),
+      })
+      .prefault({}),
+    /**
+     * The most view positions one `flow order --write-order` run writes
+     * (the hourly run and the drain's rewrite alike). Past it the run writes
+     * the first ones in place order, stops, and exits 1; the next run writes
+     * the rest. Default 300; at most 1000.
+     */
+    maxWrites: z.number().int().min(1).max(1000).default(300),
   })
   .prefault({});
 

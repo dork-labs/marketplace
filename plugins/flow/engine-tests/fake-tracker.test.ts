@@ -74,8 +74,8 @@ async function load() {
 }
 
 describe('the shipped fake tracker', () => {
-  it('declares contract 3.3.0 and is what the loader finds for a project linked to it', async () => {
-    expect(fakeModule.CONTRACT_VERSION).toBe('3.3.0');
+  it('declares contract 3.4.0 and is what the loader finds for a project linked to it', async () => {
+    expect(fakeModule.CONTRACT_VERSION).toBe('3.4.0');
     vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
     const adapter = await load();
     const snapshot = await adapter.getBacklogSnapshot();
@@ -163,6 +163,49 @@ describe('the shipped fake tracker', () => {
     expect(new Set(FIXTURE.items.map((item) => item.stateCategory))).toEqual(
       new Set(['backlog', 'unstarted', 'started', 'completed', 'canceled'])
     );
+  });
+
+  it('reads a view lower position first and writes positions through the loader (contract 3.4.0)', async () => {
+    const seeded: FakeBacklog = {
+      ...structuredClone(FIXTURE),
+      views: {
+        'view-issues': { kind: 'issues', members: ['FAKE-1', 'FAKE-2', 'OTHER-9'] },
+        'view-projects': { kind: 'projects', members: ['p-a', 'proj-selftest'] },
+      },
+      positions: { 'FAKE-2': 10 },
+    };
+    writeFileSync(backlogFile, JSON.stringify(seeded));
+    vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
+    const adapter = await load();
+    expect(adapter.capabilities).toContain('getViewOrder');
+    expect(adapter.capabilities).toContain('setPositions');
+    // Another team's issue is dropped; FAKE-2's own position puts it first.
+    expect((await adapter.getViewOrder!('issues', 'view-issues')).map((e) => e.key)).toEqual([
+      'FAKE-2',
+      'FAKE-1',
+    ]);
+    await expect(adapter.getViewOrder!('projects', 'view-issues')).rejects.toBeInstanceOf(
+      ConfigError
+    );
+    await expect(adapter.getViewOrder!('issues', 'nope')).rejects.toBeInstanceOf(ConfigError);
+    await adapter.setPositions!([{ kind: 'issues', id: 'x', key: 'FAKE-1', position: 5 }]);
+    const saved = JSON.parse(readFileSync(backlogFile, 'utf8')) as FakeBacklog;
+    expect(saved.positions).toEqual({ 'FAKE-2': 10, 'FAKE-1': 5 });
+    await expect(
+      adapter.setPositions!([{ kind: 'issues', id: 'x', key: 'OTHER-9', position: 5 }])
+    ).rejects.toThrow(/another team/);
+    await expect(
+      adapter.setPositions!([
+        { kind: 'projects', id: 'proj-selftest', key: 'proj-selftest', position: 0 },
+      ])
+    ).rejects.toThrow(/position 0/);
+    // p-a is not one of the team's projects: the view drops it, a write refuses it.
+    expect((await adapter.getViewOrder!('projects', 'view-projects')).map((e) => e.key)).toEqual([
+      'proj-selftest',
+    ]);
+    await expect(
+      adapter.setPositions!([{ kind: 'projects', id: 'p-a', key: 'p-a', position: 5 }])
+    ).rejects.toThrow(/not one of team FAKE's projects/);
   });
 
   it('uses the clock it is given for comments and snapshots', async () => {

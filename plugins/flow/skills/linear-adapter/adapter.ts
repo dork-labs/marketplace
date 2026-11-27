@@ -62,6 +62,9 @@ import type {
   StateCategory,
   WorkItem,
   NewItem,
+  PositionWrite,
+  ViewEntry,
+  ViewKind,
   WorkItemProject,
   WorkStateChange,
 } from '../../scripts/tracker/types.ts';
@@ -69,7 +72,7 @@ import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '3.3.0';
+export const CONTRACT_VERSION = '3.4.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -371,6 +374,67 @@ export const TEAM_BY_ID_QUERY = `query FlowTeamById($teamId: String!) {
   team(id: $teamId) { id key }
 }`;
 
+/** Entries per page of a saved view (no relations, so cheap). */
+export const VIEW_PAGE_SIZE = 100;
+
+/**
+ * A saved issue view in its manual order (contract 3.4.0). A custom view has
+ * no order of its own: its Manual order is `Issue.sortOrder` ascending, the
+ * workspace-wide position every manually ordered list shares (introspected
+ * and read 2026-11-23). `modelName` tells an issue view from a project view.
+ */
+export const VIEW_ISSUES_QUERY = `query FlowViewIssues($id: String!, $first: Int!, $after: String) {
+  customView(id: $id) {
+    modelName
+    issues(first: $first, after: $after, sort: [{ manual: { order: Ascending } }]) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id identifier title sortOrder }
+    }
+  }
+}`;
+
+/** A saved project view in its manual order: `Project.sortOrder` ascending (contract 3.4.0). */
+export const VIEW_PROJECTS_QUERY = `query FlowViewProjects($id: String!, $first: Int!, $after: String) {
+  customView(id: $id) {
+    modelName
+    projects(first: $first, after: $after, sort: [{ manual: { order: Ascending } }]) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name sortOrder }
+    }
+  }
+}`;
+
+/** Project ids per page of {@link TEAM_PROJECTS_QUERY}. */
+export const TEAM_PROJECTS_PAGE_SIZE = 250;
+
+/**
+ * Every project of the team, any status: the only projects a project view
+ * entry or a project position write may name. `Project.sortOrder` is shared
+ * by the whole workspace, so a write to another team's project would renumber
+ * it in that team's lists too.
+ */
+export const TEAM_PROJECTS_QUERY = `query FlowTeamProjects($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    projects(first: $first, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id }
+    }
+  }
+}`;
+
+/** One issue's position, and nothing else (contract 3.4.0). */
+export const ISSUE_POSITION_MUTATION = `mutation FlowIssuePosition($id: String!, $sortOrder: Float!) {
+  issueUpdate(id: $id, input: { sortOrder: $sortOrder }) { success }
+}`;
+
+/**
+ * One project's position, and nothing else (contract 3.4.0). Linear reads a
+ * `sortOrder` of exactly 0 as "append", so flow never sends 0.
+ */
+export const PROJECT_POSITION_MUTATION = `mutation FlowProjectPosition($id: String!, $sortOrder: Float!) {
+  projectUpdate(id: $id, input: { sortOrder: $sortOrder }) { success }
+}`;
+
 // ---------------------------------------------------------------------------
 // Response shapes (only the fields read).
 // ---------------------------------------------------------------------------
@@ -528,6 +592,22 @@ export function isTrustedComment(node: RawComment, teamId: string): boolean {
 interface RawPage<T> {
   pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
   nodes?: T[] | null;
+}
+
+/** One entry of a saved view, issue or project. */
+interface RawViewNode {
+  id?: string;
+  identifier?: string;
+  title?: string;
+  name?: string;
+  sortOrder?: number;
+}
+
+/** What {@link VIEW_ISSUES_QUERY} and {@link VIEW_PROJECTS_QUERY} return. */
+interface RawView {
+  modelName?: string;
+  issues?: RawPage<RawViewNode> | null;
+  projects?: RawPage<RawViewNode> | null;
 }
 
 /** What {@link WRITE_READ_QUERY} returns. */
@@ -955,6 +1035,9 @@ export function readDocument(query: string): string {
     VIEWER_QUERY,
     TEAM_BY_KEY_QUERY,
     TEAM_BY_ID_QUERY,
+    VIEW_ISSUES_QUERY,
+    VIEW_PROJECTS_QUERY,
+    TEAM_PROJECTS_QUERY,
   ];
   if (!reads.includes(query) || !/^query\s/.test(query))
     throw new ConfigError('The tracker read route accepts only shipped queries.');
@@ -1085,7 +1168,15 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     mutation = false
   ): Promise<T> {
     if (!mutation) readDocument(query);
-    else if (![ISSUE_UPDATE_MUTATION, COMMENT_MUTATION, CREATE_ITEM_MUTATION].includes(query))
+    else if (
+      ![
+        ISSUE_UPDATE_MUTATION,
+        COMMENT_MUTATION,
+        CREATE_ITEM_MUTATION,
+        ISSUE_POSITION_MUTATION,
+        PROJECT_POSITION_MUTATION,
+      ].includes(query)
+    )
       throw new ConfigError('Unknown tracker mutation.');
     const data = (await execute(GRAPHQL_SLUG, { query_or_mutation: query, variables })) as {
       data?: unknown;
@@ -1184,6 +1275,40 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       );
     })();
     return teamPromise;
+  }
+
+  let teamProjectsPromise: Promise<ReadonlySet<string>> | undefined;
+
+  /** The ids of every project of the team, any status; read once per adapter. */
+  function teamProjects(): Promise<ReadonlySet<string>> {
+    teamProjectsPromise ??= (async () => {
+      const { id: teamId } = await team();
+      const ids = new Set<string>();
+      let after: string | null = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const data: { team?: { projects?: RawPage<{ id?: string }> | null } | null } =
+          await graphql(TEAM_PROJECTS_QUERY, { teamId, first: TEAM_PROJECTS_PAGE_SIZE, after });
+        const connection = data.team?.projects;
+        if (connection === undefined || connection === null) {
+          throw new TrackerError('Linear returned no team projects; check connection.team.id');
+        }
+        for (const node of connection.nodes ?? []) {
+          if (typeof node.id === 'string') ids.add(node.id);
+        }
+        if (connection.pageInfo?.hasNextPage !== true) return ids;
+        after = connection.pageInfo.endCursor ?? null;
+        if (after === null)
+          throw new TrackerError('Linear said there was another page but gave no cursor');
+      }
+      throw new TrackerError(
+        `the team has more than ${MAX_PAGES} pages of projects; flow stopped reading`
+      );
+    })();
+    // A failed read is not kept: the next call tries again.
+    teamProjectsPromise.catch(() => {
+      teamProjectsPromise = undefined;
+    });
+    return teamProjectsPromise;
   }
 
   /** Pull every page of a team-scoped issue connection. */
@@ -1484,6 +1609,8 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       'comment',
       'createItem',
       'getInbox',
+      'getViewOrder',
+      'setPositions',
     ],
 
     async getCurrentUser() {
@@ -1919,6 +2046,107 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         throw new TrackerError(`Linear did not confirm the new item "${spec.title}"`);
       }
       return { id: created.id, identifier: created.identifier, url: created.url };
+    },
+
+    async getViewOrder(kind: ViewKind, viewId: string): Promise<ViewEntry[]> {
+      const own = await team();
+      const ownProjects = kind === 'projects' ? await teamProjects() : undefined;
+      const query = kind === 'issues' ? VIEW_ISSUES_QUERY : VIEW_PROJECTS_QUERY;
+      const model = kind === 'issues' ? 'Issue' : 'Project';
+      const entries: ViewEntry[] = [];
+      let after: string | null = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const data: { customView?: RawView | null } = await graphql(query, {
+          id: viewId,
+          first: VIEW_PAGE_SIZE,
+          after,
+        });
+        const view = data.customView;
+        if (view === undefined || view === null) {
+          throw new ConfigError(
+            `no Linear view has the id ${viewId}; set order.views.${kind} to a custom view's id`
+          );
+        }
+        if (view.modelName !== model) {
+          throw new ConfigError(
+            `the Linear view ${viewId} lists ${String(view.modelName)} items, not ${model.toLowerCase()}s; check order.views.${kind}`
+          );
+        }
+        const connection = kind === 'issues' ? view.issues : view.projects;
+        if (connection === undefined || connection === null || !Array.isArray(connection.nodes)) {
+          throw new TrackerError(`Linear returned no ${kind} for the view ${viewId}`);
+        }
+        for (const node of connection.nodes) {
+          const key = kind === 'issues' ? node.identifier : node.id;
+          if (typeof node.id !== 'string' || typeof key !== 'string') {
+            throw new TrackerError(
+              `Linear returned a ${model.toLowerCase()} with no id in ${viewId}`
+            );
+          }
+          if (typeof node.sortOrder !== 'number') {
+            throw new TrackerError(`Linear returned ${key} with no sortOrder in ${viewId}`);
+          }
+          if (kind === 'issues' && !key.startsWith(`${own.key}-`)) {
+            warn(
+              `the view ${viewId} shows ${key}, which is not in team ${own.key}; flow leaves it alone`
+            );
+            continue;
+          }
+          if (ownProjects !== undefined && !ownProjects.has(key)) {
+            warn(
+              `the view ${viewId} shows the project ${node.name ?? key} (${key}), which is not one of team ${own.key}'s projects; flow leaves it alone`
+            );
+            continue;
+          }
+          const name = (kind === 'issues' ? node.title : node.name) ?? key;
+          entries.push({ id: node.id, key, name, position: node.sortOrder });
+        }
+        if (connection.pageInfo?.hasNextPage !== true) return entries;
+        after = connection.pageInfo.endCursor ?? null;
+        if (after === null)
+          throw new TrackerError('Linear said there was another page but gave no cursor');
+      }
+      throw new TrackerError(
+        `the view ${viewId} is larger than ${MAX_PAGES} pages; flow stopped reading`
+      );
+    },
+
+    async setPositions(writes: readonly PositionWrite[]): Promise<void> {
+      const own = await team();
+      const ownProjects = writes.some((write) => write.kind === 'projects')
+        ? await teamProjects()
+        : undefined;
+      for (const write of writes) {
+        if (write.kind === 'issues' && !write.key.startsWith(`${own.key}-`)) {
+          throw new PreconditionError(
+            `${write.key} belongs to another team, not ${own.key}; flow only acts on its own team`
+          );
+        }
+        // A project is written by its id, so the check is on that id.
+        if (write.kind === 'projects' && !ownProjects?.has(write.id)) {
+          throw new PreconditionError(
+            `the project ${write.id} is not one of team ${own.key}'s projects; flow only acts on its own team`
+          );
+        }
+        if (write.position === 0 || !Number.isFinite(write.position)) {
+          throw new PreconditionError(`refusing position ${write.position} for ${write.key}`);
+        }
+      }
+      for (const write of writes) {
+        const mutation =
+          write.kind === 'issues' ? ISSUE_POSITION_MUTATION : PROJECT_POSITION_MUTATION;
+        // An issue is written by its identifier (Linear's id: takes one), the
+        // very value the team check above read, so no other id slips through.
+        const id = write.kind === 'issues' ? write.key : write.id;
+        const result = await graphql<{
+          issueUpdate?: { success?: boolean } | null;
+          projectUpdate?: { success?: boolean } | null;
+        }>(mutation, { id, sortOrder: write.position }, true);
+        const answer = write.kind === 'issues' ? result.issueUpdate : result.projectUpdate;
+        if (answer?.success !== true) {
+          throw new TrackerError(`Linear did not confirm the position of ${write.key}`);
+        }
+      }
     },
   };
 }

@@ -4,6 +4,25 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.103.0
+
+**Reinstall Flow to see the work order in your tracker. Nothing is written there until you set `order.views` and run it.**
+
+- `flow order --write-order` writes the work order into two saved views in your tracker: one for issues, one for projects. It moves only the items whose place changed and says how many it moved, so running it again moves nothing. Set the two view ids under `order.views` first; without them it tells you what to set.
+- On Linear, make each view a custom view ordered by hand (Manual), with no grouping. Linear keeps one hand-made order per issue and per project for the whole workspace, so writing it also moves those items in any other list ordered by hand.
+- Anything else a view shows, such as a blocked item or a new one your tracker put at the top, moves to a block after the ranked items, in the order it had.
+- `flow order --check-order` reads both views and fails when one is out of order, naming the first item in the wrong place. It writes nothing to your tracker.
+- `flow status` and the Flow page show the last check or write, and say when a view is out of order and how to fix it.
+- Nobody drags in these views: once the schedule below is on, flow order rewrites them every hour from the fields. To move an item, change its priority, size, due date, project or blockers.
+- A new schedule, `flow-order`, runs `flow order --write-order` every hour. It ships switched off.
+- With `dispatch.ladder: "v2"`, the drain also rewrites the views after each pass that claimed work. If that fails, it warns and keeps the claims. Two runs never write the views at once.
+- Allowing `flow order --write-order` in your project's settings allows it for every session there, not only the schedule. What keeps these writes small is Flow itself: they change where an item sits in the list and nothing else, and only for your own team's issues and projects.
+- Linear shares one hand-made project order across the whole workspace, so another team's project in your project view is left alone. Flow never moves it and never calls the view out of order because of it.
+- One run moves at most 300 items (`order.maxWrites`) and pauses briefly between batches. If more need to move, it moves the top ones, says how many are left, and exits 1; the next run moves the rest.
+- `flow order --for-project <name or id>` shows one project's issues, in the same order and with the same places and reasons as the whole list.
+- The backlog groom now reads `flow order -n 20 --json` and fixes fields, never the list itself.
+- Tracker adapters move to contract 3.4.0, which adds reading and writing a view's order. Adapters built for 3.3.0 keep working for everything else.
+
 ## 0.102.2
 
 **Reinstall Flow to receive this fix if you run Codex agents in DorkOS.**

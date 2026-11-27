@@ -774,6 +774,27 @@
         "personLabel": {
           "type": "string",
           "pattern": "^[^/\\s](?:[^/]*[^/\\s])?\\/[^/\\s](?:[^/]*[^/\\s])?$"
+        },
+        "views": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "issues": {
+              "type": "string",
+              "minLength": 1
+            },
+            "projects": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxWrites": {
+          "default": 300,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
         }
       },
       "additionalProperties": false

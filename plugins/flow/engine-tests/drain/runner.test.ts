@@ -2753,3 +2753,88 @@ describe('flow drain: handoff on a limit (§5)', () => {
     });
   });
 });
+
+describe('flow drain: the work order views after a claim (DOR-5068)', () => {
+  const started = { id: 'p-1', name: 'Widgets', stateCategory: 'started' as const };
+  /** A ready Must in a Started project, with a done-when, so the v2 order ranks it. */
+  const ranked = (identifier: string, size: number) =>
+    item(identifier, {
+      priority: 2,
+      size,
+      project: started,
+      description: 'Do it.\n\n## Done when\n\n- Done.',
+    });
+
+  /** Both view ids (unless `views` says otherwise), three ranked items; the issue view is out of order. */
+  function setUp(views: Record<string, string>, ladder: 'v1' | 'v2' = 'v2') {
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      autonomy: { wipCap: { global: 10, perProject: 10 } },
+      models: { bindings: { workhorse: 'model-x' } },
+      dispatch: { ladder },
+      order: { views },
+    });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [ranked('ACME-1', 1), ranked('ACME-2', 2), ranked('ACME-3', 3)],
+      projectInfo: [
+        {
+          id: 'p-1',
+          name: 'Widgets',
+          slugId: 'w',
+          statusType: 'started',
+          labels: [],
+          blockedBy: [],
+        },
+      ],
+      views: {
+        'v-issues': { kind: 'issues', members: ['ACME-3', 'ACME-2', 'ACME-1'] },
+        'v-projects': { kind: 'projects', members: ['p-1'] },
+      },
+    });
+  }
+
+  it('claims the top item, then writes the views back in step', async () => {
+    setUp({ issues: 'v-issues', projects: 'v-projects' });
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(runOf('ACME-1').status).toBe('running');
+    // ACME-1 left the order; ACME-2 now goes above ACME-3: one write.
+    expect(world.tracker.writes.filter((w) => w.method === 'setPosition')).toEqual([
+      { method: 'setPosition', kind: 'issues', key: 'ACME-2', position: 500 },
+    ]);
+  });
+
+  it('rewrites nothing, and warns nothing, under ladder v1 or with one view id', async () => {
+    for (const [views, ladder] of [
+      [{ issues: 'v-issues', projects: 'v-projects' }, 'v1'],
+      [{ issues: 'v-issues' }, 'v2'],
+    ] as const) {
+      setUp(views, ladder);
+      const pass = await tick();
+      expect(pass.code, pass.stderr).toBe(0);
+      expect(runOf('ACME-1').status).toBe('running');
+      expect(world.tracker.writes.filter((w) => w.method === 'setPosition')).toEqual([]);
+      expect(pass.stderr).not.toContain('work order views');
+      project.writeRuns({});
+    }
+  });
+
+  it('rewrites once per pass, however many items it claimed', async () => {
+    setUp({ issues: 'v-missing', projects: 'v-projects' });
+    const pass = await flow(['drain', '--tick', '--parallel', '2', '--host', 'cli']);
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(world.log.starts.filter((start) => start.req.role === 'worker')).toHaveLength(2);
+    expect(pass.stderr.split('the work order views were not rewritten').length - 1).toBe(1);
+  });
+
+  it('warns and keeps the claim when the views cannot be written', async () => {
+    setUp({ issues: 'v-missing', projects: 'v-projects' });
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(runOf('ACME-1').status).toBe('running');
+    expect(pass.stderr).toContain('the work order views were not rewritten after the claim');
+  });
+});

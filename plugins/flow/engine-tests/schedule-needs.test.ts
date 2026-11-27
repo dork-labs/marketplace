@@ -37,6 +37,7 @@ const SHIPPED_MODES: Record<string, string> = {
   'flow-groom': 'default',
   'flow-retro': 'default',
   'flow-triage': 'default',
+  'flow-order': 'default',
 };
 
 /** The one file that says what a scheduled run does about a refused tool. */
@@ -137,6 +138,11 @@ const READ_EXACT = [
   'intake done --json',
   // DOR-3669: reads the inbox and writes only flow's own watermark file.
   'inbox --json',
+  // DOR-5068: the groom's check reads the work order from its one fixed
+  // snapshot file, and the views run checks after it writes. Never a prefix,
+  // which would also allow --write-order or another --snapshot path.
+  'order --snapshot .dork/flow/tmp/groom/backlog.json -n 20 --json',
+  'order --check-order --json',
 ];
 
 /**
@@ -171,6 +177,24 @@ const READ_TIER = new Set([
   'tracker:read',
 ]);
 
+/**
+ * The writes a schedule may list, by schedule, each exact (DOR-5068). A
+ * listing grants nothing and pins nothing to one schedule: a person copies it
+ * into the project's settings, which then allow it in every session there,
+ * and the drain runs the same write after a claim. This guard keeps the
+ * listed rule exact (no prefix that would also allow another flag, no broader
+ * tracker grant) and off the other schedules' lists, so what a person copies
+ * allows no more than the position write. What limits that write is the
+ * adapter: flow's fixed `sortOrder`-only mutations, the team check and
+ * `order.maxWrites` (`engine-tests/cli/order-views.test.ts`).
+ */
+const WRITE_GRANTS: Record<string, readonly string[]> = {
+  'flow-order': [
+    `Bash(${NODE} "${ROOT}/scripts/flow.ts" order --write-order --json)`,
+    'tracker:write-positions',
+  ],
+};
+
 /** Why a declared need is not read-tier, or `null` when it is. */
 function notReadTier(entry: string): string | null {
   if (READ_TIER.has(entry)) return null;
@@ -194,6 +218,7 @@ function scheduleGaps(name: string, text: string): string[] {
   if (needs === null || needs.length === 0) gaps.push('lists no flow-needs');
   else if (!needs.includes(NOTE_RULE)) gaps.push('cannot note a refusal');
   for (const entry of needs ?? []) {
+    if ((WRITE_GRANTS[name] ?? []).includes(entry)) continue;
     const why = notReadTier(entry);
     if (why) gaps.push(why);
   }
@@ -327,6 +352,50 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
     ).toEqual(['grants tools in frontmatter']);
     expect(scheduleGaps('flow-triage', triage.replace(/^metadata:\n(?: {2}.*\n)*/m, ''))).toEqual([
       'lists no flow-needs',
+    ]);
+  });
+
+  it("lists the groom check's order read with its fixed snapshot, and no other path", () => {
+    const groom = scheduledSkills()['flow-groom'];
+    const fixed = `Bash(${NODE} "${ROOT}/scripts/flow.ts" order --snapshot .dork/flow/tmp/groom/backlog.json -n 20 --json)`;
+    expect(groom).toContain(`    - '${fixed}'`);
+    // The groom step that runs it names the same file.
+    expect(groom).toContain(
+      '`flow order --snapshot .dork/flow/tmp/groom/backlog.json -n 20 --json`'
+    );
+    const plantIn = (entry: string) =>
+      groom.replace('  flow-needs:\n', `  flow-needs:\n    - '${entry}'\n`);
+    for (const other of [
+      'order --snapshot ../x.json -n 20 --json',
+      'order --snapshot <scratch>/before.json -n 20 --json',
+      'order -n 20 --json',
+      'order --json',
+    ]) {
+      const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${other})`;
+      expect(scheduleGaps('flow-groom', plantIn(entry))).toEqual([`${entry}: not a read`]);
+    }
+  });
+
+  it("lists the views run's write exactly, and no other schedule lists it", () => {
+    const order = scheduledSkills()['flow-order'];
+    expect(scheduleGaps('flow-order', order)).toEqual([]);
+    const plantIn = (text: string, entry: string) =>
+      text.replace('  flow-needs:\n', `  flow-needs:\n    - '${entry}'\n`);
+    const write = `Bash(${NODE} "${ROOT}/scripts/flow.ts" order --write-order --json)`;
+    expect(scheduleGaps('flow-triage', plantIn(scheduledSkills()['flow-triage'], write))).toEqual([
+      `${write}: not a read`,
+    ]);
+    expect(
+      scheduleGaps(
+        'flow-triage',
+        plantIn(scheduledSkills()['flow-triage'], 'tracker:write-positions')
+      )
+    ).toEqual(['tracker:write-positions: not a read']);
+    // A prefix on order would allow --write-order; a broader tracker grant is not positions.
+    const prefix = `Bash(${NODE} "${ROOT}/scripts/flow.ts" order:*)`;
+    expect(scheduleGaps('flow-order', plantIn(order, prefix))).toEqual([`${prefix}: not a read`]);
+    expect(scheduleGaps('flow-order', plantIn(order, 'tracker:write'))).toEqual([
+      'tracker:write: not a read',
     ]);
   });
 

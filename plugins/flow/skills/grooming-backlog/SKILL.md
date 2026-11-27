@@ -39,7 +39,7 @@ lists them.
 2. Build a ledger file in the scratchpad (one row per item, current values, empty
    proposal slots). Later phases read and write it, never memory.
 3. Record the baseline: `flow audit --snapshot <scratch>/before.json --json` and
-   `flow next --snapshot <scratch>/before.json -n 10 --json`, and `flow prs --json`. Check mode: go to phase 7's report.
+   `flow order --snapshot <scratch>/before.json -n 20 --json`, and `flow prs --json`. Check mode: go to phase 7's report.
 
 ### Phase 2 — Project architecture
 
@@ -120,8 +120,8 @@ path, then is reported, never dropped.
 1. `flow audit --json`: every invariant green over the groomed scope. Report items other
    sessions made mid-groom. GRM-18 (project flags) is the operator's call; never change a
    project's status.
-2. `flow next -n 10 --json` against the baseline. **The top picks must be work the
-   operator would want an agent doing next**; a bigger pool with a wrong top pick fails.
+2. `flow order -n 20 --json` against the baseline. The groom changes fields, never the
+   list. **The top must be work the operator wants next**; a wrong top item fails.
 3. Report the before/after numbers, closures with evidence, the project map, the ready-set
    size, each stuck PR's `prompt` (never touch the PR), every flag and question, and file follow-ups (`origin/from-agent`).
 

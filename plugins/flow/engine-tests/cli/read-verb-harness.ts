@@ -73,6 +73,8 @@ export interface RunOptions {
   createForge?: CliDeps['createForge'];
   /** Runs streaming children (a usage probe turn). Default: the real runner. */
   spawnStream?: StreamRunner;
+  /** The host's sleep, to record the pauses between writes. Default: the real one. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -116,6 +118,7 @@ export async function runFlow(
         throw new Error('no DorkOS in this test');
       },
       ...(options.spawnStream === undefined ? {} : { spawnStream: options.spawnStream }),
+      ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     },
     verbs: VERBS,
   });
