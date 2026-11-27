@@ -556,10 +556,7 @@ export interface StartWorkInput {
 
 /** Why a start was refused (DorkOS `StartWorkError.code`). */
 export type StartWorkErrorCode =
-  | 'not_a_project'
-  | 'account_not_allowed_here'
-  | 'start_limit'
-  | 'agent_paused';
+  'not_a_project' | 'account_not_allowed_here' | 'start_limit' | 'agent_paused';
 
 /** `ctx.sessions` (contract 1.3.0). */
 export interface SessionsApi {

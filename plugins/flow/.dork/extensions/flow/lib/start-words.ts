@@ -130,7 +130,8 @@ export function startRefusal(code: unknown, message: unknown, name: string): str
     return said ?? 'Flow started a lot of chats in the last hour. Try again in a few minutes.';
   }
   if (code === 'not_a_project') return said ?? `${name} is no longer a project on this computer.`;
-  if (code === 'agent_paused') return said ?? `${name}'s agent is paused. Resume it, then try again.`;
+  if (code === 'agent_paused')
+    return said ?? `${name}'s agent is paused. Resume it, then try again.`;
   return "Flow couldn't start that. Try again.";
 }
 
